@@ -1270,9 +1270,11 @@ function mergeGeos(geos){
 }
 
 /* Flat ribbon for roads/waterways — follows terrain precisely */
-function mkRibbon(pts3d,width){
-  // Creates a SOLID prism from Y=0 to road/river surface — nothing floats above base
+function mkRibbon(pts3d,width,depth){
+  // Thin solid ribbon: top face at pts3d[i].y, bottom face depth mm below.
+  // Color only occupies the top `depth` mm — terrain body below stays its own color.
   if(pts3d.length<2)return null;
+  const d=depth||0.4; // default 0.4mm thickness
   const verts=[],idx=[];const hw=width/2;
   for(let i=0;i<pts3d.length-1;i++){
     const p1=pts3d[i],p2=pts3d[i+1];
@@ -1280,24 +1282,24 @@ function mkRibbon(pts3d,width){
     const len=Math.sqrt(dx*dx+dz*dz);if(len<0.0001)continue;
     const px=-dz/len,pz=dx/len;
     const vi=verts.length/3;
-    const y1=p1.y,y2=p2.y;
-    // Top 4 vertices (at road/river surface height)
+    const y1=p1.y,y2=p2.y,b1=y1-d,b2=y2-d;
+    // Top 4 (at road/river surface)
     verts.push(
-      p1.x-px*hw,y1,p1.z-pz*hw, // 0 top-left-A
-      p1.x+px*hw,y1,p1.z+pz*hw, // 1 top-right-A
-      p2.x+px*hw,y2,p2.z+pz*hw, // 2 top-right-B
-      p2.x-px*hw,y2,p2.z-pz*hw  // 3 top-left-B
+      p1.x-px*hw,y1,p1.z-pz*hw,  // 0 TLA
+      p1.x+px*hw,y1,p1.z+pz*hw,  // 1 TRA
+      p2.x+px*hw,y2,p2.z+pz*hw,  // 2 TRB
+      p2.x-px*hw,y2,p2.z-pz*hw   // 3 TLB
     );
-    // Bottom 4 vertices (at Y=0, connected to base)
+    // Bottom 4 (depth mm below = at terrain surface)
     verts.push(
-      p1.x-px*hw,0,p1.z-pz*hw,  // 4 bot-left-A
-      p1.x+px*hw,0,p1.z+pz*hw,  // 5 bot-right-A
-      p2.x+px*hw,0,p2.z+pz*hw,  // 6 bot-right-B
-      p2.x-px*hw,0,p2.z-pz*hw   // 7 bot-left-B
+      p1.x-px*hw,b1,p1.z-pz*hw,  // 4 BLA
+      p1.x+px*hw,b1,p1.z+pz*hw,  // 5 BRA
+      p2.x+px*hw,b2,p2.z+pz*hw,  // 6 BRB
+      p2.x-px*hw,b2,p2.z-pz*hw   // 7 BLB
     );
     // Top face
     idx.push(vi,vi+1,vi+2, vi,vi+2,vi+3);
-    // Bottom face (reversed winding)
+    // Bottom face
     idx.push(vi+4,vi+6,vi+5, vi+4,vi+7,vi+6);
     // Left wall
     idx.push(vi,vi+3,vi+7, vi,vi+7,vi+4);
@@ -1693,26 +1695,29 @@ function buildOSM(st){
     // Each feature type has a fixed z-offset above terrain.
     // This stacks layers correctly (water→grass→sand→roads→buildings) with no overlap or white patches.
     const LAYER_Z = {
-      water:    0.08,  // water sits just above terrain (lowest)
-      wetland:  0.10,
-      sand:     0.10,
-      grass:    0.14,  // grass above water
-      forest:   0.18,  // forest slightly above grass
-      rock:     0.14,
-      snow:     0.18,
-      ped:      0.20,  // pedestrian areas above sand/grass
-      pier:     0.24,
-      road:     0.28,  // roads clearly above ground features
-      bridge:   0.45,  // bridges above roads
-      building: 0.32   // buildings start above road surface
+      // Near-zero offsets: color appears only in the top h mm above terrain.
+      // Tiny values (0.01-0.02mm) purely to order overlapping features in the preview.
+      // At print scale these are sub-layer and do not create floating geometry.
+      water:    0.0,
+      wetland:  0.0,
+      sand:     0.0,
+      grass:    0.0,
+      forest:   0.01,
+      rock:     0.0,
+      snow:     0.01,
+      ped:      0.01,
+      pier:     0.0,
+      road:     0.01,   // slightly above grass so roads win overlap in preview
+      bridge:   0.40,   // bridges genuinely elevated above road level
+      building: 0.01
     };
     function extrudeOnLayer(bucket, h, layerZ){
-      // Solid pillar from Y=0 to feature top — fully connected to base, nothing floats
+      // Thin colored cap: exactly h mm thick, sitting flush on terrain surface.
+      // Color is only in the top h mm — everything below is the white terrain body.
       const minY=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
-      const topH=Math.max(0.1, minY+layerZ+h);
       try{const sh=new THREE.Shape();clipped.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
-        const g=new THREE.ExtrudeGeometry(sh,{depth:topH,bevelEnabled:false});
-        g.rotateX(-Math.PI/2); // bottom at Y=0, top at Y=topH — no translate
+        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
+        g.rotateX(-Math.PI/2);g.translate(0,minY+layerZ,0);
         if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
     }
 
@@ -1737,7 +1742,7 @@ function buildOSM(st){
           ? LAYER_Z.bridge+st.roadH   // bridges clearly above everything
           : (st.roadDepth>0?-(st.roadDepth*0.3):(LAYER_Z.road+st.roadH));
         const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+yOff,p.z));
-        const g=mkRibbon(v3,wMm);if(g)rGs.push(g);
+        const g=mkRibbon(v3,wMm,st.roadH||1);if(g)rGs.push(g);
       }
       // Pedestrian AREAS (closed polygon highways) = light pavement surface
       if(hw==='pedestrian'&&treatAsPolygon){
@@ -1771,7 +1776,7 @@ function buildOSM(st){
         const bw=ww==='river'?2.5:ww==='canal'?1.5:.5;
         const minYw=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
         const v3=clipped.map(p=>new THREE.Vector3(p.x,minYw+LAYER_Z.water+st.waterH,p.z));
-        const g=mkRibbon(v3,Math.max(st.waterMW,bw));if(g)wGs.push(g);
+        const g=mkRibbon(v3,Math.max(st.waterMW,bw),st.waterH||1);if(g)wGs.push(g);
       }
     }
     // GRASS (light green) and FOREST (dark green) — slightly higher than water
@@ -1836,10 +1841,9 @@ function buildOSM(st){
         if(st.buildSS&&st.buildSS!==1){const bx=pts2.reduce((s,p)=>s+p.x,0)/pts2.length,bz=pts2.reduce((s,p)=>s+p.z,0)/pts2.length;pts2=pts2.map(p=>({...p,x:bx+(p.x-bx)*st.buildSS,z:bz+(p.z-bz)*st.buildSS}));}
         const baseY=pts2.reduce((s,p)=>Math.max(s,p.y),0);
         const sh=new THREE.Shape();pts2.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
-        // Solid from Y=0 to building top — fully connected to base, nothing floats
-        const topBuildH=Math.max(0.1,baseY+LAYER_Z.building+baseOffMm+hMm);
-        const g=new THREE.ExtrudeGeometry(sh,{depth:topBuildH,bevelEnabled:false});
-        g.rotateX(-Math.PI/2); // bottom at Y=0, top at Y=topBuildH — no translate
+        // Thin colored block: only hMm tall, sitting on terrain. Color only in top hMm.
+        const g=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:false});
+        g.rotateX(-Math.PI/2);g.translate(0,baseY+LAYER_Z.building+baseOffMm,0);
         // TAPER: apply to thin tall building:parts (tower spires, upper sections)
         const xs=pts2.map(p=>p.x),zs=pts2.map(p=>p.z);
         const fpW=Math.max(...xs)-Math.min(...xs);
