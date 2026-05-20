@@ -287,109 +287,100 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
 <div id="sp-hd">⚙ Paramètres 3D</div>
 <div id="sp-bd">
 
+<!-- ── TERRAIN ── -->
 <div class="sec">
-  <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Topographie</span><span class="sc o" id="ca-topo">▼</span></div>
+  <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Terrain</span><span class="sc o" id="ca-topo">▼</span></div>
   <div class="sb" id="sb-topo">
-    <div class="r"><label>Couleur terrain</label><input type="color" id="c-base" value="#c2b49a"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#c2b49a"></div>
     <div class="r"><label>Résolution</label>
-      <select id="t-res"><option value="28">Basse (28²)</option><option value="56">Moy. (56²)</option><option value="96">Haute (96²)</option><option value="128" selected>Ultra (128²)</option><option value="256">Max (256²)</option></select></div>
-    <div class="r"><label>Éch. altitude</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"><span>×</span></div>
-    <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="2"><span class="rv" id="t-smooth-v">2px</span></div>
-    <div class="r"><label>Qualité zoom</label><input type="number" id="t-zoom" value="15" step="1" min="1" max="18"><span>z</span></div>
-    <div class="r"><label>Source</label>
-      <select id="t-src"><option value="terrarium">AWS Terrarium</option><option value="mapthorn">Mapthorn</option></select></div>
-    <div class="r"><label>Épaisseur socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
+      <select id="t-res"><option value="56">Rapide (56²)</option><option value="96">Normale (96²)</option><option value="128" selected>Haute (128²)</option><option value="256">Max (256²)</option></select></div>
+    <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
+    <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="2"><span class="rv" id="t-smooth-v">2</span></div>
+    <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
     <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
+    <!-- Technical defaults (not shown) -->
+    <input type="hidden" id="t-zoom" value="15">
+    <input type="hidden" id="t-src" value="terrarium">
   </div>
 </div>
 
+<!-- ── ROUTES ── -->
 <div class="sec">
   <div class="sh" onclick="ts('road')"><span class="si">🛣️</span><span class="sn">Routes</span>
     <input type="checkbox" id="road-on" checked onclick="ev(event)"><span class="sc o" id="ca-road">▼</span></div>
   <div class="sb" id="sb-road">
     <div class="r"><label>Couleur</label><input type="color" id="road-col" value="#2a2a2a"></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="road-h" value="1.0" step="0.1" min="0"><span>mm</span></div>
-    <div class="r"><label>Prof. gravure</label><input type="number" id="road-depth" value="0" step="0.1" min="0"><span>mm</span></div>
-    <div class="r"><label>Largeur min</label><input type="number" id="road-mw" value="0.4" step="0.1" min="0.1"><span>mm</span></div>
-    <div class="r"><label>Mult. largeur</label><input type="number" id="road-wm" value="1" step="0.1" min="0.2" max="5"><span>×</span></div>
-    <div class="chk"><input type="checkbox" id="road-paths" checked><label>Sentiers pédestres</label></div>
+    <!-- Hardcoded defaults -->
+    <input type="hidden" id="road-h" value="0.4">
+    <input type="hidden" id="road-depth" value="0">
+    <input type="hidden" id="road-mw" value="0.4">
+    <input type="hidden" id="road-wm" value="1">
+    <input type="checkbox" id="road-paths" checked style="display:none">
   </div>
 </div>
 
+<!-- ── EAU ── -->
 <div class="sec">
   <div class="sh" onclick="ts('water')"><span class="si">💧</span><span class="sn">Eau</span>
     <input type="checkbox" id="water-on" checked onclick="ev(event)"><span class="sc o" id="ca-water">▼</span></div>
   <div class="sb h" id="sb-water">
     <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#1a7bbf"></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="water-h" value="1.0" step="0.1" min="0"><span>mm</span></div>
-    <div class="r"><label>Prof. gravure</label><input type="number" id="water-depth" value="0" step="0.1" min="0"><span>mm</span></div>
-    <div class="r"><label>Largeur min</label><input type="number" id="water-mw" value="0.4" step="0.1" min="0"><span>mm</span></div>
-    <div class="r"><label>Ignorer &lt;</label><input type="number" id="water-ma" value="10" step="5" min="0"><span>m²</span></div>
-    <div class="chk"><input type="checkbox" id="water-sea" checked><label>Mers / Océans</label></div>
+    <input type="hidden" id="water-h" value="0.8">
+    <input type="hidden" id="water-depth" value="0">
+    <input type="hidden" id="water-mw" value="0.5">
+    <input type="hidden" id="water-ma" value="10">
+    <input type="checkbox" id="water-sea" checked style="display:none">
   </div>
 </div>
 
+<!-- ── HERBE / PARCS ── -->
 <div class="sec">
-  <div class="sh" onclick="ts('grass')"><span class="si">🌿</span><span class="sn">Herbe / Parcs</span>
+  <div class="sh" onclick="ts('grass')"><span class="si">🌿</span><span class="sn">Parcs / Végétation</span>
     <input type="checkbox" id="grass-on" checked onclick="ev(event)"><span class="sc o" id="ca-grass">▼</span></div>
   <div class="sb h" id="sb-grass">
     <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#3d9e2a"></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="grass-h" value="0.7" step="0.05" min="0"><span>mm</span></div>
+    <input type="hidden" id="grass-h" value="0.4">
   </div>
 </div>
 
+<!-- ── BÂTIMENTS ── -->
 <div class="sec">
   <div class="sh" onclick="ts('build')"><span class="si">🏛️</span><span class="sn">Bâtiments</span>
     <input type="checkbox" id="build-on" checked onclick="ev(event)"><span class="sc o" id="ca-build">▼</span></div>
   <div class="sb h" id="sb-build">
     <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#888888"></div>
-    <div class="r"><label>Éch. hauteur</label><input type="number" id="build-hs" value="1" step="0.1" min="0.1"><span>×</span></div>
-    <div class="r"><label>Éch. taille</label><input type="number" id="build-ss" value="1" step="0.1" min="0.1"><span>×</span></div>
-    <div class="r"><label>Haut. min</label><input type="number" id="build-mh" value="1.0" step="0.1" min="0"><span>mm</span></div>
-    <div class="r"><label>Ignorer &lt;</label><input type="number" id="build-ma" value="1" step="0.5" min="0"><span>m²</span></div>
-    <div class="chk"><input type="checkbox" id="build-roofs" checked><label>Toits</label></div>
+    <div class="r"><label>Hauteur ×</label><input type="number" id="build-hs" value="1" step="0.1" min="0.1" max="5"></div>
+    <input type="hidden" id="build-ss" value="1">
+    <input type="hidden" id="build-mh" value="0.5">
+    <input type="hidden" id="build-ma" value="5">
+    <input type="checkbox" id="build-roofs" style="display:none">
   </div>
 </div>
 
-<div class="sec">
-  <div class="sh" onclick="ts('sand')"><span class="si">🏖️</span><span class="sn">Sable / Plage</span>
-    <input type="checkbox" id="sand-on" checked onclick="ev(event)"><span class="sc o" id="ca-sand">▼</span></div>
-  <div class="sb h" id="sb-sand">
-    <div class="r"><label>Couleur</label><input type="color" id="sand-col" value="#fac393"></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="sand-h" value="0.2" step="0.1" min="0"><span>mm</span></div>
-  </div>
-</div>
-
-<div class="sec">
-  <div class="sh" onclick="ts('pier')"><span class="si">⛵</span><span class="sn">Jetées / Quais</span>
-    <input type="checkbox" id="pier-on" onclick="ev(event)"><span class="sc o" id="ca-pier">▼</span></div>
-  <div class="sb h" id="sb-pier">
-    <div class="r"><label>Couleur</label><input type="color" id="pier-col" value="#262626"></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="pier-h" value="0.8" step="0.5" min="0"><span>mm</span></div>
-  </div>
-</div>
-
-<div class="sec">
-  <div class="sh" onclick="ts('gpx2')"><span class="si">🔴</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx2">▼</span></div>
-  <div class="sb" id="sb-gpx2">
-    <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff0000"></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="gpx-h" value="1" step="0.5" min="0.1"><span>mm</span></div>
-    <div class="r"><label>Largeur min</label><input type="number" id="gpx-mw" value="0.4" step="0.1" min="0.1"><span>mm</span></div>
-    <div class="r"><label>Épaisseur (m)</label><input type="number" id="gpx-tw" value="10" step="1" min="1"><span>m</span></div>
-  </div>
-</div>
-
+<!-- ── COURBES DE NIVEAU ── -->
 <div class="sec">
   <div class="sh" onclick="ts('ct')"><span class="si">〰️</span><span class="sn">Courbes de niveau</span>
     <input type="checkbox" id="ct-on" checked onclick="ev(event)"><span class="sc o" id="ca-ct">▼</span></div>
   <div class="sb" id="sb-ct">
     <div class="r"><label>Intervalle</label><input type="number" id="ct-int" value="50" step="10" min="5"><span>m</span></div>
-    <div class="r"><label>Hauteur</label><input type="number" id="ct-h" value="0.3" step="0.05" min="0.05"><span>mm</span></div>
-    <div class="r"><label>Largeur</label><input type="number" id="ct-w" value="0.4" step="0.05" min="0.1"><span>mm</span></div>
-    <div class="r"><label>Couleur</label><input type="color" id="ct-col" value="#8b7355"></div>
+    <input type="hidden" id="ct-h" value="0.3">
+    <input type="hidden" id="ct-w" value="0.4">
+    <input type="hidden" id="ct-col" value="#8b7355">
   </div>
 </div>
 
+<!-- ── TRACE GPX ── -->
+<div class="sec">
+  <div class="sh" onclick="ts('gpx2')"><span class="si">🔴</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx2">▼</span></div>
+  <div class="sb h" id="sb-gpx2">
+    <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff0000"></div>
+    <input type="hidden" id="gpx-h" value="1">
+    <input type="hidden" id="gpx-mw" value="0.4">
+    <input type="hidden" id="gpx-tw" value="10">
+  </div>
+</div>
+
+<!-- ── CADRE ── -->
 <div class="sec">
   <div class="sh" onclick="ts('frame')"><span class="si">🖼️</span><span class="sn">Cadre</span>
     <input type="checkbox" id="frame-on" onclick="ev(event)"><span class="sc o" id="ca-frame">▼</span></div>
@@ -397,15 +388,20 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
     <div class="r"><label>Couleur</label><input type="color" id="frame-col" value="#cccccc"></div>
     <div class="r"><label>Hauteur</label><input type="number" id="frame-hh" value="8" step="1" min="1"><span>mm</span></div>
     <div class="r"><label>Épaisseur</label><input type="number" id="frame-th" value="5" step="1" min="1"><span>mm</span></div>
-    <div class="chk"><input type="checkbox" id="frame-rnd"><label>Coins arrondis</label></div>
-    <div class="chk"><input type="checkbox" id="frame-ton" id="frame-ton"><label>Ajouter du texte</label></div>
-    <div id="frame-ttxt" class="sub h">
-      <div class="r"><label>Position</label>
-        <select id="frame-tpos"><option value="bottom">En bas</option><option value="top">En haut</option></select></div>
-      <div class="r"><label>Texte</label><input type="text" id="frame-txt" placeholder="Nom du lieu..."></div>
-    </div>
+    <input type="hidden" id="frame-rnd" value="">
+    <input type="hidden" id="frame-ton" value="">
+    <input type="hidden" id="frame-tpos" value="bottom">
+    <input type="hidden" id="frame-txt" value="">
   </div>
 </div>
+
+<!-- Unused features — hidden with sane defaults -->
+<input type="hidden" id="sand-col" value="#fac393">
+<input type="hidden" id="sand-h" value="0.3">
+<input type="checkbox" id="sand-on" style="display:none">
+<input type="hidden" id="pier-col" value="#262626">
+<input type="hidden" id="pier-h" value="0.8">
+<input type="checkbox" id="pier-on" style="display:none">
 
 </div></div><!-- end sp -->
 </div><!-- end ws -->
@@ -472,7 +468,7 @@ function S(){
     pierOn:c('pier-on'),pierCol:v('pier-col'),pierH:n('pier-h'),
     gpxCol:v('gpx-col'),gpxH:n('gpx-h'),gpxMW:n('gpx-mw'),gpxTW:n('gpx-tw'),
     frameOn:c('frame-on'),frameCol:v('frame-col'),frameH:n('frame-hh'),frameTh:n('frame-th'),
-    frameRnd:c('frame-rnd'),frameTxtOn:c('frame-ton'),frameTxtPos:v('frame-tpos'),frameTxt:v('frame-txt'),
+    frameRnd:false,frameTxtOn:false,frameTxtPos:v('frame-tpos'),frameTxt:v('frame-txt'),
     maxDim:Math.max(50,Math.min(400,n('t-maxdim')||150)),
     ctOn:c('ct-on'),ctInterval:Math.max(5,n('ct-int')||50),ctH:Math.max(0.05,n('ct-h')||0.3),ctW:Math.max(0.1,n('ct-w')||0.4),ctCol:v('ct-col')||'#8b7355'
   };
@@ -480,8 +476,8 @@ function S(){
 
 // Smooth range label
 $('t-smooth').addEventListener('input',()=>{$('t-smooth-v').textContent=$('t-smooth').value+'px'});
-// Frame text toggle
-$('frame-ton').addEventListener('change',()=>{$('frame-ttxt').classList.toggle('h',!$('frame-ton').checked)});
+// Frame text toggle (frame-ton now hidden — no-op guard)
+if($('frame-ton')&&$('frame-ton').type==='checkbox'){$('frame-ton').addEventListener('change',()=>{const el=$('frame-ttxt');if(el)el.classList.toggle('h',!$('frame-ton').checked)});}
 
 /* ═══════════════════ LEAFLET MAP ═══════════════════ */
 const osmL=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'});
@@ -1603,6 +1599,23 @@ function buildSideWalls(st){
   }
 }
 
+/* Bilinear interpolation of terrain elevation at any model-space (x,z) position */
+function sampleTerrainY(x,z){
+  const{elevs,GRID,minE,elevRange,elevScaleMm,BASE_H}=Cache;
+  if(!elevs||!GRID)return BASE_H||0;
+  const W=App.wMm,D=App.dMm;
+  const fc=(x+W/2)/W*(GRID-1);
+  const fr=(z+D/2)/D*(GRID-1);
+  const c0=Math.max(0,Math.min(GRID-2,Math.floor(fc)));
+  const r0=Math.max(0,Math.min(GRID-2,Math.floor(fr)));
+  const tc=fc-c0,tr=fr-r0;
+  const e00=elevs[r0*GRID+c0]||minE,e10=elevs[r0*GRID+c0+1]||minE;
+  const e01=elevs[(r0+1)*GRID+c0]||minE,e11=elevs[(r0+1)*GRID+c0+1]||minE;
+  const e=e00*(1-tc)*(1-tr)+e10*tc*(1-tr)+e01*(1-tc)*tr+e11*tc*tr;
+  const n=Math.max(0,Math.min(1,(e-minE)/Math.max(0.001,elevRange)));
+  return (BASE_H||0)+n*(elevScaleMm||0);
+}
+
 /* OSM ELEMENTS */
 function buildOSM(st){
   if(!Cache.osm?.elements)return;
@@ -1712,13 +1725,32 @@ function buildOSM(st){
       building: 0.01
     };
     function extrudeOnLayer(bucket, h, layerZ){
-      // Thin colored cap: exactly h mm thick, sitting flush on terrain surface.
-      // Color is only in the top h mm — everything below is the white terrain body.
-      const minY=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
-      try{const sh=new THREE.Shape();clipped.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
-        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
-        g.rotateX(-Math.PI/2);g.translate(0,minY+layerZ,0);
-        if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
+      // Terrain-following extrusion: each polygon vertex sits at its sampled terrain height.
+      // Color cap is exactly h mm thick above the terrain surface — nothing floats, nothing sinks.
+      if(clipped.length<3)return;
+      try{
+        const n=clipped.length;
+        const contour=clipped.map(p=>new THREE.Vector2(p.x,-p.z));
+        const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
+        if(!tris||!tris.length)return;
+        const verts=new Float32Array(n*6); // top[0..n-1] + bottom[n..2n-1]
+        for(let i=0;i<n;i++){
+          const yBase=sampleTerrainY(clipped[i].x,clipped[i].z)+layerZ;
+          // top vertex
+          verts[i*3]=clipped[i].x; verts[i*3+1]=yBase+h; verts[i*3+2]=clipped[i].z;
+          // bottom vertex
+          verts[(n+i)*3]=clipped[i].x; verts[(n+i)*3+1]=yBase; verts[(n+i)*3+2]=clipped[i].z;
+        }
+        const idxArr=[];
+        for(const t of tris) idxArr.push(t[0],t[1],t[2]); // top face
+        for(const t of tris) idxArr.push(n+t[2],n+t[1],n+t[0]); // bottom (reversed)
+        for(let i=0;i<n;i++){const j=(i+1)%n; idxArr.push(i,n+i,n+j,i,n+j,j);} // sides
+        const geo=new THREE.BufferGeometry();
+        geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+        geo.setIndex(idxArr);geo.computeVertexNormals();
+        if(geo.attributes.uv)geo.deleteAttribute('uv');
+        bucket.push(geo);
+      }catch(e){}
     }
 
     // ROADS — dynamic width from OSM real data
