@@ -1111,7 +1111,7 @@ $('btn-prev').addEventListener('click',async()=>{
     // 3) Dark mask ON TOP — covers everything OUTSIDE zone
     const world=[[90,-180],[90,180],[-90,180],[-90,-180]];
     const hole=App.zonePts.map(p=>Array.isArray(p)?[p[0],p[1]]:[p.lat,p.lng||p.lon]);
-    const mask=L.polygon([world,hole],{color:'none',fillColor:'#07090f',fillOpacity:.93,interactive:false});
+    const mask=L.polygon([world,hole],{color:'none',fillColor:'#07090f',fillOpacity:.0,interactive:false});
     mask.addTo(map);prevLayers.push(mask);
     // 4) Zone outline on top
     const outline=L.polygon(App.zonePts,{color:'#f43f5e',weight:2.5,fillOpacity:0,interactive:false,dashArray:'6,4'});
@@ -1146,15 +1146,15 @@ function ensureThree(){
       renderer.setPixelRatio(Math.min(devicePixelRatio,2));
       renderer.setSize(W,H);
       renderer.shadowMap.enabled=false; // no shadows — cleaner print preview
-      renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;
+      renderer.toneMapping=THREE.LinearToneMapping;renderer.toneMappingExposure=1.0;
       App.renderer=renderer;
       const ctrl=new THREE.OrbitControls(camera,canvas);
       ctrl.enableDamping=true;ctrl.dampingFactor=0.07;ctrl.minDistance=10;ctrl.maxDistance=4000;ctrl.screenSpacePanning=true;
       App.controls=ctrl;
-      // Lights — dramatic relief shading for 3D map printing preview
-      scene.add(new THREE.HemisphereLight(0xb0d4f0,0x6b5a40,0.55));
-      const sun=new THREE.DirectionalLight(0xfff5e0,1.1);sun.position.set(250,600,200);sun.castShadow=false;scene.add(sun);
-      const fill=new THREE.DirectionalLight(0xd0e8ff,0.2);fill.position.set(-300,200,-200);scene.add(fill);
+      // Lights — bright, even for print preview (matches physical model appearance)
+      scene.add(new THREE.AmbientLight(0xffffff,0.88));
+      const sun=new THREE.DirectionalLight(0xfffaf0,0.75);sun.position.set(300,600,250);scene.add(sun);
+      const fill=new THREE.DirectionalLight(0xe8f0ff,0.22);fill.position.set(-200,300,-150);scene.add(fill);
       const tg=new THREE.Group();scene.add(tg);App.tg=tg;
       window.addEventListener('resize',()=>{
         const W2=vp.clientWidth,H2=vp.clientHeight;if(!W2||!H2)return;
@@ -1247,22 +1247,11 @@ function makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,baseH,minE,elevRange,sca
   };
 }
 
-/* ═══════════════════ TERRAIN COLOR — topographic gradient ═══════════════════ */
+/* ═══════════════════ TERRAIN COLOR — neutral beige base ═══════════════════ */
+// Terrain is a uniform warm beige; all color variation comes from OSM layers on top
 function tColor(n){
-  // Hypsometric tint: valley green → straw → brown → rock → snow
-  const stops=[
-    [0.00,'#3a6b35'],[0.18,'#6a9f52'],[0.35,'#b5a86a'],
-    [0.55,'#9a7040'],[0.75,'#c0a882'],[0.90,'#d6cfc4'],[1.00,'#eeebe5']
-  ];
-  let c=new THREE.Color(stops[stops.length-1][1]);
-  for(let i=1;i<stops.length;i++){
-    if(n<=stops[i][0]){
-      const t=(n-stops[i-1][0])/(stops[i][0]-stops[i-1][0]);
-      c=new THREE.Color(stops[i-1][1]).lerp(new THREE.Color(stops[i][1]),t);
-      break;
-    }
-  }
-  return c;
+  // Very subtle lightening toward peaks — visible for mountains, invisible for flat cities
+  return new THREE.Color('#dedad4').lerp(new THREE.Color('#eae7e1'),n*0.45);
 }
 
 /* ═══════════════════ GEOMETRY HELPERS ═══════════════════ */
