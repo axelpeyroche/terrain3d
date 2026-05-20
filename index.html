@@ -1608,7 +1608,7 @@ function buildTerrain(st){
   // Single flat terrain color — OSM features provide all color variation on top
   const terrMat=new THREE.MeshStandardMaterial({
     color:new THREE.Color(st.cBase),roughness:.88,metalness:0,
-    polygonOffset:true,polygonOffsetFactor:6,polygonOffsetUnits:6
+    polygonOffset:true,polygonOffsetFactor:12,polygonOffsetUnits:12
   });
   const mesh=new THREE.Mesh(geo,terrMat);
   mesh.name='TERRAIN';App.tg.add(mesh);
@@ -1790,17 +1790,24 @@ function buildOSM(st){
       // Color cap is exactly h mm thick above the terrain surface — nothing floats, nothing sinks.
       if(clipped.length<3)return;
       try{
-        const n=clipped.length;
-        const contour=clipped.map(p=>new THREE.Vector2(p.x,-p.z));
+        // Deduplicate near-identical vertices to prevent earcut triangulation failures
+        const deduped=[];
+        for(const p of clipped){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p);}
+        if(deduped.length<3)return;
+        const n=deduped.length;
+        const contour=deduped.map(p=>new THREE.Vector2(p.x,-p.z));
         const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
         if(!tris||!tris.length)return;
+        // SINK bottom 2mm below terrain: the cap is a solid plug going INTO the terrain body.
+        // This prevents z-fighting (white patches) AND terrain bleeding through on any slope.
+        const SINK=2.0;
         const verts=new Float32Array(n*6); // top[0..n-1] + bottom[n..2n-1]
         for(let i=0;i<n;i++){
-          const yBase=sampleTerrainY(clipped[i].x,clipped[i].z)+layerZ;
-          // top vertex
-          verts[i*3]=clipped[i].x; verts[i*3+1]=yBase+h; verts[i*3+2]=clipped[i].z;
-          // bottom vertex
-          verts[(n+i)*3]=clipped[i].x; verts[(n+i)*3+1]=yBase; verts[(n+i)*3+2]=clipped[i].z;
+          const yBase=sampleTerrainY(deduped[i].x,deduped[i].z)+layerZ;
+          // top vertex — sits exactly at terrain surface + feature height
+          verts[i*3]=deduped[i].x; verts[i*3+1]=yBase+h; verts[i*3+2]=deduped[i].z;
+          // bottom vertex — 2mm below terrain so terrain can never poke through
+          verts[(n+i)*3]=deduped[i].x; verts[(n+i)*3+1]=yBase-SINK; verts[(n+i)*3+2]=deduped[i].z;
         }
         const idxArr=[];
         for(const t of tris) idxArr.push(t[0],t[1],t[2]); // top face
@@ -1901,8 +1908,10 @@ function buildOSM(st){
     if((isBuilding||isBuildPart)&&st.buildOn){
       const area=polyAreaM2(way.geometry.map(n=>({lat:n.lat,lon:n.lon})));
       if(area<st.buildMA)return;
-      // Skip main building ONLY for true TOWERS (like Tour Eiffel: man_made=tower + height>150m)
-      // NOT for tourism=attraction, historic, museums etc — those must always render their footprint
+      // For true TOWERS (man_made=tower + height>150m + has building:parts):
+      // render the main footprint as a THIN SOLID BASE instead of skipping it.
+      // This fills the hollow center that would otherwise appear between the legs/parts.
+      let forceThinBase=false;
       if(isBuilding&&!isBuildPart){
         const isTrueTower=tags.man_made==='tower';
         if(isTrueTower){
@@ -1921,7 +1930,7 @@ function buildOSM(st){
               }
               return inside;
             });
-            if(hasPart)return; // Skip main polygon — building:parts render the tower structure
+            if(hasPart)forceThinBase=true; // thin base fills center; parts handle the structure
           }
         }
       }
@@ -1938,17 +1947,20 @@ function buildOSM(st){
       const partHm=Math.max(0.5,maxHm-minHm);
       // Cap at 10% of model width — keeps landmarks visible but printable (e.g. Tour Eiffel ≤15mm)
       const maxBuildMm=Math.max(5,App.wMm*0.10);
-      const hMm=Math.min(maxBuildMm,Math.max(st.buildMH,partHm*mmPerMeter*(st.buildHS||1)));
+      let hMm=Math.min(maxBuildMm,Math.max(st.buildMH,partHm*mmPerMeter*(st.buildHS||1)));
       const baseOffMm=minHm*mmPerMeter*(st.buildHS||1);
+      // Tower main polygon: thin solid base (building:parts handle the structure above)
+      if(forceThinBase)hMm=Math.max(0.5,st.buildMH||0.5);
       try{
         let pts2=clipped;
         if(st.buildSS&&st.buildSS!==1){const bx=pts2.reduce((s,p)=>s+p.x,0)/pts2.length,bz=pts2.reduce((s,p)=>s+p.z,0)/pts2.length;pts2=pts2.map(p=>({...p,x:bx+(p.x-bx)*st.buildSS,z:bz+(p.z-bz)*st.buildSS}));}
         const baseY=pts2.reduce((s,p)=>Math.max(s,p.y),0);
         const sh=new THREE.Shape();pts2.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
-        // Thin colored block: only hMm tall, sitting on terrain. Color only in top hMm.
-        const g=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:false});
+        // Small chamfer on edges: less boxy/cubic appearance without changing overall shape
+        const bvSz=Math.min(0.3,hMm*0.06);
+        const g=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:bvSz>0.05,bevelThickness:bvSz,bevelSize:bvSz,bevelSegments:1});
         g.rotateX(-Math.PI/2);g.translate(0,baseY+LAYER_Z.building+baseOffMm,0);
-        // TAPER: apply to thin tall building:parts (tower spires, upper sections)
+        // TAPER: apply to tall building:parts — spires, tower tops, AND legs (Tour Eiffel style)
         const xs=pts2.map(p=>p.x),zs=pts2.map(p=>p.z);
         const fpW=Math.max(...xs)-Math.min(...xs);
         const fpD=Math.max(...zs)-Math.min(...zs);
@@ -1957,7 +1969,9 @@ function buildOSM(st){
         const isSpire=isBuildPart&&hMm>fpSize*2&&hMm>2;
         // Tower top: part starts above 30m physical height and is tall relative to footprint
         const isTowerTop=isBuildPart&&minHm>30&&hMm>fpSize*0.7;
-        if(isSpire||isTowerTop){
+        // Leg: tall part at ground level (e.g. Tour Eiffel legs — taller than half their footprint)
+        const isLeg=isBuildPart&&hMm>1.5&&fpSize>0&&hMm>fpSize*0.5&&!isSpire&&!isTowerTop;
+        if(isSpire||isTowerTop||isLeg){
           const pos=g.attributes.position;
           const cx2=xs.reduce((s,x)=>s+x,0)/xs.length;
           const cz2=zs.reduce((s,z)=>s+z,0)/zs.length;
@@ -1967,8 +1981,8 @@ function buildOSM(st){
           for(let i=0;i<pos.count;i++){
             const py=pos.getY(i);
             const t=Math.max(0,Math.min(1,(py-yMin)/(yMax-yMin)));
-            // Taper to 30% at top for spires, 50% for tower sections
-            const tScale=isSpire?0.70:0.50;
+            // Taper to 70% at top for spires, 50% for tower sections, 20% for legs
+            const tScale=isSpire?0.70:isTowerTop?0.50:0.20;
             const scale=1.0-t*tScale;
             const px=pos.getX(i),pz=pos.getZ(i);
             pos.setX(i,cx2+(px-cx2)*scale);
