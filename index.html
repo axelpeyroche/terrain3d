@@ -1271,6 +1271,7 @@ function mergeGeos(geos){
 
 /* Flat ribbon for roads/waterways — follows terrain precisely */
 function mkRibbon(pts3d,width){
+  // Creates a SOLID prism from Y=0 to road/river surface — nothing floats above base
   if(pts3d.length<2)return null;
   const verts=[],idx=[];const hw=width/2;
   for(let i=0;i<pts3d.length-1;i++){
@@ -1280,13 +1281,32 @@ function mkRibbon(pts3d,width){
     const px=-dz/len,pz=dx/len;
     const vi=verts.length/3;
     const y1=p1.y,y2=p2.y;
+    // Top 4 vertices (at road/river surface height)
     verts.push(
-      p1.x-px*hw,y1,p1.z-pz*hw,
-      p1.x+px*hw,y1,p1.z+pz*hw,
-      p2.x+px*hw,y2,p2.z+pz*hw,
-      p2.x-px*hw,y2,p2.z-pz*hw
+      p1.x-px*hw,y1,p1.z-pz*hw, // 0 top-left-A
+      p1.x+px*hw,y1,p1.z+pz*hw, // 1 top-right-A
+      p2.x+px*hw,y2,p2.z+pz*hw, // 2 top-right-B
+      p2.x-px*hw,y2,p2.z-pz*hw  // 3 top-left-B
     );
-    idx.push(vi,vi+1,vi+2,vi,vi+2,vi+3);
+    // Bottom 4 vertices (at Y=0, connected to base)
+    verts.push(
+      p1.x-px*hw,0,p1.z-pz*hw,  // 4 bot-left-A
+      p1.x+px*hw,0,p1.z+pz*hw,  // 5 bot-right-A
+      p2.x+px*hw,0,p2.z+pz*hw,  // 6 bot-right-B
+      p2.x-px*hw,0,p2.z-pz*hw   // 7 bot-left-B
+    );
+    // Top face
+    idx.push(vi,vi+1,vi+2, vi,vi+2,vi+3);
+    // Bottom face (reversed winding)
+    idx.push(vi+4,vi+6,vi+5, vi+4,vi+7,vi+6);
+    // Left wall
+    idx.push(vi,vi+3,vi+7, vi,vi+7,vi+4);
+    // Right wall
+    idx.push(vi+1,vi+5,vi+6, vi+1,vi+6,vi+2);
+    // Start cap
+    idx.push(vi,vi+4,vi+5, vi,vi+5,vi+1);
+    // End cap
+    idx.push(vi+3,vi+2,vi+6, vi+3,vi+6,vi+7);
   }
   if(!verts.length)return null;
   const g=new THREE.BufferGeometry();
@@ -1687,11 +1707,12 @@ function buildOSM(st){
       building: 0.32   // buildings start above road surface
     };
     function extrudeOnLayer(bucket, h, layerZ){
-      // Use MINIMUM Y of polygon to avoid floating features on slopes
+      // Solid pillar from Y=0 to feature top — fully connected to base, nothing floats
       const minY=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
+      const topH=Math.max(0.1, minY+layerZ+h);
       try{const sh=new THREE.Shape();clipped.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
-        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
-        g.rotateX(-Math.PI/2);g.translate(0,minY+layerZ,0);
+        const g=new THREE.ExtrudeGeometry(sh,{depth:topH,bevelEnabled:false});
+        g.rotateX(-Math.PI/2); // bottom at Y=0, top at Y=topH — no translate
         if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
     }
 
@@ -1815,12 +1836,11 @@ function buildOSM(st){
         if(st.buildSS&&st.buildSS!==1){const bx=pts2.reduce((s,p)=>s+p.x,0)/pts2.length,bz=pts2.reduce((s,p)=>s+p.z,0)/pts2.length;pts2=pts2.map(p=>({...p,x:bx+(p.x-bx)*st.buildSS,z:bz+(p.z-bz)*st.buildSS}));}
         const baseY=pts2.reduce((s,p)=>Math.max(s,p.y),0);
         const sh=new THREE.Shape();pts2.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
-        const bev=st.buildRoofs&&hMm>1&&minHm===0;
-        const g=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:bev,bevelSize:bev?.2:0,bevelThickness:bev?.12:0,bevelSegments:1});
-        // Place at terrain + building layer offset + min_height offset
-        g.rotateX(-Math.PI/2);g.translate(0,baseY+LAYER_Z.building+baseOffMm,0);
+        // Solid from Y=0 to building top — fully connected to base, nothing floats
+        const topBuildH=Math.max(0.1,baseY+LAYER_Z.building+baseOffMm+hMm);
+        const g=new THREE.ExtrudeGeometry(sh,{depth:topBuildH,bevelEnabled:false});
+        g.rotateX(-Math.PI/2); // bottom at Y=0, top at Y=topBuildH — no translate
         // TAPER: apply to thin tall building:parts (tower spires, upper sections)
-        // Lower thresholds to work at typical print scale (mmPerMeter ≈ 0.1-0.2mm/m)
         const xs=pts2.map(p=>p.x),zs=pts2.map(p=>p.z);
         const fpW=Math.max(...xs)-Math.min(...xs);
         const fpD=Math.max(...zs)-Math.min(...zs);
@@ -1833,7 +1853,8 @@ function buildOSM(st){
           const pos=g.attributes.position;
           const cx2=xs.reduce((s,x)=>s+x,0)/xs.length;
           const cz2=zs.reduce((s,z)=>s+z,0)/zs.length;
-          const yMin=baseY+0.05+baseOffMm;
+          // Taper only applies to the building section above terrain
+          const yMin=baseY+LAYER_Z.building+baseOffMm;
           const yMax=yMin+hMm;
           for(let i=0;i<pos.count;i++){
             const py=pos.getY(i);
@@ -1859,6 +1880,7 @@ function buildOSM(st){
     const mg=mergeGeos(geos);if(!mg)return;
     const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
       color:new THREE.Color(col),roughness:.92,metalness:0,flatShading:false,
+      side:THREE.DoubleSide, // solid faces visible from all angles
       polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4
     }));
     m.name=name;App.tg.add(m);
