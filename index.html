@@ -1835,18 +1835,39 @@ function buildOSM(st){
         let roadWidthM=typeW;
         if(tags.width&&parseFloat(tags.width))roadWidthM=parseFloat(tags.width);
         else if(tags.lanes&&parseInt(tags.lanes))roadWidthM=parseInt(tags.lanes)*3.5;
-        // Convert to mm using real model scale
-        const wMm=Math.max(st.roadMW, roadWidthM*Cache.mmPerMeter*(st.roadWM||1));
+        // Pedestrian paths: enforce a visible minimum width (0.8mm) regardless of real scale
+        const minW=isPed?Math.max(st.roadMW,0.8):st.roadMW;
+        const wMm=Math.max(minW, roadWidthM*Cache.mmPerMeter*(st.roadWM||1));
         // Bridge: elevated above water; road: at road layer height
         const yOff=isBridge
           ? LAYER_Z.bridge+st.roadH   // bridges clearly above everything
           : (st.roadDepth>0?-(st.roadDepth*0.3):(LAYER_Z.road+st.roadH));
-        const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+yOff,p.z));
-        const g=mkRibbon(v3,wMm,st.roadH||1);if(g)rGs.push(g);
+        // ── DENSE TERRAIN-FOLLOWING RESAMPLING ──────────────────────────────────
+        // OSM waypoints can be 10-100m apart. Between them, terrain may rise or fall.
+        // We resample every terrain-grid cell width to get exact intermediate heights.
+        const ROAD_SINK=2.0; // sink ribbon 2mm into terrain — same as surface caps
+        const cellW=Math.max(0.5,App.wMm/(Cache.GRID-1||47));
+        const v3raw=clipped.map(p=>new THREE.Vector3(p.x,p.y+yOff,p.z));
+        const v3=[];
+        for(let i=0;i<v3raw.length;i++){
+          v3.push(v3raw[i]);
+          if(i<v3raw.length-1){
+            const p1=v3raw[i],p2=v3raw[i+1];
+            const dx=p2.x-p1.x,dz=p2.z-p1.z;
+            const nSub=Math.floor(Math.sqrt(dx*dx+dz*dz)/cellW);
+            for(let s=1;s<nSub;s++){
+              const t=s/nSub,x=p1.x+t*dx,z=p1.z+t*dz;
+              // sample terrain height at intermediate point and apply same yOff
+              v3.push(new THREE.Vector3(x,sampleTerrainY(x,z)+yOff,z));
+            }
+          }
+        }
+        // depth = roadH (colored surface) + ROAD_SINK (plug into terrain)
+        const g=mkRibbon(v3,wMm,(st.roadH||0.4)+ROAD_SINK);if(g)rGs.push(g);
       }
       // Pedestrian AREAS (closed polygon highways) = light pavement surface
       if(hw==='pedestrian'&&treatAsPolygon){
-        extrudeOnLayer(pedGs,0.15,LAYER_Z.ped);
+        extrudeOnLayer(pedGs,0.3,LAYER_Z.ped); // slightly thicker for visibility
       }
     }
 
@@ -1854,7 +1875,7 @@ function buildOSM(st){
     if(tags.man_made==='embankment'||tags.waterway==='bank'||tags.natural==='cliff'&&tags.waterway){
       if(clipped.length>=2){
         const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+0.5,p.z));
-        const g=mkRibbon(v3,1.5);if(g)rGs.push(g);
+        const g=mkRibbon(v3,1.5,2.4);if(g)rGs.push(g); // sink 2mm into terrain
       }
     }
     if(tags.man_made==='quay'||tags.man_made==='pier'||tags.man_made==='jetty'){
@@ -1874,9 +1895,24 @@ function buildOSM(st){
       if(isWaterPoly){const area=polyAreaM2(way.geometry.map(n=>({lat:n.lat,lon:n.lon})));if(area>=st.waterMA)extrudeOnLayer(wGs,st.waterH,LAYER_Z.water);}
       if(isWaterLine){
         const bw=ww==='river'?2.5:ww==='canal'?1.5:.5;
-        const minYw=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
-        const v3=clipped.map(p=>new THREE.Vector3(p.x,minYw+LAYER_Z.water+st.waterH,p.z));
-        const g=mkRibbon(v3,Math.max(st.waterMW,bw),st.waterH||1);if(g)wGs.push(g);
+        const waterYOff=LAYER_Z.water+st.waterH;
+        // Dense terrain-following for waterway lines + 2mm sink
+        const cellW2=Math.max(0.5,App.wMm/(Cache.GRID-1||47));
+        const v3raw2=clipped.map(p=>new THREE.Vector3(p.x,p.y+waterYOff,p.z));
+        const v3w=[];
+        for(let i=0;i<v3raw2.length;i++){
+          v3w.push(v3raw2[i]);
+          if(i<v3raw2.length-1){
+            const p1=v3raw2[i],p2=v3raw2[i+1];
+            const dx=p2.x-p1.x,dz=p2.z-p1.z;
+            const nSub=Math.floor(Math.sqrt(dx*dx+dz*dz)/cellW2);
+            for(let s=1;s<nSub;s++){
+              const t=s/nSub,x=p1.x+t*dx,z=p1.z+t*dz;
+              v3w.push(new THREE.Vector3(x,sampleTerrainY(x,z)+waterYOff,z));
+            }
+          }
+        }
+        const g=mkRibbon(v3w,Math.max(st.waterMW,bw),(st.waterH||0.8)+2.0);if(g)wGs.push(g);
       }
     }
     // GRASS (light green) and FOREST (dark green) — slightly higher than water
