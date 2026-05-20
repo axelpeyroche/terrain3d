@@ -968,8 +968,27 @@ $('btn-prev').addEventListener('click',async()=>{
       `way["tourism"~"^(attraction|monument|artwork|museum)$"](${bb});`+
       `way["historic"~"^(monument|memorial|castle|ruins|tower|archaeological_site)$"](${bb});`+
     `);(._;>;);out geom qt;`;
-    const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});
-    const data=await res.json();
+    const OVERPASS_ENDPOINTS=[
+      'https://overpass-api.de/api/interpreter',
+      'https://lz4.overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter'
+    ];
+    async function fetchOverpass(query){
+      for(const url of OVERPASS_ENDPOINTS){
+        try{
+          const r=await fetch(url,{method:'POST',body:query,signal:AbortSignal.timeout(55000)});
+          const txt=await r.text();
+          if(txt.trim().startsWith('<')){
+            // Overpass returned XML error (timeout/rate-limit) — try next mirror
+            console.warn('Overpass XML error on',url,txt.slice(0,200));
+            continue;
+          }
+          return JSON.parse(txt);
+        }catch(e){console.warn('Overpass failed on',url,e.message);}
+      }
+      throw new Error('Serveur de données cartographiques indisponible.\nRéessaie dans quelques secondes ou réduis la zone.');
+    }
+    const data=await fetchOverpass(q);
     // Expand relations — assemble outer member ways into one closed ring per relation
     const expandedPrev=[];
     data.elements.forEach(elem=>{
@@ -2131,7 +2150,8 @@ $('btn-gen').addEventListener('click',async()=>{
       `way["historic"](${bbox});`+
     `);(._;>;);out geom qt;`;
     let osmData={elements:[]};
-    try{const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});if(res.ok)osmData=await res.json()}catch(e){}
+    const OVERPASS_3D=['https://overpass-api.de/api/interpreter','https://lz4.overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+    for(const _url of OVERPASS_3D){try{const _r=await fetch(_url,{method:'POST',body:q,signal:AbortSignal.timeout(58000)});const _t=await _r.text();if(!_t.trim().startsWith('<')){osmData=JSON.parse(_t);break;}}catch(e){console.warn('OSM 3D:',_url,e.message);}}
 
     // Expand relations: assemble ALL outer member ways into ONE closed ring per relation
     // (Critical for Seine multipolygon — each member is a short open segment, not a polygon)
