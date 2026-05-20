@@ -124,7 +124,7 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
 .pld{width:10px;height:10px;border-radius:2px;flex-shrink:0}
 
 /* ─ 3D VIEWER ─ */
-#vp{flex:1 1 0;position:relative;background:#b8cdd8;overflow:hidden;min-width:0}
+#vp{flex:1 1 0;position:relative;background:#94afc0;overflow:hidden;min-width:0}
 #c3d{position:absolute;top:0;left:0;width:100%!important;height:100%!important;display:block}
 #gen-wrap{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:100}
 #empty3d{position:absolute;inset:0;z-index:5;pointer-events:none;
@@ -134,7 +134,7 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
 #empty3d svg{opacity:.2;width:50px;height:50px}
 #empty3d p{font-family:var(--mono);font-size:9px;letter-spacing:1px;text-align:center;line-height:2.2}
 #prog{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
-  background:rgba(184,205,216,.75);backdrop-filter:blur(4px)}
+  background:rgba(148,175,192,.75);backdrop-filter:blur(4px)}
 #pc{background:var(--p1);border:1px solid var(--b2);border-radius:10px;padding:24px 32px;
   min-width:280px;display:flex;flex-direction:column;gap:12px}
 #ps{font-family:var(--mono);font-size:9px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
@@ -291,7 +291,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
 <div class="sec">
   <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Terrain</span><span class="sc o" id="ca-topo">▼</span></div>
   <div class="sb" id="sb-topo">
-    <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#c2b49a"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#c6bfae"></div>
     <div class="r"><label>Résolution</label>
       <select id="t-res"><option value="56">Rapide (56²)</option><option value="96">Normale (96²)</option><option value="128" selected>Haute (128²)</option><option value="256">Max (256²)</option></select></div>
     <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
@@ -324,7 +324,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('water')"><span class="si">💧</span><span class="sn">Eau</span>
     <input type="checkbox" id="water-on" checked onclick="ev(event)"><span class="sc o" id="ca-water">▼</span></div>
   <div class="sb h" id="sb-water">
-    <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#1a7bbf"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#2e92d0"></div>
     <input type="hidden" id="water-h" value="0.8">
     <input type="hidden" id="water-depth" value="0">
     <input type="hidden" id="water-mw" value="0.5">
@@ -338,7 +338,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('grass')"><span class="si">🌿</span><span class="sn">Parcs / Végétation</span>
     <input type="checkbox" id="grass-on" checked onclick="ev(event)"><span class="sc o" id="ca-grass">▼</span></div>
   <div class="sb h" id="sb-grass">
-    <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#3d9e2a"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#54aa38"></div>
     <input type="hidden" id="grass-h" value="0.4">
   </div>
 </div>
@@ -348,7 +348,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('build')"><span class="si">🏛️</span><span class="sn">Bâtiments</span>
     <input type="checkbox" id="build-on" checked onclick="ev(event)"><span class="sc o" id="ca-build">▼</span></div>
   <div class="sb h" id="sb-build">
-    <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#888888"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#9a9a9a"></div>
     <div class="r"><label>Hauteur ×</label><input type="number" id="build-hs" value="1" step="0.1" min="0.1" max="5"></div>
     <input type="hidden" id="build-ss" value="1">
     <input type="hidden" id="build-mh" value="0.5">
@@ -365,7 +365,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
     <div class="r"><label>Intervalle</label><input type="number" id="ct-int" value="50" step="10" min="5"><span>m</span></div>
     <input type="hidden" id="ct-h" value="0.3">
     <input type="hidden" id="ct-w" value="0.4">
-    <input type="hidden" id="ct-col" value="#8b7355">
+    <input type="hidden" id="ct-col" value="#8a7860">
   </div>
 </div>
 
@@ -385,7 +385,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('frame')"><span class="si">🖼️</span><span class="sn">Cadre</span>
     <input type="checkbox" id="frame-on" onclick="ev(event)"><span class="sc o" id="ca-frame">▼</span></div>
   <div class="sb h" id="sb-frame">
-    <div class="r"><label>Couleur</label><input type="color" id="frame-col" value="#cccccc"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="frame-col" value="#c8c2b8"></div>
     <div class="r"><label>Hauteur</label><input type="number" id="frame-hh" value="8" step="1" min="1"><span>mm</span></div>
     <div class="r"><label>Épaisseur</label><input type="number" id="frame-th" value="5" step="1" min="1"><span>mm</span></div>
     <input type="hidden" id="frame-rnd" value="">
@@ -1129,8 +1129,8 @@ function ensureThree(){
       const W=vp.clientWidth,H=vp.clientHeight;
       if(!W||!H){setTimeout(tryIt,100);return}
       const scene=new THREE.Scene();
-      scene.background=new THREE.Color(0x8fb8d4);
-      scene.fog=new THREE.Fog(0x8fb8d4,1200,4000);
+      scene.background=new THREE.Color(0x94afc0);
+      scene.fog=new THREE.Fog(0x94afc0,1200,4000);
       App.scene=scene;
       const camera=new THREE.PerspectiveCamera(40,W/H,0.5,8000);
       camera.position.set(0,180,280);App.camera=camera;
@@ -1143,11 +1143,11 @@ function ensureThree(){
       const ctrl=new THREE.OrbitControls(camera,canvas);
       ctrl.enableDamping=true;ctrl.dampingFactor=0.07;ctrl.minDistance=10;ctrl.maxDistance=4000;ctrl.screenSpacePanning=true;
       App.controls=ctrl;
-      // Lights — bright, even for print preview (matches physical model appearance)
-      // Lighting tuned for relief maps: stronger directional light from upper-left to accentuate terrain relief
-      scene.add(new THREE.AmbientLight(0xffffff,0.65));
-      const sun=new THREE.DirectionalLight(0xfff5e0,1.10);sun.position.set(-250,700,200);scene.add(sun);
-      const fill=new THREE.DirectionalLight(0xd0e8ff,0.30);fill.position.set(200,250,-200);scene.add(fill);
+      // Lights — balanced for clean map-model print preview
+      // Bright ambient base so all faces are readable; soft warm key light for gentle terrain shading
+      scene.add(new THREE.AmbientLight(0xffffff,0.78));
+      const sun=new THREE.DirectionalLight(0xfffaf4,0.95);sun.position.set(-250,700,200);scene.add(sun);
+      const fill=new THREE.DirectionalLight(0xddeeff,0.40);fill.position.set(200,250,-200);scene.add(fill);
       const tg=new THREE.Group();scene.add(tg);App.tg=tg;
       window.addEventListener('resize',()=>{
         const W2=vp.clientWidth,H2=vp.clientHeight;if(!W2||!H2)return;
@@ -1616,7 +1616,7 @@ function buildTerrain(st){
   geo.computeVertexNormals();
   // Single flat terrain color — OSM features provide all color variation on top
   const terrMat=new THREE.MeshStandardMaterial({
-    color:new THREE.Color(st.cBase),roughness:.88,metalness:0,
+    color:new THREE.Color(st.cBase),roughness:.92,metalness:0,
     polygonOffset:true,polygonOffsetFactor:12,polygonOffsetUnits:12
   });
   const mesh=new THREE.Mesh(geo,terrMat);
@@ -2046,25 +2046,25 @@ function buildOSM(st){
   function addLayer(geos,col,name){
     const mg=mergeGeos(geos);if(!mg)return;
     const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
-      color:new THREE.Color(col),roughness:.92,metalness:0,flatShading:false,
-      side:THREE.DoubleSide, // solid faces visible from all angles
+      color:new THREE.Color(col),roughness:.96,metalness:0,flatShading:false,
+      side:THREE.DoubleSide,
       polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4
     }));
     m.name=name;App.tg.add(m);
   }
   if(st.waterOn) addLayer(wGs,    st.waterCol, 'WATER');
-  if(st.grassOn) addLayer(grassGs, st.grassCol,'GRASS');   // light green (from settings)
-  if(st.grassOn) addLayer(forestGs,'#1f5c1f',  'FOREST');  // dark green
-  addLayer(rockGs,  '#9a9a9a','ROCK');
-  addLayer(snowGs,  '#f8f8f8','SNOW');
+  if(st.grassOn) addLayer(grassGs, st.grassCol,'GRASS');
+  if(st.grassOn) addLayer(forestGs,'#2a6e1e',  'FOREST');  // deep green, clearly darker than parks
+  addLayer(rockGs,  '#a0a0a0','ROCK');
+  addLayer(snowGs,  '#f6f6f6','SNOW');
   if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
   if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
-  // Urban landuse layers — sit below roads and buildings
-  addLayer(resGs, '#d0bca8', 'RESIDENTIAL'); // warm pale rose-gray
-  addLayer(comGs, '#c8985c', 'COMMERCIAL');  // warm amber/ochre
-  addLayer(indGs, '#7890a8', 'INDUSTRIAL');  // steel blue-gray
-  // Pedestrian areas — light warm cream, distinct from buildings
-  addLayer(pedGs, '#d4b48c', 'PED_AREA'); // warm sandy tan — clearly distinct from terrain beige and building gray
+  // Urban landuse — subtle tints so OSM zones read but don't overwhelm
+  addLayer(resGs, '#d4cabb', 'RESIDENTIAL'); // light warm stone
+  addLayer(comGs, '#c89a60', 'COMMERCIAL');  // warm amber
+  addLayer(indGs, '#8098b0', 'INDUSTRIAL');  // slate blue-gray
+  // Pedestrian areas — neutral paving tone
+  addLayer(pedGs, '#cec4b2', 'PED_AREA');
   if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
   if(st.buildOn) addLayer(bGs,    st.buildCol, 'BUILDINGS');
 }
