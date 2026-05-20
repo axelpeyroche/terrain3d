@@ -1523,15 +1523,20 @@ function buildTerrain(st){
     cols.push(c.r,c.g,c.b);
   }
 
-  // ─── KEY FIX: remove triangles with any outside vertex for non-rectangular zones ───
-  // This gives the terrain exactly the shape of the zone (circle/hex/poly) when seen from above
+  // Snap outside vertices onto zone boundary → smooth contour, no triangle removal
   const s=App.zoneType;
-  if((s==='circ'||s==='hex'||s==='poly')&&geo.index){
-    const orig=geo.index.array;
-    const kept=[];
+  if(s==='circ'){
+    const R=W/2;
+    for(let i=0;i<pos.count;i++) if(!isIn[i]){
+      const x=pos.getX(i),z=pos.getZ(i),r=Math.sqrt(x*x+z*z)||0.001;
+      pos.setX(i,x/r*R); pos.setZ(i,z/r*R);
+    }
+  } else if((s==='hex'||s==='poly')&&geo.index){
+    // Keep triangles where at least one vertex is inside (wider boundary → no jagged holes)
+    const orig=geo.index.array,kept=[];
     for(let i=0;i<orig.length;i+=3){
       const a=orig[i],b=orig[i+1],c=orig[i+2];
-      if(isIn[a]&&isIn[b]&&isIn[c]) kept.push(a,b,c);
+      if(isIn[a]||isIn[b]||isIn[c]) kept.push(a,b,c);
     }
     geo.setIndex(kept);
   }
@@ -1549,53 +1554,45 @@ function buildTerrain(st){
   return geo;
 }
 
-/* SIDE WALLS — builds walls from terrain boundary edges down to y=0
-   Uses edge-detection on the actual terrain mesh index (works for any shape: rect, circ, hex, poly)
-   Outward normals ensured by DoubleSide material */
+/* SIDE WALLS — smooth geometry matched exactly to zone shape */
 function buildSideWalls(st){
-  const terrMesh=App.tg.getObjectByName('TERRAIN');
-  if(!terrMesh||!terrMesh.geometry.index)return;
+  const W=App.wMm,D=App.dMm,BASE=Cache.BASE_H,s=App.zoneType;
+  const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55,side:THREE.DoubleSide});
 
-  const pos=terrMesh.geometry.attributes.position;
-  const idx=terrMesh.geometry.index.array;
-
-  // Find boundary edges: appear exactly once in the triangle list
-  const edgeCnt={};
-  for(let i=0;i<idx.length;i+=3){
-    const a=idx[i],b=idx[i+1],c=idx[i+2];
-    [[a,b],[b,c],[c,a]].forEach(([p,q])=>{
-      const k=p<q?`${p},${q}`:`${q},${p}`;
-      edgeCnt[k]=(edgeCnt[k]||0)+1;
-    });
+  function makeWalls(pts2d){
+    // pts2d: [{x,z}] closed loop; builds quads from BASE down to 0
+    const verts=[],idx=[];let vi=0;
+    const n=pts2d.length;
+    for(let i=0;i<n;i++){
+      const a=pts2d[i],b=pts2d[(i+1)%n];
+      const mx=(a.x+b.x)/2,mz=(a.z+b.z)/2;
+      const outward=mx*(b.z-a.z)-mz*(b.x-a.x);
+      const[p1,p2]=outward>=0?[a,b]:[b,a];
+      verts.push(p1.x,BASE,p1.z, p2.x,BASE,p2.z, p2.x,0,p2.z, p1.x,0,p1.z);
+      idx.push(vi,vi+1,vi+2, vi,vi+2,vi+3);vi+=4;
+    }
+    if(!verts.length)return;
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+    geo.setIndex(idx);geo.computeVertexNormals();
+    const m=new THREE.Mesh(geo,mat);m.name='WALLS';App.tg.add(m);
   }
 
-  const verts=[],wallIdx=[];let vi=0;
-  for(const [k,cnt] of Object.entries(edgeCnt)){
-    if(cnt!==1)continue; // skip interior (shared) edges
-    const [a,b]=k.split(',').map(Number);
-    const p1={x:pos.getX(a),y:pos.getY(a),z:pos.getZ(a)};
-    const p2={x:pos.getX(b),y:pos.getY(b),z:pos.getZ(b)};
-    // Determine winding so normal faces OUTWARD from zone center
-    const mx=(p1.x+p2.x)/2,mz=(p1.z+p2.z)/2;
-    // Edge tangent × (0,1,0) gives horizontal normal candidate
-    const tx=p2.x-p1.x,tz=p2.z-p1.z;
-    // Normal should point away from center (mx,mz direction)
-    const outward=mx*tz - mz*tx; // if positive, p1→p2 winding gives outward normal; reverse if negative
-    let [pa,pb]=outward>=0?[p1,p2]:[p2,p1];
-    // Wall quad: top-left→top-right→bottom-right→bottom-left (CCW from outside)
-    verts.push(pa.x,pa.y,pa.z, pb.x,pb.y,pb.z, pb.x,0,pb.z, pa.x,0,pa.z);
-    wallIdx.push(vi,vi+1,vi+2, vi,vi+2,vi+3);vi+=4;
+  if(s==='circ'){
+    const N=256,R=W/2;
+    makeWalls(Array.from({length:N},(_,i)=>({x:R*Math.cos(i/N*Math.PI*2),z:R*Math.sin(i/N*Math.PI*2)})));
+  } else if(s==='hex'){
+    const R=W/2;
+    makeWalls(Array.from({length:6},(_,i)=>({x:R*Math.cos(i/6*Math.PI*2-Math.PI/6),z:R*Math.sin(i/6*Math.PI*2-Math.PI/6)})));
+  } else if(App.zonePts&&App.zonePts.length>=3&&Cache.bounds){
+    const{bounds}=Cache;
+    const cLat=(bounds.minLat+bounds.maxLat)/2,cLon=(bounds.minLon+bounds.maxLon)/2;
+    const la2mm=App.dMm/(bounds.maxLat-bounds.minLat),lo2mm=App.wMm/(bounds.maxLon-bounds.minLon);
+    makeWalls(App.zonePts.map(p=>{
+      const lat=Array.isArray(p)?p[0]:p.lat,lon=Array.isArray(p)?p[1]:(p.lng||p.lon);
+      return{x:(lon-cLon)*lo2mm,z:-(lat-cLat)*la2mm};
+    }));
   }
-
-  if(!verts.length)return;
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
-  geo.setIndex(wallIdx);geo.computeVertexNormals();
-  const mat=new THREE.MeshStandardMaterial({
-    color:new THREE.Color(st.cBase),roughness:.6,
-    side:THREE.DoubleSide // visible from both sides regardless of winding
-  });
-  const m=new THREE.Mesh(geo,mat);m.name='WALLS';App.tg.add(m);
 }
 
 /* OSM ELEMENTS */
@@ -1690,18 +1687,18 @@ function buildOSM(st){
     // Each feature type has a fixed z-offset above terrain.
     // This stacks layers correctly (water→grass→sand→roads→buildings) with no overlap or white patches.
     const LAYER_Z = {
-      water:    0.02,  // water sits just above terrain (lowest)
-      wetland:  0.03,
-      sand:     0.04,
-      grass:    0.06,  // grass above water
-      forest:   0.08,  // forest slightly above grass
-      rock:     0.07,
-      snow:     0.09,
-      ped:      0.10,  // pedestrian areas above sand/grass
-      pier:     0.12,
-      road:     0.15,  // roads clearly above ground features
-      bridge:   0.25,  // bridges above roads
-      building: 0.18   // buildings start above road surface
+      water:    0.08,  // water sits just above terrain (lowest)
+      wetland:  0.10,
+      sand:     0.10,
+      grass:    0.14,  // grass above water
+      forest:   0.18,  // forest slightly above grass
+      rock:     0.14,
+      snow:     0.18,
+      ped:      0.20,  // pedestrian areas above sand/grass
+      pier:     0.24,
+      road:     0.28,  // roads clearly above ground features
+      bridge:   0.45,  // bridges above roads
+      building: 0.32   // buildings start above road surface
     };
     function extrudeOnLayer(bucket, h, layerZ){
       // Use MINIMUM Y of polygon to avoid floating features on slopes
@@ -1874,7 +1871,8 @@ function buildOSM(st){
   function addLayer(geos,col,name){
     const mg=mergeGeos(geos);if(!mg)return;
     const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
-      color:new THREE.Color(col),roughness:.92,metalness:0,flatShading:false
+      color:new THREE.Color(col),roughness:.92,metalness:0,flatShading:false,
+      polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2
     }));
     m.name=name;App.tg.add(m);
   }
@@ -1886,7 +1884,7 @@ function buildOSM(st){
   if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
   if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
   // Pedestrian areas — light warm cream, distinct from buildings
-  addLayer(pedGs, '#c4c0b8', 'PED_AREA'); // light gray — clearly lighter than buildings (#727272)
+  addLayer(pedGs, '#d4b48c', 'PED_AREA'); // warm sandy tan — clearly distinct from terrain beige and building gray
   if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
   if(st.buildOn) addLayer(bGs,    st.buildCol, 'BUILDINGS');
 }
