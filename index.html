@@ -1420,6 +1420,63 @@ function pointInPolyXZ(x,z,pts){
   return inside;
 }
 
+/* Clip a polyline (road, river, etc.) to the zone boundary.
+   Inserts the exact boundary intersection point when crossing in/out.
+   Returns flat array of {x,z,y,lat,lon} — compatible with mkRibbon / existing code. */
+function clipLineToZone(pts){
+  if(!pts||pts.length<2)return(pts||[]).filter(p=>inZone(p.x,p.z));
+  const W=App.wMm/2,D=App.dMm/2;
+  function boundaryPt(a,b){
+    if(App.zoneType==='circ'||App.zoneType==='hex')return intersectEllipse(a,b,W,D);
+    const dx=b.x-a.x,dz=b.z-a.z,ts=[];
+    if(Math.abs(dx)>1e-10)for(const v of[-W,W]){
+      const t=(v-a.x)/dx;
+      if(t>1e-7&&t<1-1e-7){const zi=a.z+t*dz;if(zi>=-D-1e-6&&zi<=D+1e-6)ts.push(t);}
+    }
+    if(Math.abs(dz)>1e-10)for(const v of[-D,D]){
+      const t=(v-a.z)/dz;
+      if(t>1e-7&&t<1-1e-7){const xi=a.x+t*dx;if(xi>=-W-1e-6&&xi<=W+1e-6)ts.push(t);}
+    }
+    return interpPt(a,b,ts.length?ts.sort((x,y)=>x-y)[0]:0.5);
+  }
+  const out=[];
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i],inside=inZone(p.x,p.z);
+    if(i===0){if(inside)out.push(p);continue;}
+    const prev=pts[i-1],prevIn=inZone(prev.x,prev.z);
+    if(prevIn&&inside)out.push(p);
+    else if(prevIn&&!inside)out.push(boundaryPt(prev,p));
+    else if(!prevIn&&inside){out.push(boundaryPt(prev,p));out.push(p);}
+    // both outside: skip
+  }
+  return out;
+}
+
+/* Stitch ordered/unordered way segments into a single closed polygon ring.
+   segs: array of {pts:[{lat,lon}...]}  — each segment is a partial way.
+   Reverses segments as needed to connect end-to-end.
+   Returns flat array of {lat,lon}. */
+function stitchWaySegments(segs){
+  if(!segs.length)return[];
+  if(segs.length===1)return segs[0].pts.slice();
+  const EPS=1e-6;
+  const eq=(a,b)=>Math.abs(a.lat-b.lat)<EPS&&Math.abs(a.lon-b.lon)<EPS;
+  const used=new Array(segs.length).fill(false);
+  let ring=segs[0].pts.slice(); used[0]=true;
+  for(let iter=0;iter<segs.length*2;iter++){
+    const tail=ring[ring.length-1];
+    let found=false;
+    for(let j=0;j<segs.length;j++){
+      if(used[j])continue;
+      const pts=segs[j].pts;
+      if(eq(tail,pts[0])){ring.push(...pts.slice(1));used[j]=true;found=true;break;}
+      else if(eq(tail,pts[pts.length-1])){ring.push(...pts.slice(0,-1).reverse());used[j]=true;found=true;break;}
+    }
+    if(!found)break;
+  }
+  return ring;
+}
+
 function getZoneBoundary(refY){
   const W=App.wMm/2,D=App.dMm/2;
   const y=refY||(Cache.BASE_H+MIN_SURF);
@@ -1621,6 +1678,7 @@ function buildOSM(st){
   if(!Cache.osm?.elements)return;
   const{BASE_H,mmPerMeter,toLocal,terrYAt}=Cache;
   const rGs=[],wGs=[],grassGs=[],forestGs=[],rockGs=[],snowGs=[],bGs=[],sGs=[],pGs=[],pedGs=[];
+  const resGs=[],comGs=[],indGs=[]; // urban landuse layers
   // Restrict fallback to water only (prevents white zones from large land polygons)
   const _origClipFn=clipPolyToZone;
   function clipPolyWaterSafe(pts,isWater){
@@ -1669,7 +1727,7 @@ function buildOSM(st){
       const pts0=isClosedByCoords?lps.slice(0,-1):lps.slice();
       clipped=clipPolyToZone(pts0);
     } else {
-      clipped=lps.filter(p=>inZone(p.x,p.z));
+      clipped=clipLineToZone(lps);
     }
     if(clipped.length<2)return;
     if(treatAsPolygon&&clipped.length<3)return;
@@ -1720,9 +1778,12 @@ function buildOSM(st){
       snow:     0.01,
       ped:      0.01,
       pier:     0.0,
-      road:     0.01,   // slightly above grass so roads win overlap in preview
-      bridge:   0.40,   // bridges genuinely elevated above road level
-      building: 0.01
+      road:         0.01,   // slightly above grass so roads win overlap in preview
+      bridge:       0.40,   // bridges genuinely elevated above road level
+      building:     0.01,
+      residential:  0.0,
+      commercial:   0.0,
+      industrial:   0.0
     };
     function extrudeOnLayer(bucket, h, layerZ){
       // Terrain-following extrusion: each polygon vertex sits at its sampled terrain height.
@@ -1823,6 +1884,17 @@ function buildOSM(st){
     if(tags.natural&&['scree','bare_rock','rock'].includes(tags.natural)) extrudeOnLayer(rockGs,0.4,LAYER_Z.rock);
     // SNOW / GLACIERS — white, raised slightly
     if(tags.natural&&['glacier','snowfield'].includes(tags.natural)) extrudeOnLayer(snowGs,0.5,LAYER_Z.snow);
+    // URBAN LANDUSE — rendered BEFORE buildings so building footprints sit on top
+    // Only applies when the way is a polygon (landuse is always a polygon by OSM convention)
+    if(treatAsPolygon){
+      const lu3=tags.landuse||'';
+      if(lu3==='residential'||lu3==='housing'||lu3==='garages')
+        extrudeOnLayer(resGs,0.3,LAYER_Z.residential);
+      else if(lu3==='commercial'||lu3==='retail'||lu3==='shops'||lu3==='office')
+        extrudeOnLayer(comGs,0.35,LAYER_Z.commercial);
+      else if(lu3==='industrial'||lu3==='railway'||lu3==='quarry'||lu3==='port'||lu3==='depot')
+        extrudeOnLayer(indGs,0.3,LAYER_Z.industrial);
+    }
     // BUILDINGS & BUILDING:PARTS — proper min_height support for landmarks (Tour Eiffel etc.)
     const isBuilding=tags.building&&tags.building!=='no';
     const isBuildPart=tags['building:part']&&tags['building:part']!=='no';
@@ -1928,6 +2000,10 @@ function buildOSM(st){
   addLayer(snowGs,  '#f8f8f8','SNOW');
   if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
   if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
+  // Urban landuse layers — sit below roads and buildings
+  addLayer(resGs, '#d0bca8', 'RESIDENTIAL'); // warm pale rose-gray
+  addLayer(comGs, '#c8985c', 'COMMERCIAL');  // warm amber/ochre
+  addLayer(indGs, '#7890a8', 'INDUSTRIAL');  // steel blue-gray
   // Pedestrian areas — light warm cream, distinct from buildings
   addLayer(pedGs, '#d4b48c', 'PED_AREA'); // warm sandy tan — clearly distinct from terrain beige and building gray
   if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
@@ -2170,6 +2246,9 @@ $('btn-gen').addEventListener('click',async()=>{
       `way["natural"~"^(wood|grassland|beach|sand|wetland|scree|bare_rock|rock|glacier|snowfield)$"](${bbox});`+
       `way["landuse"~"^(grass|meadow|forest|wood|village_green|recreation_ground|farmland|cemetery|allotments)$"](${bbox});`+
       `way["leisure"~"^(park|garden|pitch|golf_course|playground|sports_centre|stadium|nature_reserve)$"](${bbox});`+
+      // Urban landuse (residential / commercial / industrial zones)
+      `way["landuse"~"^(residential|housing|garages|commercial|retail|shops|office|industrial|railway|quarry|port|depot)$"](${bbox});`+
+      `relation["landuse"~"^(residential|commercial|retail|industrial)$"](${bbox});`+
       // Vegetation RELATIONS
       `relation["landuse"~"^(forest|wood|farmland)$"](${bbox});`+
       `relation["leisure"~"^(park|garden|nature_reserve)$"](${bbox});`+
@@ -2189,17 +2268,23 @@ $('btn-gen').addEventListener('click',async()=>{
       if(elem.type==='way'&&elem.geometry){
         expanded.push(elem);
       } else if(elem.type==='relation'&&Array.isArray(elem.members)&&elem.tags){
-        // Stitch all outer member geometries into one closed polygon ring
-        const outerGeom=[];
+        // Collect outer-role way segments, then stitch them end-to-end in the correct order.
+        // This fixes multipolygons where OSM stores member ways in arbitrary order
+        // (e.g. the Seine river in Paris — each segment is a short open arc).
+        const outerSegs=[];
         elem.members.forEach(m=>{
           if(m.type==='way'&&Array.isArray(m.geometry)&&m.geometry.length>=2&&m.role==='outer'){
-            // Skip the last point to avoid duplicates at junctions between segments
-            outerGeom.push(...m.geometry.slice(0,-1));
+            outerSegs.push({pts:m.geometry});
           }
         });
-        if(outerGeom.length>=3){
-          outerGeom.push({...outerGeom[0]}); // close the ring
-          expanded.push({type:'way',tags:{...elem.tags},geometry:outerGeom});
+        if(outerSegs.length>=1){
+          const ring=stitchWaySegments(outerSegs);
+          if(ring.length>=3){
+            // Close the ring if not already closed
+            const first=ring[0],last=ring[ring.length-1];
+            if(Math.abs(first.lat-last.lat)>1e-7||Math.abs(first.lon-last.lon)>1e-7)ring.push({...first});
+            expanded.push({type:'way',tags:{...elem.tags},geometry:ring});
+          }
         }
       }
     });
