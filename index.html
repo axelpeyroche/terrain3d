@@ -1,0 +1,2182 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Terrain3D Pro · GPX · 3MF</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='16,3 30,29 2,29' fill='%2322c55e'/%3E%3Cpolygon points='10,18 22,18 16,6' fill='white' opacity='.7'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07090f;--p1:#0c1422;--p2:#101b2d;--p3:#152035;
+  --b1:#1c3050;--b2:#254468;--b3:#2e5880;
+  --cyan:#00d8ff;--em:#10b981;--rose:#f43f5e;--amb:#f59e0b;--vi:#8b5cf6;
+  --txt:#c8daea;--dim:#4a6280;--mut:#1a2d44;
+  --mono:'DM Mono',monospace;--ui:'Inter',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100vh;width:100vw;overflow:hidden;font-family:var(--ui);background:var(--bg);color:var(--txt)}
+body{display:flex;flex-direction:column}
+
+/* ─ TOPBAR ─ */
+#tb{flex:0 0 auto;height:46px;background:var(--p1);border-bottom:1px solid var(--b1);
+  display:flex;align-items:center;padding:0 16px;gap:10px;z-index:3000;flex-shrink:0}
+.logo{font-family:var(--mono);font-size:13px;color:var(--cyan);letter-spacing:3px;
+  flex-shrink:0;border-right:1px solid var(--b1);padding-right:12px;user-select:none}
+.logo span{color:var(--rose)}
+.mleft{margin-left:auto}
+button{font-family:var(--ui);font-size:11px;font-weight:600;border:none;border-radius:5px;
+  padding:5px 13px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn-exp{background:var(--em);color:#000}.btn-exp:hover{background:#34d399;box-shadow:0 0 14px rgba(16,185,129,.4)}
+.btn-exp:disabled{opacity:.35;cursor:not-allowed}
+.btn-gen-f{background:var(--cyan);color:#000;padding:6px 20px;font-size:12px;font-weight:700;border-radius:20px}
+.btn-gen-f:hover{background:#33e5ff;box-shadow:0 0 16px rgba(0,216,255,.45)}
+.btn-gen-f:disabled{opacity:.35;cursor:not-allowed}
+input[type=file]{display:none}
+select,input[type=number],input[type=text],input[type=range]{background:var(--bg);border:1px solid var(--b1);
+  color:var(--txt);border-radius:4px;padding:3px 7px;font-family:var(--mono);font-size:10px;cursor:pointer;outline:none}
+select:focus,input:focus{border-color:var(--cyan)}
+input[type=number]{width:52px;text-align:center}
+input[type=checkbox]{accent-color:var(--cyan);cursor:pointer}
+input[type=range]{padding:2px 5px;width:80px}
+
+/* ─ WORKSPACE ─ */
+#ws{flex:1;display:flex;min-height:0}
+
+/* ─ MAP ─ */
+#mp{flex:1 1 0;position:relative;border-right:1px solid var(--b1);min-width:0}
+#map{position:absolute;inset:0}
+#map.dm,#map.dm .leaflet-interactive{cursor:crosshair!important}
+
+/* SEARCH BOX */
+#srch-wrap{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:900;width:260px}
+#srch-input{width:100%;background:rgba(12,20,34,.97);border:1px solid var(--b2);
+  border-radius:20px;padding:6px 16px;color:var(--txt);font-size:11px;outline:none;
+  text-align:center;letter-spacing:.2px}
+#srch-input:focus{border-color:var(--cyan);text-align:left}
+#srch-drop{display:none;position:absolute;top:34px;left:0;right:0;
+  background:rgba(12,20,34,.99);border:1px solid var(--b2);border-radius:8px;
+  overflow:hidden;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.srch-item{padding:7px 12px;font-size:10px;cursor:pointer;border-bottom:1px solid var(--b1);
+  color:var(--txt);line-height:1.4}
+.srch-item:hover{background:var(--p3)}
+.srch-item:last-child{border-bottom:none}
+.srch-name{font-weight:500}
+.srch-addr{color:var(--dim);font-size:9px}
+
+/* DRAW PANEL */
+#dt{position:absolute;top:10px;left:10px;z-index:800;
+  background:rgba(12,20,34,.97);border:1px solid var(--b2);border-radius:8px;
+  padding:10px;width:152px;backdrop-filter:blur(10px)}
+#dt h4{font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--cyan);
+  text-transform:uppercase;padding-bottom:5px;border-bottom:1px solid var(--b1);margin-bottom:6px}
+.dg{font-family:var(--mono);font-size:7px;letter-spacing:1px;color:var(--dim);
+  margin:5px 0 3px;padding-left:2px;text-transform:uppercase}
+.dbtn{width:100%;font-size:10px;font-weight:500;color:var(--dim);background:transparent;
+  border:1px solid var(--b1);border-radius:4px;padding:5px 8px;cursor:pointer;
+  text-align:left;transition:all .12s;display:flex;align-items:center;gap:7px;margin-bottom:2px}
+.dbtn:hover,.dbtn.act{background:rgba(0,216,255,.07);border-color:var(--cyan);color:var(--txt)}
+.dbtn .ico{font-size:11px;width:14px;text-align:center;flex-shrink:0}
+.dbtn.red{color:#f87171;border-color:rgba(248,113,113,.2)}
+.dbtn.red:hover{background:rgba(248,113,113,.1);border-color:#f87171}
+hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
+.filebtn{width:100%;display:block;text-align:center;font-size:10px;font-weight:500;
+  color:var(--dim);background:var(--bg);border:1px solid var(--b1);border-radius:4px;
+  padding:5px 8px;cursor:pointer;transition:all .12s;margin-bottom:2px}
+.filebtn:hover,.filebtn.on{border-color:var(--rose);color:var(--rose)}
+
+/* GPS counter */
+#gpx-ctr{display:none;font-family:var(--mono);font-size:9px;color:var(--amb);
+  text-align:center;padding:3px;border:1px solid rgba(245,158,11,.2);border-radius:3px;margin-bottom:2px}
+
+/* Draw cursor hint */
+#dch{position:absolute;bottom:52px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.88);color:#fff;font-family:var(--mono);font-size:9px;
+  padding:4px 12px;border-radius:20px;pointer-events:none;z-index:900;
+  white-space:nowrap;display:none;border:1px solid var(--b2)}
+
+/* Snap dot */
+#snap{position:absolute;width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--cyan);background:rgba(0,216,255,.3);
+  display:none;pointer-events:none;z-index:1200;transform:translate(-50%,-50%)}
+
+/* Bottom buttons */
+#bot-wrap{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  z-index:700;display:none;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center}
+.bbtn{border-radius:20px;padding:6px 16px;font-size:11px;font-weight:700}
+.bbtn-vi{background:var(--vi);color:#fff}.bbtn-vi:hover{background:#a78bfa;box-shadow:0 0 14px rgba(139,92,246,.4)}
+.bbtn-vi:disabled{opacity:.4;cursor:not-allowed}
+.bbtn-dim{background:transparent;color:var(--dim);border:1px solid var(--b2)}
+.bbtn-dim:hover{color:var(--txt);border-color:var(--txt)}
+.bbtn-cyan{background:var(--cyan);color:#000}.bbtn-cyan:hover{background:#33e5ff}
+
+/* GPX badge */
+#gpx-badge{display:none;position:absolute;bottom:52px;right:12px;z-index:700;
+  background:rgba(12,20,34,.93);border:1px solid rgba(244,63,94,.3);border-radius:6px;
+  padding:6px 10px;font-family:var(--mono);font-size:9px;color:var(--rose);pointer-events:none}
+
+/* Preview legend */
+#prev-leg{position:absolute;bottom:52px;right:12px;z-index:700;
+  background:rgba(12,20,34,.95);border:1px solid var(--b2);border-radius:8px;
+  padding:10px 12px;display:none}
+#prev-leg h5{font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--vi);margin-bottom:8px}
+.pl{display:flex;align-items:center;gap:7px;margin-bottom:3px;font-size:10px}
+.pld{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+
+/* ─ 3D VIEWER ─ */
+#vp{flex:1 1 0;position:relative;background:#b8cdd8;overflow:hidden;min-width:0}
+#c3d{position:absolute;top:0;left:0;width:100%!important;height:100%!important;display:block}
+#gen-wrap{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:100}
+#empty3d{position:absolute;inset:0;z-index:5;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;transition:opacity .3s;color:#456}
+#empty3d.h{opacity:0}
+#empty3d svg{opacity:.2;width:50px;height:50px}
+#empty3d p{font-family:var(--mono);font-size:9px;letter-spacing:1px;text-align:center;line-height:2.2}
+#prog{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+  background:rgba(184,205,216,.75);backdrop-filter:blur(4px)}
+#pc{background:var(--p1);border:1px solid var(--b2);border-radius:10px;padding:24px 32px;
+  min-width:280px;display:flex;flex-direction:column;gap:12px}
+#ps{font-family:var(--mono);font-size:9px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
+#pl{font-size:13px;font-weight:500;color:var(--txt)}
+#pt{height:3px;background:var(--b1);border-radius:2px;overflow:hidden}
+#pb{height:100%;background:linear-gradient(90deg,var(--cyan),#0066ff);width:0;transition:width .3s}
+#pp{font-family:var(--mono);font-size:20px;font-weight:500;color:var(--cyan);text-align:right}
+#elev{display:none;position:absolute;top:52px;right:12px;z-index:15;
+  background:rgba(7,9,15,.88);border:1px solid var(--b2);border-radius:6px;
+  padding:8px 12px;font-family:var(--mono);font-size:10px;line-height:1.9}
+.ev{color:var(--cyan);font-weight:700}
+#hint3d{display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:15;
+  background:rgba(0,0,0,.6);border-radius:20px;padding:4px 12px;
+  font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.6);pointer-events:none;white-space:nowrap}
+
+/* ─ SETTINGS PANEL ─ */
+#sp{flex:0 0 230px;background:var(--p1);border-left:1px solid var(--b1);display:flex;flex-direction:column;flex-shrink:0}
+#sp-hd{background:var(--p2);border-bottom:1px solid var(--b1);padding:8px 12px;flex-shrink:0;
+  font-family:var(--mono);font-size:8px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
+#sp-bd{flex:1;overflow-y:auto}
+#sp-bd::-webkit-scrollbar{width:3px}
+#sp-bd::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+.sec{border-bottom:1px solid var(--b1)}
+.sh{display:flex;align-items:center;gap:7px;padding:7px 10px;cursor:pointer;background:var(--p2);user-select:none;transition:background .12s}
+.sh:hover{background:var(--p3)}
+.si{font-size:11px;flex-shrink:0}.sn{font-size:10px;font-weight:600;color:var(--txt);flex:1}
+.sc{font-size:9px;color:var(--dim);transition:transform .18s}.sc.o{transform:rotate(180deg)}
+.sb{padding:7px 10px;display:flex;flex-direction:column;gap:4px}
+.sb.h{display:none}
+.r{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.r>label:first-child{font-size:9px;color:var(--dim);white-space:nowrap;min-width:88px;flex-shrink:0}
+.r input[type=color]{width:22px;height:18px;border:1px solid var(--b2);border-radius:3px;cursor:pointer;padding:0;background:none;flex-shrink:0}
+.r input[type=number]{flex:1;min-width:0}
+.r input[type=range]{flex:1;min-width:0}
+.r input[type=text]{flex:1;min-width:0}
+.r select{flex:1;min-width:0}
+.r span{font-size:9px;color:var(--dim);flex-shrink:0}
+.r .rv{font-family:var(--mono);font-size:9px;color:var(--cyan);width:26px;text-align:right;flex-shrink:0}
+.chk{display:flex;align-items:center;gap:6px;padding:1px 0}
+.chk label{font-size:9px;color:var(--dim)}
+.sub{padding-left:10px;border-left:2px solid var(--b1);margin-left:4px;display:flex;flex-direction:column;gap:4px}
+.sub.h{display:none}
+hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
+
+/* ─ MODAL ─ */
+#modal{display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(3px)}
+#mbox{background:var(--p1);border:1px solid var(--b2);border-radius:10px;padding:24px;max-width:380px;text-align:center}
+#mtit{font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--rose);margin-bottom:10px}
+#mmsg{font-size:12px;color:var(--txt);line-height:1.7;margin-bottom:18px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+
+<!-- TOPBAR -->
+<div id="tb">
+  <div class="logo">TERRAIN<span>3D</span></div>
+  <div class="mleft">
+    <button class="btn-exp" id="btn-export">💾 Exporter .3MF (AMS)</button>
+  </div>
+</div>
+
+<!-- WORKSPACE -->
+<div id="ws">
+
+<!-- MAP -->
+<div id="mp">
+  <div id="map"></div>
+  <div id="snap"></div>
+  <div id="dch"></div>
+  <div id="gpx-badge"></div>
+
+  <!-- Custom search -->
+  <div id="srch-wrap">
+    <input type="text" id="srch-input" placeholder="🔍 Rechercher un lieu...">
+    <div id="srch-drop"></div>
+  </div>
+
+  <!-- Drawing panel -->
+  <div id="dt">
+    <h4>🗺 Zone & Tracé</h4>
+    <div class="dg">Zone d'impression</div>
+    <button class="dbtn" id="db-rect"><span class="ico">▭</span>Rectangle</button>
+    <button class="dbtn" id="db-sq"><span class="ico">■</span>Carré</button>
+    <button class="dbtn" id="db-circ"><span class="ico">◯</span>Rond</button>
+    <button class="dbtn" id="db-hex"><span class="ico">⬡</span>Hexagone</button>
+    <button class="dbtn" id="db-poly"><span class="ico">⬟</span>Polygone</button>
+    <hr class="ds">
+    <div class="dg">Trace GPX</div>
+    <label class="filebtn on" id="gpx-lbl" for="gpx-file">📂 Importer .gpx</label>
+    <input type="file" id="gpx-file" accept=".gpx">
+    <button class="dbtn" id="db-trace"><span class="ico">✏️</span>Tracer GPX</button>
+    <div id="gpx-ctr">0 points tracés</div>
+    <button class="dbtn" id="db-cgpx" style="display:none"><span class="ico">⊕</span>Centrer GPX</button>
+    <hr class="ds">
+    <button class="dbtn red" id="db-clear"><span class="ico">🗑</span>Tout effacer</button>
+  </div>
+
+  <!-- Bottom action buttons -->
+  <div id="bot-wrap">
+    <button class="bbtn bbtn-vi" id="btn-prev">🔍 Analyser la zone</button>
+    <button class="bbtn bbtn-cyan" id="btn-czone" style="display:none">📍 Centrer zone</button>
+    <button class="bbtn bbtn-dim" id="btn-pclr" style="display:none">✕ Effacer analyse</button>
+  </div>
+
+  <!-- Preview legend -->
+  <div id="prev-leg">
+    <h5>Analyse du terrain</h5>
+    <div class="pl"><div class="pld" style="background:#ffe0a0"></div>Terrain</div>
+    <div class="pl"><div class="pld" style="background:#228b22"></div>Forêt / Bois</div>
+    <div class="pl"><div class="pld" style="background:#90cc40"></div>Herbe / Parcs</div>
+    <div class="pl"><div class="pld" style="background:#c8a84b"></div>Terres agricoles</div>
+    <div class="pl"><div class="pld" style="background:#2b88d8"></div>Eau (fleuve / lac)</div>
+    <div class="pl"><div class="pld" style="background:#7aafcc"></div>Zone humide</div>
+    <div class="pl"><div class="pld" style="background:#506080"></div>Quai / Berge / Digue</div>
+    <div class="pl"><div class="pld" style="background:#f4d47a"></div>Sable / Plage</div>
+    <div class="pl"><div class="pld" style="background:#a0a0a0"></div>Bâtiments</div>
+    <div class="pl"><div class="pld" style="background:#d8d0c0"></div>Zone piétonne</div>
+    <div class="pl"><div class="pld" style="background:#e07800"></div>Sentiers pédestres</div>
+    <div class="pl"><div class="pld" style="background:#0088dd"></div>Pistes cyclables</div>
+    <div class="pl"><div class="pld" style="background:#e8503a"></div>Routes principales</div>
+    <div class="pl"><div class="pld" style="background:#aaaaaa"></div>Rues / Voiries</div>
+    <div class="pl"><div class="pld" style="background:#886644"></div>Ponts</div>
+    <div class="pl"><div class="pld" style="background:#ff3355"></div>Trace GPX</div>
+  </div>
+</div>
+
+<!-- 3D VIEWER -->
+<div id="vp">
+  <canvas id="c3d"></canvas>
+  <div id="gen-wrap">
+    <button class="btn-gen-f" id="btn-gen">▶ Générer le Terrain 3D</button>
+  </div>
+  <div id="empty3d">
+    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.3">
+      <polygon points="32,5 58,52 6,52"/><polygon points="32,5 44,30 20,30" fill="currentColor" opacity=".15"/>
+    </svg>
+    <p>APERÇU 3D<br>Dessinez une zone sur la carte<br>puis cliquez sur Générer</p>
+  </div>
+  <div id="prog"><div id="pc">
+    <div id="ps">INIT</div><div id="pl">Préparation...</div>
+    <div id="pt"><div id="pb"></div></div><div id="pp">0%</div>
+  </div></div>
+  <div id="hint3d">🖱 Gauche=Rotation · Molette=Zoom · Droite=Déplacer</div>
+  <div id="elev"></div>
+</div>
+
+<!-- SETTINGS RIGHT -->
+<div id="sp">
+<div id="sp-hd">⚙ Paramètres 3D</div>
+<div id="sp-bd">
+
+<div class="sec">
+  <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Topographie</span><span class="sc o" id="ca-topo">▼</span></div>
+  <div class="sb" id="sb-topo">
+    <!-- Hidden color inputs — values fixed internally, not shown to user -->
+    <input type="hidden" id="c-low" value="#d4cec6">
+    <input type="hidden" id="c-mid" value="#d8d4cc">
+    <input type="hidden" id="c-high" value="#e8e4e0">
+    <input type="hidden" id="c-base" value="#e4dfd8">
+    <div class="r"><label>Résolution</label>
+      <select id="t-res"><option value="28">Basse (28²)</option><option value="56">Moy. (56²)</option><option value="96">Haute (96²)</option><option value="128" selected>Ultra (128²)</option><option value="256">Max (256²)</option></select></div>
+    <div class="r"><label>Éch. altitude</label><input type="number" id="t-exag" value="1" step="0.5" min="0.5" max="10"><span>×</span></div>
+    <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="10"><span class="rv" id="t-smooth-v">10px</span></div>
+    <div class="r"><label>Qualité zoom</label><input type="number" id="t-zoom" value="15" step="1" min="1" max="18"><span>z</span></div>
+    <div class="r"><label>Source</label>
+      <select id="t-src"><option value="terrarium">AWS Terrarium</option><option value="mapthorn">Mapthorn</option></select></div>
+    <div class="r"><label>Épaisseur socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
+    <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('road')"><span class="si">🛣️</span><span class="sn">Routes</span>
+    <input type="checkbox" id="road-on" checked onclick="ev(event)"><span class="sc o" id="ca-road">▼</span></div>
+  <div class="sb" id="sb-road">
+    <div class="r"><label>Couleur</label><input type="color" id="road-col" value="#1a1a1a"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="road-h" value="0.8" step="0.1" min="0"><span>mm</span></div>
+    <div class="r"><label>Prof. gravure</label><input type="number" id="road-depth" value="0" step="0.1" min="0"><span>mm</span></div>
+    <div class="r"><label>Largeur min</label><input type="number" id="road-mw" value="0.4" step="0.1" min="0.1"><span>mm</span></div>
+    <div class="r"><label>Mult. largeur</label><input type="number" id="road-wm" value="1" step="0.1" min="0.2" max="5"><span>×</span></div>
+    <div class="chk"><input type="checkbox" id="road-paths" checked><label>Sentiers pédestres</label></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('water')"><span class="si">💧</span><span class="sn">Eau</span>
+    <input type="checkbox" id="water-on" checked onclick="ev(event)"><span class="sc o" id="ca-water">▼</span></div>
+  <div class="sb h" id="sb-water">
+    <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#2e8fd1"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="water-h" value="0.6" step="0.1" min="0"><span>mm</span></div>
+    <div class="r"><label>Prof. gravure</label><input type="number" id="water-depth" value="0" step="0.1" min="0"><span>mm</span></div>
+    <div class="r"><label>Largeur min</label><input type="number" id="water-mw" value="0.4" step="0.1" min="0"><span>mm</span></div>
+    <div class="r"><label>Ignorer &lt;</label><input type="number" id="water-ma" value="10" step="5" min="0"><span>m²</span></div>
+    <div class="chk"><input type="checkbox" id="water-sea" checked><label>Mers / Océans</label></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('grass')"><span class="si">🌿</span><span class="sn">Herbe / Parcs</span>
+    <input type="checkbox" id="grass-on" checked onclick="ev(event)"><span class="sc o" id="ca-grass">▼</span></div>
+  <div class="sb h" id="sb-grass">
+    <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#5cb02c"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="grass-h" value="0.4" step="0.05" min="0"><span>mm</span></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('build')"><span class="si">🏛️</span><span class="sn">Bâtiments</span>
+    <input type="checkbox" id="build-on" checked onclick="ev(event)"><span class="sc o" id="ca-build">▼</span></div>
+  <div class="sb h" id="sb-build">
+    <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#727272"></div>
+    <div class="r"><label>Éch. hauteur</label><input type="number" id="build-hs" value="1" step="0.1" min="0.1"><span>×</span></div>
+    <div class="r"><label>Éch. taille</label><input type="number" id="build-ss" value="1" step="0.1" min="0.1"><span>×</span></div>
+    <div class="r"><label>Haut. min</label><input type="number" id="build-mh" value="0.6" step="0.1" min="0"><span>mm</span></div>
+    <div class="r"><label>Ignorer &lt;</label><input type="number" id="build-ma" value="1" step="0.5" min="0"><span>m²</span></div>
+    <div class="chk"><input type="checkbox" id="build-roofs" checked><label>Toits</label></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('sand')"><span class="si">🏖️</span><span class="sn">Sable / Plage</span>
+    <input type="checkbox" id="sand-on" checked onclick="ev(event)"><span class="sc o" id="ca-sand">▼</span></div>
+  <div class="sb h" id="sb-sand">
+    <div class="r"><label>Couleur</label><input type="color" id="sand-col" value="#fac393"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="sand-h" value="0.2" step="0.1" min="0"><span>mm</span></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('pier')"><span class="si">⛵</span><span class="sn">Jetées / Quais</span>
+    <input type="checkbox" id="pier-on" onclick="ev(event)"><span class="sc o" id="ca-pier">▼</span></div>
+  <div class="sb h" id="sb-pier">
+    <div class="r"><label>Couleur</label><input type="color" id="pier-col" value="#262626"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="pier-h" value="0.8" step="0.5" min="0"><span>mm</span></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('gpx2')"><span class="si">🔴</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx2">▼</span></div>
+  <div class="sb" id="sb-gpx2">
+    <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff0000"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="gpx-h" value="1" step="0.5" min="0.1"><span>mm</span></div>
+    <div class="r"><label>Largeur min</label><input type="number" id="gpx-mw" value="0.4" step="0.1" min="0.1"><span>mm</span></div>
+    <div class="r"><label>Épaisseur (m)</label><input type="number" id="gpx-tw" value="10" step="1" min="1"><span>m</span></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('ct')"><span class="si">〰️</span><span class="sn">Courbes de niveau</span>
+    <input type="checkbox" id="ct-on" checked onclick="ev(event)"><span class="sc o" id="ca-ct">▼</span></div>
+  <div class="sb" id="sb-ct">
+    <div class="r"><label>Intervalle</label><input type="number" id="ct-int" value="50" step="10" min="5"><span>m</span></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="ct-h" value="0.3" step="0.05" min="0.05"><span>mm</span></div>
+    <div class="r"><label>Largeur</label><input type="number" id="ct-w" value="0.4" step="0.05" min="0.1"><span>mm</span></div>
+    <div class="r"><label>Couleur</label><input type="color" id="ct-col" value="#8b7355"></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('frame')"><span class="si">🖼️</span><span class="sn">Cadre</span>
+    <input type="checkbox" id="frame-on" onclick="ev(event)"><span class="sc o" id="ca-frame">▼</span></div>
+  <div class="sb h" id="sb-frame">
+    <div class="r"><label>Couleur</label><input type="color" id="frame-col" value="#cccccc"></div>
+    <div class="r"><label>Hauteur</label><input type="number" id="frame-hh" value="8" step="1" min="1"><span>mm</span></div>
+    <div class="r"><label>Épaisseur</label><input type="number" id="frame-th" value="5" step="1" min="1"><span>mm</span></div>
+    <div class="chk"><input type="checkbox" id="frame-rnd"><label>Coins arrondis</label></div>
+    <div class="chk"><input type="checkbox" id="frame-ton" id="frame-ton"><label>Ajouter du texte</label></div>
+    <div id="frame-ttxt" class="sub h">
+      <div class="r"><label>Position</label>
+        <select id="frame-tpos"><option value="bottom">En bas</option><option value="top">En haut</option></select></div>
+      <div class="r"><label>Texte</label><input type="text" id="frame-txt" placeholder="Nom du lieu..."></div>
+    </div>
+  </div>
+</div>
+
+</div></div><!-- end sp -->
+</div><!-- end ws -->
+
+<!-- Modal -->
+<div id="modal"><div id="mbox">
+  <div id="mtit">INFO</div><div id="mmsg"></div>
+  <button class="btn-gen-f" id="btn-mc" style="margin-top:6px">OK</button>
+</div></div>
+
+<!-- LIBRARIES -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<script>
+'use strict';
+
+/* ═══════════════════ STATE ═══════════════════ */
+const App = {
+  zoneType:null, zonePts:[], zoneLayer:null,
+  bounds:null, wMm:150, dMm:150,
+  gpxPoints:[], gpxLayer:null,
+  scene:null, camera:null, renderer:null, controls:null, tg:null,
+  threeReady:false, generated:false,
+  searchMarker:null
+};
+const Cache = {
+  ready:false, elevs:null, osm:null, GRID:56,
+  minE:0, maxE:0, elevRange:1, elevScaleMm:0, BASE_H:4,
+  mmPerMeter:1, toLocal:null, terrYAt:null,
+  bounds:null
+};
+let prevLayers=[], firstPolyMarker=null;
+
+/* ═══════════════════ HELPERS ═══════════════════ */
+const $=id=>document.getElementById(id);
+function ev(e){e.stopPropagation()}
+function ts(n){$('sb-'+n).classList.toggle('h');$('ca-'+n).classList.toggle('o')}
+function modal(t,m){$('mtit').textContent=t;$('mmsg').textContent=m;$('modal').style.display='flex'}
+$('btn-mc').onclick=()=>$('modal').style.display='none';
+function setP(p,s,l){
+  const w=$('prog');
+  if(p===null){w.style.display='none';return}
+  w.style.display='flex';
+  $('pb').style.width=p+'%';$('pp').textContent=Math.round(p)+'%';
+  if(s)$('ps').textContent=s;if(l)$('pl').textContent=l;
+}
+function tick(){return new Promise(r=>setTimeout(r,16))}
+
+function S(){
+  const n=i=>parseFloat($(i).value)||0,c=i=>$(i).checked,v=i=>$(i).value;
+  return{
+    tRes:parseInt(v('t-res'))||56, tExag:n('t-exag')||1, tSmooth:n('t-smooth')||0,
+    tZoom:Math.min(18,Math.max(1,parseInt(v('t-zoom'))||13)),
+    tSrc:v('t-src'),
+    cLow:v('c-low'),cMid:v('c-mid'),cHigh:v('c-high'),cBase:v('c-base'),baseH:n('t-base-h')||4,
+    roadsOn:c('road-on'),roadCol:v('road-col'),roadH:n('road-h'),roadDepth:n('road-depth'),roadMW:n('road-mw'),roadWM:n('road-wm')||1,roadPaths:c('road-paths'),
+    waterOn:c('water-on'),waterCol:v('water-col'),waterH:n('water-h'),waterDepth:n('water-depth'),waterMW:n('water-mw'),waterMA:n('water-ma'),waterSea:c('water-sea'),
+    grassOn:c('grass-on'),grassCol:v('grass-col'),grassH:n('grass-h'),
+    buildOn:c('build-on'),buildCol:v('build-col'),buildHS:n('build-hs')||1,buildSS:n('build-ss')||1,buildMH:n('build-mh'),buildMA:n('build-ma'),buildRoofs:c('build-roofs'),
+    sandOn:c('sand-on'),sandCol:v('sand-col'),sandH:n('sand-h'),
+    pierOn:c('pier-on'),pierCol:v('pier-col'),pierH:n('pier-h'),
+    gpxCol:v('gpx-col'),gpxH:n('gpx-h'),gpxMW:n('gpx-mw'),gpxTW:n('gpx-tw'),
+    frameOn:c('frame-on'),frameCol:v('frame-col'),frameH:n('frame-hh'),frameTh:n('frame-th'),
+    frameRnd:c('frame-rnd'),frameTxtOn:c('frame-ton'),frameTxtPos:v('frame-tpos'),frameTxt:v('frame-txt'),
+    maxDim:Math.max(50,Math.min(400,n('t-maxdim')||150)),
+    ctOn:c('ct-on'),ctInterval:Math.max(5,n('ct-int')||50),ctH:Math.max(0.05,n('ct-h')||0.3),ctW:Math.max(0.1,n('ct-w')||0.4),ctCol:v('ct-col')||'#8b7355'
+  };
+}
+
+// Smooth range label
+$('t-smooth').addEventListener('input',()=>{$('t-smooth-v').textContent=$('t-smooth').value+'px'});
+// Frame text toggle
+$('frame-ton').addEventListener('change',()=>{$('frame-ttxt').classList.toggle('h',!$('frame-ton').checked)});
+
+/* ═══════════════════ LEAFLET MAP ═══════════════════ */
+const osmL=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'});
+const satL=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'});
+const ignL=L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',{maxZoom:19,attribution:'© IGN'});
+
+const map=L.map('map',{center:[48.8584,2.2945],zoom:15,zoomControl:false,layers:[osmL]});
+L.control.zoom({position:'topright'}).addTo(map);
+L.control.layers({'OSM':osmL,'Satellite':satL,'IGN':ignL},{},{position:'topright'}).addTo(map);
+
+new ResizeObserver(()=>map.invalidateSize()).observe($('mp'));
+setTimeout(()=>map.invalidateSize(),300);
+
+/* ═══════════════════ CUSTOM SEARCH ═══════════════════ */
+let _srchdeb;
+$('srch-input').addEventListener('input',function(){
+  clearTimeout(_srchdeb);
+  const q=this.value.trim();
+  $('srch-drop').style.display='none';
+  if(q.length<2)return;
+  _srchdeb=setTimeout(()=>doSearch(q),120);
+});
+$('srch-input').addEventListener('blur',()=>setTimeout(()=>$('srch-drop').style.display='none',200));
+
+async function doSearch(q){
+  try{
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`);
+    const d=await r.json();
+    const drop=$('srch-drop');
+    if(!d.length){drop.style.display='none';return}
+    drop.innerHTML=d.map((x,i)=>`<div class="srch-item" data-i="${i}" data-lat="${x.lat}" data-lon="${x.lon}" data-bb="${x.boundingbox}"><div class="srch-name">${x.display_name.split(',')[0]}</div><div class="srch-addr">${x.display_name.split(',').slice(1,3).join(',')}</div></div>`).join('');
+    drop.style.display='block';
+    drop.querySelectorAll('.srch-item').forEach(el=>{
+      el.addEventListener('mousedown',function(e){
+        e.preventDefault();
+        const lat=parseFloat(this.dataset.lat),lon=parseFloat(this.dataset.lon);
+        const bb=this.dataset.bb.split(',').map(parseFloat);
+        // Remove old search marker
+        if(App.searchMarker){map.removeLayer(App.searchMarker);App.searchMarker=null}
+        // Add snappable marker
+        App.searchMarker=L.circleMarker([lat,lon],{radius:8,fillColor:'#f43f5e',fillOpacity:.9,color:'#fff',weight:2}).addTo(map);
+        App.searchMarker._latlng=L.latLng(lat,lon);
+        // Fly to location
+        map.fitBounds([[bb[0],bb[2]],[bb[1],bb[3]]],{padding:[60,60],maxZoom:16});
+        $('srch-drop').style.display='none';
+        $('srch-input').value=el.querySelector('.srch-name').textContent;
+      });
+    });
+  }catch(e){$('srch-drop').style.display='none'}
+}
+
+/* ═══════════════════ DRAWING SYSTEM ═══════════════════ */
+let drawMode=null, drawPt1=null, polyPts=[], prevPoly=null, tracePts=[];
+
+const HINTS={
+  rect:'Cliquez 1er coin puis coin opposé',sq:'Cliquez 1er coin (carré)',
+  circ:'Cliquez centre, glissez pour le rayon',hex:'Cliquez centre, glissez pour le rayon',
+  poly:'Cliquez pour ajouter des points – rejoignez le 1er point pour fermer',
+  trace:'Cliquez pour ajouter des points – double-clic ou rejoignez le 1er pour finir'
+};
+
+function setMode(m){
+  // Avoid recursive call: only reset draw state without calling setMode again
+  if(drawMode && drawMode!==m){
+    drawPt1=null; polyPts=[]; tracePts=[];
+    if(prevPoly){map.removeLayer(prevPoly);prevPoly=null}
+    if(firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}
+  }
+  drawMode=m;
+  ['rect','sq','circ','hex','poly','trace'].forEach(k=>{
+    const el=$('db-'+k);
+    if(el) el.classList.toggle('act',k===m);
+  });
+  $('map').classList.toggle('dm',!!m);
+  const dch=$('dch');
+  dch.style.display=m?'block':'none';
+  if(m) dch.textContent=HINTS[m]||'';
+  $('gpx-ctr').style.display=m==='trace'?'block':'none';
+  if(m!=='trace') $('gpx-ctr').textContent='0 points tracés';
+  if(m!=='poly'&&m!=='trace'&&firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}
+  if(!m) $('snap').style.display='none';
+}
+
+function resetDraw(rm=true){
+  if(prevPoly){map.removeLayer(prevPoly);prevPoly=null}
+  if(firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}
+  drawPt1=null; polyPts=[]; tracePts=[];
+  if(rm) setMode(null);
+}
+
+/* Snap test: screen pixels */
+function snapDist(ll,target){
+  if(!target)return 9999;
+  return map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(target));
+}
+
+function updateSnapDot(ll,target){
+  const s=$('snap');
+  if(!target||snapDist(ll,target)>18){s.style.display='none';return}
+  // latLngToContainerPoint returns coords relative to the map container element
+  // which is inside #mp (position:relative), so we DON'T add getBoundingClientRect offset
+  const p=map.latLngToContainerPoint(target);
+  s.style.display='block';
+  s.style.left=p.x+'px';
+  s.style.top=p.y+'px';
+}
+
+/* SNAP TARGETS: first poly point + search marker */
+function getSnapTargets(){
+  const t=[];
+  if(polyPts.length>2)t.push(polyPts[0]);
+  if(tracePts.length>2)t.push(tracePts[0]);
+  if(App.searchMarker)t.push(App.searchMarker._latlng);
+  return t;
+}
+function closestSnap(ll){
+  const targets=getSnapTargets();
+  let best=null,bd=9999;
+  for(const t of targets){const d=snapDist(ll,t);if(d<18&&d<bd){bd=d;best=t}}
+  return best;
+}
+
+map.on('mousemove',e=>{
+  if(!drawMode)return;
+  const ll=e.latlng;
+  const snap=closestSnap(ll);
+  updateSnapDot(ll,snap||drawPt1);
+  const ell=snap||ll;
+
+  if(drawMode==='rect'||drawMode==='sq'){
+    if(!drawPt1)return;
+    const pts=drawMode==='sq'?mkSq(drawPt1,ell):mkRect(drawPt1,ell);
+    if(!prevPoly)prevPoly=L.polygon(pts,{color:'#f43f5e',weight:2,fillOpacity:.1}).addTo(map);
+    else prevPoly.setLatLngs(pts);
+  } else if(drawMode==='circ'){
+    if(!drawPt1)return;
+    const pts=mkCirc(drawPt1,ell,80);
+    if(!prevPoly)prevPoly=L.polygon(pts,{color:'#00d8ff',weight:2,fillOpacity:.1}).addTo(map);
+    else prevPoly.setLatLngs(pts);
+  } else if(drawMode==='hex'){
+    if(!drawPt1)return;
+    const pts=mkHex(drawPt1,ell);
+    if(!prevPoly)prevPoly=L.polygon(pts,{color:'#00d8ff',weight:2,fillOpacity:.1}).addTo(map);
+    else prevPoly.setLatLngs(pts);
+  } else if(drawMode==='poly'&&polyPts.length>0){
+    const all=[...polyPts,ell];
+    if(!prevPoly)prevPoly=L.polyline(all,{color:'#f43f5e',weight:2,dashArray:'5,4'}).addTo(map);
+    else prevPoly.setLatLngs(all);
+  } else if(drawMode==='trace'&&tracePts.length>0){
+    const all=[...tracePts,ell];
+    if(!prevPoly)prevPoly=L.polyline(all,{color:'#ff0000',weight:3,dashArray:'4,3'}).addTo(map);
+    else prevPoly.setLatLngs(all);
+  }
+});
+
+// Debounce timer to detect dblclick vs single click in trace mode
+let _clickTimer=null;
+
+map.on('click',e=>{
+  if(!drawMode)return;
+  const ll=e.latlng;
+  const snap=closestSnap(ll);
+  const ell=snap||ll;
+
+  if(drawMode==='rect'){
+    if(!drawPt1){drawPt1=ell;return}
+    finalizeZone(mkRect(drawPt1,ell));
+  } else if(drawMode==='sq'){
+    if(!drawPt1){drawPt1=ell;return}
+    finalizeZone(mkSq(drawPt1,ell));
+  } else if(drawMode==='circ'){
+    if(!drawPt1){drawPt1=ell;return}
+    finalizeZone(mkCirc(drawPt1,ell,80));
+  } else if(drawMode==='hex'){
+    if(!drawPt1){drawPt1=ell;return}
+    finalizeZone(mkHex(drawPt1,ell));
+  } else if(drawMode==='poly'){
+    // Check snap to first point
+    if(polyPts.length>2&&snapDist(ll,polyPts[0])<18){
+      finalizeZone([...polyPts]);return;
+    }
+    // Check snap to search marker
+    if(App.searchMarker&&snapDist(ll,App.searchMarker._latlng)<18){
+      polyPts.push(App.searchMarker._latlng);
+    } else {
+      polyPts.push(ell);
+    }
+    // Show first point marker
+    if(polyPts.length===1){
+      if(firstPolyMarker)map.removeLayer(firstPolyMarker);
+      firstPolyMarker=L.circleMarker(polyPts[0],{radius:7,fillColor:'#f43f5e',fillOpacity:.95,color:'#fff',weight:2}).addTo(map);
+    }
+  } else if(drawMode==='trace'){
+    // Use debounced click to avoid adding extra point on dblclick
+    clearTimeout(_clickTimer);
+    _clickTimer=setTimeout(()=>{
+      // Check snap to first point for loop closure
+      if(tracePts.length>2&&snapDist(ll,tracePts[0])<18){
+        finalizeTrace(tracePts);return;
+      }
+      const tll=snap||ll;
+      tracePts.push(tll);
+      $('gpx-ctr').textContent=`${tracePts.length} point${tracePts.length>1?'s':''} tracé${tracePts.length>1?'s':''}`;
+      // Show first point marker
+      if(tracePts.length===1){
+        if(firstPolyMarker)map.removeLayer(firstPolyMarker);
+        firstPolyMarker=L.circleMarker(tll,{radius:7,fillColor:'#ff0000',fillOpacity:.95,color:'#fff',weight:2}).addTo(map);
+      }
+      updateTraceLayer();
+    },220); // 220ms = single click only (dblclick arrives within ~150ms)
+  }
+});
+
+map.on('dblclick',e=>{
+  if(drawMode==='trace'&&tracePts.length>=2){
+    finalizeTrace(tracePts);
+    e.originalEvent.preventDefault();
+  }
+});
+
+function updateTraceLayer(){
+  if(App.gpxLayer){map.removeLayer(App.gpxLayer);App.gpxLayer=null}
+  if(tracePts.length<2)return;
+  App.gpxLayer=L.polyline(tracePts,{color:'#ff0000',weight:4,opacity:.9}).addTo(map);
+}
+
+function finalizeTrace(pts){
+  $('snap').style.display='none';
+  if(firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}
+  if(pts.length<2){resetDraw();return}
+  App.gpxPoints=pts.map(p=>({lat:p.lat,lon:p.lng}));
+  updateTraceLayer();
+  const b=$('gpx-badge');
+  b.innerHTML=`✏️ ${App.gpxPoints.length} pts · tracé manuel`;b.style.display='block';
+  $('db-cgpx').style.display='flex';
+  resetDraw();
+  if(App.generated&&Cache.ready)debouncedBuild();
+}
+
+function finalizeZone(pts){
+  if(App.zoneLayer){map.removeLayer(App.zoneLayer);App.zoneLayer=null}
+  clearPrev();
+  App.zonePts=pts;
+  App.zoneLayer=L.polygon(pts,{color:'#f43f5e',weight:2.5,fillColor:'#f43f5e',fillOpacity:.08,dashArray:'6,4'}).addTo(map);
+  // Compute bounds and scale
+  const lats=pts.map(p=>Array.isArray(p)?p[0]:p.lat);
+  const lons=pts.map(p=>Array.isArray(p)?p[1]:p.lng);
+  App.bounds={minLat:Math.min(...lats),maxLat:Math.max(...lats),minLon:Math.min(...lons),maxLon:Math.max(...lons)};
+  const latDiff=App.bounds.maxLat-App.bounds.minLat;
+  const lonDiff=App.bounds.maxLon-App.bounds.minLon;
+  const cLat=(App.bounds.maxLat+App.bounds.minLat)/2;
+  const realH=latDiff*111320;
+  const realW=lonDiff*Math.cos(cLat*Math.PI/180)*111320;
+  App.realW=realW; App.realH=realH;
+  const maxDim=Math.max(50,Math.min(400,parseFloat($('t-maxdim')?.value)||150));
+  const sc=maxDim/Math.max(realH,realW);
+  App.wMm=Math.round(realW*sc);
+  App.dMm=Math.round(realH*sc);
+  const savedMode=drawMode; // save before resetDraw clears it
+  App.zoneType=savedMode;
+  // Show buttons
+  $('bot-wrap').style.display='flex';
+  $('btn-czone').style.display='inline-block';
+  resetDraw();
+}
+
+/* Zone shape geometry */
+function mkRect(a,b){return[[a.lat,a.lng],[a.lat,b.lng],[b.lat,b.lng],[b.lat,a.lng]]}
+function mkSq(a,b){
+  const dLat=Math.abs(b.lat-a.lat),dLon=Math.abs(b.lng-a.lng);
+  const cLat=(a.lat+b.lat)/2;
+  const mLat=dLat*111320,mLon=dLon*111320*Math.cos(cLat*Math.PI/180);
+  const dm=Math.min(mLat,mLon);
+  const nLat=dm/111320,nLon=dm/(111320*Math.cos(cLat*Math.PI/180));
+  const minLat=Math.min(a.lat,b.lat),minLon=Math.min(a.lng,b.lng);
+  return[[minLat,minLon],[minLat,minLon+nLon],[minLat+nLat,minLon+nLon],[minLat+nLat,minLon]];
+}
+function mkCirc(c,e,n){
+  const R=c.distanceTo(e);const pts=[];
+  for(let i=0;i<n;i++){
+    const a=i/n*Math.PI*2;
+    pts.push([c.lat+R*Math.cos(a)/111320,c.lng+R*Math.sin(a)/(111320*Math.cos(c.lat*Math.PI/180))]);
+  }
+  return pts;
+}
+function mkHex(c,e){
+  const R=c.distanceTo(e);const pts=[];
+  for(let i=0;i<6;i++){
+    const a=i/6*Math.PI*2-Math.PI/6;
+    pts.push([c.lat+R*Math.cos(a)/111320,c.lng+R*Math.sin(a)/(111320*Math.cos(c.lat*Math.PI/180))]);
+  }
+  return pts;
+}
+
+/* CENTER BUTTONS */
+$('btn-czone').addEventListener('click',()=>{
+  if(!App.bounds)return;
+  const b=App.bounds;
+  map.fitBounds([[b.minLat,b.minLon],[b.maxLat,b.maxLon]],{padding:[80,200],maxZoom:14});
+});
+$('db-cgpx').addEventListener('click',()=>{
+  if(!App.gpxPoints.length)return;
+  const la=App.gpxPoints.map(p=>p.lat),lo=App.gpxPoints.map(p=>p.lon);
+  map.fitBounds([[Math.min(...la),Math.min(...lo)],[Math.max(...la),Math.max(...lo)]],
+    {paddingTopLeft:[180,80],paddingBottomRight:[80,80],maxZoom:12});
+});
+
+/* GPX FILE IMPORT */
+$('gpx-file').addEventListener('change',function(e){
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=ev=>{
+    try{
+      const xml=new DOMParser().parseFromString(ev.target.result,'text/xml');
+      const nodes=[...xml.getElementsByTagName('trkpt'),...xml.getElementsByTagName('wpt'),...xml.getElementsByTagName('rtept')];
+      if(!nodes.length){modal('GPX','Aucun point trouvé.');return}
+      const pts=nodes.map(n=>({lat:parseFloat(n.getAttribute('lat')),lon:parseFloat(n.getAttribute('lon'))})).filter(p=>!isNaN(p.lat));
+      if(!pts.length)return;
+      App.gpxPoints=pts;
+      if(App.gpxLayer)map.removeLayer(App.gpxLayer);
+      App.gpxLayer=L.polyline(pts.map(p=>[p.lat,p.lon]),{color:'#f43f5e',weight:3.5,opacity:.92}).addTo(map);
+      if(!App.bounds)map.fitBounds(App.gpxLayer.getBounds(),{padding:[60,60],maxZoom:12});
+      const l=$('gpx-lbl');l.textContent='✓ '+f.name.replace('.gpx','').substring(0,16);l.classList.add('on');
+      $('db-cgpx').style.display='flex';
+      let d=0;for(let i=1;i<pts.length;i++){
+        const R=6371,dLa=(pts[i].lat-pts[i-1].lat)*Math.PI/180,dLo=(pts[i].lon-pts[i-1].lon)*Math.PI/180;
+        const a=Math.sin(dLa/2)**2+Math.cos(pts[i-1].lat*Math.PI/180)*Math.cos(pts[i].lat*Math.PI/180)*Math.sin(dLo/2)**2;
+        d+=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+      }
+      $('gpx-badge').innerHTML=`📍 ${pts.length.toLocaleString()} pts · ${d.toFixed(1)} km`;
+      $('gpx-badge').style.display='block';
+      if(App.generated&&Cache.ready)debouncedBuild();
+    }catch(err){modal('ERREUR GPX','Lecture impossible.');}
+  };
+  rd.readAsText(f);
+});
+
+/* ═══════════════════ DRAWING BUTTON EVENT LISTENERS ═══════════════════ */
+/* These were missing — this is why drawing was broken */
+['rect','sq','circ','hex','poly','trace'].forEach(k=>{
+  const el=$('db-'+k);
+  if(el) el.addEventListener('click',()=>{
+    setMode(drawMode===k ? null : k);
+  });
+});
+
+/* CLEAR ALL */
+$('db-clear').addEventListener('click',()=>{
+  resetDraw();
+  if(App.zoneLayer){map.removeLayer(App.zoneLayer);App.zoneLayer=null}
+  if(App.gpxLayer){map.removeLayer(App.gpxLayer);App.gpxLayer=null}
+  if(App.searchMarker){map.removeLayer(App.searchMarker);App.searchMarker=null}
+  clearPrev();
+  App.zonePts=[];App.bounds=null;App.gpxPoints=[];tracePts=[];
+  $('gpx-badge').style.display='none';$('db-cgpx').style.display='none';
+  $('bot-wrap').style.display='none';$('btn-czone').style.display='none';
+  $('snap').style.display='none';
+  $('gpx-lbl').textContent='📂 Importer .gpx';$('gpx-lbl').classList.remove('on');
+});
+
+/* ═══════════════════ PREVIEW ANALYSIS ═══════════════════ */
+function clearPrev(){
+  prevLayers.forEach(l=>map.removeLayer(l));prevLayers=[];
+  $('prev-leg').style.display='none';$('btn-pclr').style.display='none';
+}
+
+// Point-in-polygon test (ray casting)
+function ptInPoly(lat,lon,pts){
+  const n=pts.length;let inside=false;
+  for(let i=0,j=n-1;i<n;j=i++){
+    const la=Array.isArray(pts[i])?pts[i][0]:pts[i].lat,lo=Array.isArray(pts[i])?pts[i][1]:pts[i].lng||pts[i].lon;
+    const lb=Array.isArray(pts[j])?pts[j][0]:pts[j].lat,lob=Array.isArray(pts[j])?pts[j][1]:pts[j].lng||pts[j].lon;
+    if(((la>lat)!==(lb>lat))&&(lon<(lob-lo)*(lat-la)/(lb-la)+lo))inside=!inside;
+  }
+  return inside;
+}
+function ptInCirc(lat,lon,pts){
+  const lats=pts.map(p=>Array.isArray(p)?p[0]:p.lat),lons=pts.map(p=>Array.isArray(p)?p[1]:p.lng||p.lon);
+  const cLa=(Math.max(...lats)+Math.min(...lats))/2,cLo=(Math.max(...lons)+Math.min(...lons))/2;
+  const rLa=(Math.max(...lats)-Math.min(...lats))/2,rLo=(Math.max(...lons)-Math.min(...lons))/2;
+  return ((lat-cLa)/rLa)**2+((lon-cLo)/rLo)**2<=1.01;
+}
+function ptInZone(lat,lon){
+  if(!App.zonePts.length)return false;
+  if(App.zoneType==='circ')return ptInCirc(lat,lon,App.zonePts);
+  if(App.zoneType==='hex')return ptInPoly(lat,lon,App.zonePts);
+  return ptInPoly(lat,lon,App.zonePts);
+}
+function centroid(geom){
+  return{lat:geom.reduce((s,n)=>s+n.lat,0)/geom.length,lon:geom.reduce((s,n)=>s+n.lon,0)/geom.length};
+}
+
+$('btn-prev').addEventListener('click',async()=>{
+  if(!App.bounds){modal('Info','Dessinez d\'abord une zone.');return}
+  const btn=$('btn-prev');btn.textContent='⏳ Analyse...';btn.disabled=true;
+  clearPrev();
+  // 1) Zone background fill (drawn first = lowest layer)
+  const zoneFill=L.polygon(App.zonePts,{color:'none',fillColor:'#f5e8c8',fillOpacity:.7,interactive:false});
+  zoneFill.addTo(map);prevLayers.push(zoneFill);
+  try{
+    const bb=`${App.bounds.minLat},${App.bounds.minLon},${App.bounds.maxLat},${App.bounds.maxLon}`;
+    const q=`[out:json][timeout:50];(`+
+      // WATER (ways + relations for multipolygons like Seine)
+      `way["natural"="water"](${bb});`+
+      `way["water"](${bb});`+
+      `way["waterway"~"^(river|stream|canal|drain|ditch|riverbank|dock|boatyard|lock)$"](${bb});`+
+      `way["landuse"~"^(reservoir|basin)$"](${bb});`+
+      `way["natural"="coastline"](${bb});`+
+      `relation["natural"="water"](${bb});`+
+      `relation["water"](${bb});`+
+      `relation["waterway"](${bb});`+
+      // QUAIS, BERGES, DIGUES, PONTS, EMBANKMENTS
+      `way["man_made"~"^(quay|pier|jetty|breakwater|embankment|groyne|dock|weir|dam|lock_gate|fish_pass|bridge)$"](${bb});`+
+      `way["waterway"~"^(dam|weir|waterfall)$"](${bb});`+
+      `way["embankment"="yes"](${bb});`+
+      `way["barrier"="retaining_wall"](${bb});`+
+      `way["barrier"="flood_wall"](${bb});`+
+      // FOREST
+      `way["landuse"~"^(forest|wood)$"](${bb});`+
+      `way["natural"="wood"](${bb});`+
+      `relation["landuse"~"^(forest|wood)$"](${bb});`+
+      // GRASS / PARKS / FIELDS
+      `way["natural"~"^(grassland|heath|fell|scrub)$"](${bb});`+
+      `way["landuse"~"^(grass|meadow|village_green|recreation_ground|cemetery|allotments|vineyard|orchard)$"](${bb});`+
+      `way["leisure"~"^(park|garden|pitch|golf_course|playground|sports_centre|stadium|nature_reserve|track)$"](${bb});`+
+      `relation["leisure"~"^(park|garden|nature_reserve)$"](${bb});`+
+      // FARMLAND
+      `way["landuse"~"^(farmland|farmyard)$"](${bb});`+
+      // SAND / BEACH / WETLAND
+      `way["natural"~"^(beach|sand|wetland|mud|shingle)$"](${bb});`+
+      // ROCK / SNOW
+      `way["natural"~"^(scree|bare_rock|rock|cliff|glacier|snowfield)$"](${bb});`+
+      // BUILDINGS & ROADS (including pedestrian areas)
+      `way["building"](${bb});`+
+      `way["highway"](${bb});`+
+      // TOURISM / HISTORIC / LANDMARKS
+      `way["tourism"~"^(attraction|monument|artwork|museum)$"](${bb});`+
+      `way["historic"~"^(monument|memorial|castle|ruins|tower|archaeological_site)$"](${bb});`+
+    `);(._;>;);out geom qt;`;
+    const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});
+    const data=await res.json();
+    // Expand relations — assemble outer member ways into one closed ring per relation
+    const expandedPrev=[];
+    data.elements.forEach(elem=>{
+      if(elem.type==='way'&&elem.geometry){expandedPrev.push(elem);}
+      else if(elem.type==='relation'&&Array.isArray(elem.members)&&elem.tags){
+        const outerGeom=[];
+        elem.members.forEach(m=>{
+          if(m.type==='way'&&Array.isArray(m.geometry)&&m.geometry.length>=2&&m.role==='outer'){
+            outerGeom.push(...m.geometry.slice(0,-1));
+          }
+        });
+        if(outerGeom.length>=3){
+          outerGeom.push({...outerGeom[0]});
+          expandedPrev.push({type:'way',tags:{...elem.tags},geometry:outerGeom});
+        }
+      }
+    });
+    data.elements=expandedPrev;
+    const PCOLS={water:'#2b88d8',river:'#2b88d8',stream:'#5fa8e0',canal:'#4898d8',drain:'#7abbe0',
+      dock:'#2b88d8',reservoir:'#2b88d8',basin:'#2b88d8',coastline:'#2b88d8',boatyard:'#8888dd',
+      wood:'#2d7a2d',forest:'#2d7a2d',grassland:'#8bc34a',grass:'#8bc34a',meadow:'#8bc34a',heath:'#a0c068',scrub:'#a8b870',
+      park:'#8bc34a',garden:'#9acc40',pitch:'#6fb820',golf_course:'#9bd060',playground:'#a8d870',track:'#88aa60',
+      sports_centre:'#85bb40',stadium:'#85bb40',nature_reserve:'#a0c860',cemetery:'#aabb88',
+      recreation_ground:'#8bc34a',village_green:'#8bc34a',allotments:'#b8a870',vineyard:'#c0a030',orchard:'#9ab050',
+      farmland:'#c8a84b',farmyard:'#c09040',
+      beach:'#f4d47a',sand:'#f4d47a',mud:'#c8a888',shingle:'#c8c0a8',
+      wetland:'#7aafcc',waterfall:'#88ccff',
+      scree:'#888888',bare_rock:'#888888',rock:'#888888',cliff:'#666666',
+      glacier:'#f0f4f8',snowfield:'#f4f8fc',
+      building:'#a0a0a0',pedestrian_area:'#d8d0c0',
+      // Roads — color by type (dynamic width)
+      motorway:'#e8503a',trunk:'#e8693a',primary:'#e89a3a',secondary:'#e8c83a',tertiary:'#888',
+      residential:'#aaa',service:'#bbb',living_street:'#999',unclassified:'#999',
+      footway:'#e07800',path:'#e07800',cycleway:'#0088dd',pedestrian:'#cc7700',bridleway:'#885500',
+      steps:'#aa6600',track:'#887744',
+      // Water infrastructure
+      quay:'#506080',pier:'#506080',jetty:'#506080',breakwater:'#506080',
+      embankment:'#8b7050',groyne:'#7a6040',dam:'#605040',weir:'#705040',
+      flood_wall:'#888060',retaining_wall:'#7a7060',
+      // Bridges rendered differently
+      bridge_road:'#886644',
+      // Landmarks
+      attraction:'#c0a060',monument:'#a09060',artwork:'#908050',museum:'#9c8050',tower:'#909090'};
+
+    // 2) OSM features inside zone
+    data.elements.forEach(way=>{
+      if(!way.geometry||way.geometry.length<2)return;
+      const tags=way.tags||{};
+      const geom=way.geometry;
+      const anyIn=geom.some(n=>ptInZone(n.lat,n.lon));
+      const cen=centroid(geom);
+      if(!anyIn&&!ptInZone(cen.lat,cen.lon))return;
+      const lls=geom.map(n=>[n.lat,n.lon]);
+      let col=null,isLine=false,lineW=1.5;
+      const isBridge=tags.bridge&&tags.bridge!=='no'&&tags.bridge!=='0';
+      const isArea=tags.area==='yes'||tagsLookLikePolygon(tags);
+
+      // WATER infrastructure (lines and polygons)
+      if(tags.waterway&&['dam','weir','waterfall','lock_gate'].includes(tags.waterway)){
+        col=PCOLS[tags.waterway]||PCOLS.dam;isLine=true;lineW=3;
+      }
+      // WATER lines — proportional width to real river width
+      else if(tags.waterway&&['river','stream','canal','drain','ditch','lock'].includes(tags.waterway)){
+        col=PCOLS[tags.waterway]||PCOLS.river;isLine=true;
+        const wm={'river':8,'canal':4,'stream':2,'drain':1.5,'ditch':1,'lock':5}[tags.waterway]||2;
+        lineW=Math.max(1, wm); // visual width ≈ real width at scale
+      }
+      // ROADS — color and width by type (dynamic, proportional to physical width)
+      else if(tags.highway){
+        const hw=tags.highway;
+        if(hw==='pedestrian'&&isArea){col=PCOLS.pedestrian_area;isLine=false;}
+        else{
+          isLine=true;
+          col=isBridge?PCOLS.bridge_road:(PCOLS[hw]||PCOLS.residential);
+          const physW={'motorway':15,'trunk':12,'primary':9,'secondary':7,'tertiary':6,
+            'residential':4.5,'service':3,'living_street':4,'unclassified':4,
+            'footway':2,'path':1.5,'cycleway':2.5,'pedestrian':7,'bridleway':2.5,'steps':2.5,'track':4}[hw]||3;
+          lineW=Math.max(0.6, physW/2.2);
+        }
+      }
+      // BERGES / QUAIS / DIGUES / EMBANKMENTS (distinct from water)
+      else if(tags.man_made&&['embankment','quay','pier','jetty','breakwater','groyne','dam','weir','lock_gate','fish_pass'].includes(tags.man_made)){
+        col=PCOLS[tags.man_made]||PCOLS.quay;isLine=true;lineW=2.5;
+      }
+      else if(tags.embankment==='yes'||tags.barrier==='retaining_wall'||tags.barrier==='flood_wall'){
+        col=PCOLS.embankment;isLine=true;lineW=2;
+      }
+      else if(tags.waterway==='dam'||tags.waterway==='weir'){col=PCOLS.dam;isLine=true;lineW=3;}
+      // Water polygons (Seine etc.)
+      else if(tags.natural==='water'||tags.waterway==='riverbank'||tags.waterway==='dock'||tags.waterway==='boatyard'
+        ||tags.landuse==='reservoir'||tags.landuse==='basin'
+        ||(tags.water&&['river','lake','canal','pond','reservoir','lagoon','oxbow','reflecting_pool'].includes(tags.water)))col=PCOLS.water;
+      else if(tags.natural==='coastline')col=PCOLS.coastline;
+      else if(tags.natural==='wetland')col=PCOLS.wetland;
+      else if(tags.natural&&['scree','bare_rock','rock'].includes(tags.natural))col=PCOLS.scree;
+      else if(tags.natural==='cliff')col=PCOLS.cliff;
+      else if(tags.natural&&['glacier','snowfield'].includes(tags.natural))col=PCOLS[tags.natural];
+      else if(tags.natural==='wood'||tags.landuse==='forest'||tags.landuse==='wood')col=PCOLS.forest;
+      else if(tags.natural==='grassland'||['grass','meadow','village_green','recreation_ground','cemetery','allotments'].includes(tags.landuse))col=PCOLS[tags.landuse]||PCOLS.grassland;
+      else if(['heath','scrub','fell'].includes(tags.natural))col=PCOLS[tags.natural]||PCOLS.grassland;
+      else if(['park','garden','pitch','golf_course','playground','sports_centre','stadium','nature_reserve','track'].includes(tags.leisure))col=PCOLS[tags.leisure]||PCOLS.park;
+      else if(['farmland','farmyard','orchard','vineyard'].includes(tags.landuse))col=PCOLS[tags.landuse]||PCOLS.farmland;
+      else if(['beach','sand','mud','shingle'].includes(tags.natural))col=PCOLS[tags.natural]||PCOLS.beach;
+      else if(['attraction','monument','artwork','museum'].includes(tags.tourism))col=PCOLS[tags.tourism]||PCOLS.monument;
+      else if(tags.historic)col=PCOLS.monument;
+      else if(tags.man_made==='tower'||tags.man_made==='bridge')col=PCOLS.tower;
+      else if(tags.building)col=PCOLS.building;
+      if(!col)return;
+      let layer;
+      if(isLine){
+        layer=L.polyline(lls,{color:col,weight:lineW,opacity:.94,interactive:false});
+      }else{
+        layer=L.polygon(lls,{color:'none',fillColor:col,fillOpacity:.88,interactive:false,weight:0});
+      }
+      layer.addTo(map);prevLayers.push(layer);
+    });
+    // 3) Dark mask ON TOP — covers everything OUTSIDE zone
+    const world=[[90,-180],[90,180],[-90,180],[-90,-180]];
+    const hole=App.zonePts.map(p=>Array.isArray(p)?[p[0],p[1]]:[p.lat,p.lng||p.lon]);
+    const mask=L.polygon([world,hole],{color:'none',fillColor:'#000',fillOpacity:.58,interactive:false});
+    mask.addTo(map);prevLayers.push(mask);
+    // 4) Zone outline on top
+    const outline=L.polygon(App.zonePts,{color:'#f43f5e',weight:2.5,fillOpacity:0,interactive:false,dashArray:'6,4'});
+    outline.addTo(map);prevLayers.push(outline);
+    $('prev-leg').style.display='block';
+    $('btn-pclr').style.display='inline-block';
+    $('gpx-badge').style.display='none';
+  }catch(e){modal('ERREUR','Analyse impossible: '+(e.message||''))}
+  btn.textContent='🔍 Analyser la zone';btn.disabled=false;
+});
+
+$('btn-pclr').addEventListener('click',clearPrev);
+
+/* ═══════════════════ THREE.JS INIT ═══════════════════ */
+let _3p=null;
+function ensureThree(){
+  if(App.threeReady)return Promise.resolve();
+  if(_3p)return _3p;
+  _3p=new Promise(res=>{
+    function tryIt(){
+      if(!THREE.OrbitControls){setTimeout(tryIt,100);return}
+      const vp=$('vp'),canvas=$('c3d');
+      const W=vp.clientWidth,H=vp.clientHeight;
+      if(!W||!H){setTimeout(tryIt,100);return}
+      const scene=new THREE.Scene();
+      scene.background=new THREE.Color(0xb8cdd8);
+      scene.fog=new THREE.Fog(0xb8cdd8,900,3000);
+      App.scene=scene;
+      const camera=new THREE.PerspectiveCamera(40,W/H,0.5,8000);
+      camera.position.set(0,180,280);App.camera=camera;
+      const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+      renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+      renderer.setSize(W,H);
+      renderer.shadowMap.enabled=false; // no shadows — cleaner print preview
+      renderer.toneMapping=THREE.LinearToneMapping;renderer.toneMappingExposure=1.0;
+      App.renderer=renderer;
+      const ctrl=new THREE.OrbitControls(camera,canvas);
+      ctrl.enableDamping=true;ctrl.dampingFactor=0.07;ctrl.minDistance=10;ctrl.maxDistance=4000;ctrl.screenSpacePanning=true;
+      App.controls=ctrl;
+      // Lights — bright, uniform, NO SHADOWS (cleaner for 3D printing preview)
+      scene.add(new THREE.AmbientLight(0xffffff,0.95));
+      const sun=new THREE.DirectionalLight(0xfff8ee,0.55);sun.position.set(220,500,260);
+      // No shadow casting — cleaner render for map use
+      scene.add(sun);
+      const fill=new THREE.DirectionalLight(0xeef5ff,0.25);fill.position.set(-200,300,-100);scene.add(fill);
+      const tg=new THREE.Group();scene.add(tg);App.tg=tg;
+      window.addEventListener('resize',()=>{
+        const W2=vp.clientWidth,H2=vp.clientHeight;if(!W2||!H2)return;
+        camera.aspect=W2/H2;camera.updateProjectionMatrix();renderer.setSize(W2,H2);
+      });
+      function loop(){requestAnimationFrame(loop);ctrl.update();renderer.render(scene,camera)}
+      loop();
+      App.threeReady=true;res();
+    }
+    setTimeout(tryIt,100);
+  });
+  return _3p;
+}
+window.addEventListener('load',()=>ensureThree());
+
+/* ═══════════════════ ELEVATION TILES ═══════════════════ */
+function ll2tile(lat,lon,z){
+  const n=2**z,x=Math.floor((lon+180)/360*n);
+  const r=lat*Math.PI/180,y=Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n);
+  return{x,y};
+}
+function pxIn(lat,lon,z,tx,ty){
+  const n=2**z,xF=(lon+180)/360*n-tx,r=lat*Math.PI/180;
+  const yF=(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n-ty;
+  return{px:Math.max(0,Math.min(255,Math.floor(xF*256))),py:Math.max(0,Math.min(255,Math.floor(yF*256)))};
+}
+async function fetchTile(z,x,y,src){
+  const img=new Image();img.crossOrigin='anonymous';
+  const url=src==='mapthorn'
+    ?`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`
+    :`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+  await new Promise((ok,er)=>{img.onload=ok;img.onerror=er;img.src=url;});
+  const cv=document.createElement('canvas');cv.width=cv.height=256;
+  const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);
+  return ctx.getImageData(0,0,256,256);
+}
+async function sampleElevs(latLons,zoom,src){
+  const tm={};
+  for(const[la,lo]of latLons){const t=ll2tile(la,lo,zoom),k=`${t.x}_${t.y}`;if(!tm[k])tm[k]={...t,d:null}}
+  await Promise.all(Object.keys(tm).map(async k=>{try{tm[k].d=await fetchTile(zoom,tm[k].x,tm[k].y,src)}catch(e){}}));
+  return latLons.map(([la,lo])=>{
+    const t=ll2tile(la,lo,zoom),tile=tm[`${t.x}_${t.y}`];
+    if(!tile?.d)return 0;
+    const{px,py}=pxIn(la,lo,zoom,t.x,t.y);
+    const i=(py*256+px)*4;
+    return(tile.d.data[i]*256+tile.d.data[i+1]+tile.d.data[i+2]/256)-32768;
+  });
+}
+
+/* True Gaussian smoothing — weighted kernel, sigma = radius/2.5 */
+function smoothElevs(elevs,GRID,radius){
+  if(radius<=0)return elevs;
+  const sigma=Math.max(0.5,radius/2.5);
+  const k=[];let wSum=0;
+  for(let dr=-radius;dr<=radius;dr++){
+    for(let dc=-radius;dc<=radius;dc++){
+      const w=Math.exp(-(dr*dr+dc*dc)/(2*sigma*sigma));
+      k.push({dr,dc,w});wSum+=w;
+    }
+  }
+  k.forEach(e=>e.w/=wSum);
+  const out=new Float64Array(elevs.length);
+  for(let r=0;r<GRID;r++){
+    for(let c=0;c<GRID;c++){
+      let s=0,tw=0;
+      for(const{dr,dc,w}of k){
+        const nr=r+dr,nc=c+dc;
+        if(nr>=0&&nr<GRID&&nc>=0&&nc<GRID){s+=w*(elevs[nr*GRID+nc]||0);tw+=w;}
+      }
+      out[r*GRID+c]=tw>0?s/tw:0;
+    }
+  }
+  return out;
+}
+
+/* Bilinear interpolation for precise terrain height at any lat/lon */
+function makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,baseH,minE,elevRange,scaleMm){
+  return function(lat,lon){
+    const tR=(lat-bounds.minLat)/latDiff*(GRID-1);
+    const tC=(lon-bounds.minLon)/lonDiff*(GRID-1);
+    const r0=Math.max(0,Math.min(GRID-2,Math.floor(tR)));
+    const c0=Math.max(0,Math.min(GRID-2,Math.floor(tC)));
+    const r1=r0+1,c1=c0+1;
+    const fr=tR-r0,fc=tC-c0;
+    const e00=elevs[r0*GRID+c0]||0,e01=elevs[r0*GRID+c1]||0;
+    const e10=elevs[r1*GRID+c0]||0,e11=elevs[r1*GRID+c1]||0;
+    const e=(1-fr)*((1-fc)*e00+fc*e01)+fr*((1-fc)*e10+fc*e11);
+    // Include MIN_SURF (=0) so OSM elements sit exactly on the terrain surface
+    return baseH + MIN_SURF + (e-minE)/elevRange*scaleMm;
+  };
+}
+
+/* ═══════════════════ TERRAIN COLOR — flat uniform base ═══════════════════ */
+// Terrain itself is uniform; colors come from OSM land-use layers on top
+function tColor(n,st){
+  // Very subtle gradient: nearly flat for urban areas
+  // For mountains: slight variation from base to slightly lighter at peaks
+  const lo=new THREE.Color(st.cLow);
+  const hi=new THREE.Color(st.cHigh);
+  // Almost no change — most color variation comes from OSM layers
+  return lo.clone().lerp(hi, n*0.6);
+}
+
+/* ═══════════════════ GEOMETRY HELPERS ═══════════════════ */
+function mergeGeos(geos){
+  const v=geos.filter(g=>g&&g.attributes?.position?.count>=3);
+  if(!v.length)return null;
+  if(v.length===1)return v[0];
+  let tv=0,ti=0;
+  v.forEach(g=>{tv+=g.attributes.position.count;ti+=g.index?g.index.count:g.attributes.position.count});
+  const pa=new Float32Array(tv*3),ia=new Uint32Array(ti);
+  let vo=0,io=0;
+  v.forEach(g=>{
+    const p=g.attributes.position;
+    for(let i=0;i<p.count;i++){pa[(vo+i)*3]=p.getX(i);pa[(vo+i)*3+1]=p.getY(i);pa[(vo+i)*3+2]=p.getZ(i)}
+    if(g.index){for(let i=0;i<g.index.count;i++)ia[io+i]=g.index.getX(i)+vo;io+=g.index.count}
+    else{for(let i=0;i<p.count;i++)ia[io++]=vo+i;}
+    vo+=p.count;
+  });
+  const mg=new THREE.BufferGeometry();
+  mg.setAttribute('position',new THREE.Float32BufferAttribute(pa,3));
+  mg.setIndex(new THREE.Uint32BufferAttribute(ia,1));
+  mg.computeVertexNormals();
+  return mg;
+}
+
+/* Flat ribbon for roads/waterways — follows terrain precisely */
+function mkRibbon(pts3d,width){
+  if(pts3d.length<2)return null;
+  const verts=[],idx=[];const hw=width/2;
+  for(let i=0;i<pts3d.length-1;i++){
+    const p1=pts3d[i],p2=pts3d[i+1];
+    const dx=p2.x-p1.x,dz=p2.z-p1.z;
+    const len=Math.sqrt(dx*dx+dz*dz);if(len<0.0001)continue;
+    const px=-dz/len,pz=dx/len;
+    const vi=verts.length/3;
+    const y1=p1.y,y2=p2.y;
+    verts.push(
+      p1.x-px*hw,y1,p1.z-pz*hw,
+      p1.x+px*hw,y1,p1.z+pz*hw,
+      p2.x+px*hw,y2,p2.z+pz*hw,
+      p2.x-px*hw,y2,p2.z-pz*hw
+    );
+    idx.push(vi,vi+1,vi+2,vi,vi+2,vi+3);
+  }
+  if(!verts.length)return null;
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+  g.setIndex(idx);g.computeVertexNormals();
+  return g;
+}
+
+/* Zone inclusion test (3D local coords) */
+function inZone(x,z){
+  const W=App.wMm/2,D=App.dMm/2;
+  if(App.zoneType==='circ')return (x/W)**2+(z/D)**2<=1.01;
+  if(App.zoneType==='hex'){const ax=Math.abs(x/W),az=Math.abs(z/D);return ax<=1&&az<=1&&(ax+az)<=1.42}
+  return x>=-W-0.1&&x<=W+0.1&&z>=-D-0.1&&z<=D+0.1;
+}
+
+/* ═══════════════════ POLYGON CLIPPING (Sutherland-Hodgman) ═══════════════════ */
+/* Critical for large polygons (Seine river) that mostly extend outside the zone */
+function interpPt(a,b,t){return{
+  x:a.x+(b.x-a.x)*t, z:a.z+(b.z-a.z)*t, y:a.y+(b.y-a.y)*t,
+  lat:a.lat+(b.lat-a.lat)*t, lon:a.lon+(b.lon-a.lon)*t
+};}
+
+function clipAgainstEdge(pts,isInside,findIntersect){
+  if(pts.length<3)return [];
+  const out=[];
+  const n=pts.length;
+  for(let i=0;i<n;i++){
+    const a=pts[(i-1+n)%n];
+    const b=pts[i];
+    const aIn=isInside(a), bIn=isInside(b);
+    if(bIn){
+      if(!aIn) out.push(findIntersect(a,b));
+      out.push(b);
+    } else if(aIn){
+      out.push(findIntersect(a,b));
+    }
+  }
+  return out;
+}
+
+function clipPolyToRect(pts){
+  const W=App.wMm/2,D=App.dMm/2;
+  let out=pts;
+  out=clipAgainstEdge(out,p=>p.x<=W,(a,b)=>interpPt(a,b,(W-a.x)/(b.x-a.x)));
+  if(out.length<3)return out;
+  out=clipAgainstEdge(out,p=>p.x>=-W,(a,b)=>interpPt(a,b,(-W-a.x)/(b.x-a.x)));
+  if(out.length<3)return out;
+  out=clipAgainstEdge(out,p=>p.z<=D,(a,b)=>interpPt(a,b,(D-a.z)/(b.z-a.z)));
+  if(out.length<3)return out;
+  out=clipAgainstEdge(out,p=>p.z>=-D,(a,b)=>interpPt(a,b,(-D-a.z)/(b.z-a.z)));
+  return out;
+}
+
+function intersectEllipse(a,b,W,D){
+  const X=a.x/W,Z=a.z/D, dX=(b.x-a.x)/W,dZ=(b.z-a.z)/D;
+  const A=dX*dX+dZ*dZ, B=2*(X*dX+Z*dZ), C=X*X+Z*Z-1;
+  const disc=B*B-4*A*C;
+  if(disc<0||A<1e-9)return interpPt(a,b,0.5);
+  const sq=Math.sqrt(disc);
+  const t1=(-B+sq)/(2*A), t2=(-B-sq)/(2*A);
+  // pick the t value in [0,1]
+  let t=0.5;
+  if(t1>=0&&t1<=1)t=t1;
+  else if(t2>=0&&t2<=1)t=t2;
+  else t=Math.max(0,Math.min(1,t1));
+  return interpPt(a,b,t);
+}
+
+function clipPolyToEllipse(pts){
+  if(pts.length<3)return [];
+  const W=App.wMm/2,D=App.dMm/2;
+  const isIn=p=>(p.x/W)**2+(p.z/D)**2<=1.0;
+  const out=[];
+  const n=pts.length;
+  for(let i=0;i<n;i++){
+    const a=pts[(i-1+n)%n],b=pts[i];
+    const aIn=isIn(a),bIn=isIn(b);
+    if(bIn){
+      if(!aIn)out.push(intersectEllipse(a,b,W,D));
+      out.push(b);
+    } else if(aIn){
+      out.push(intersectEllipse(a,b,W,D));
+    }
+  }
+  return out;
+}
+
+function clipPolyToZone(pts){
+  if(!pts||pts.length<3)return [];
+  let result;
+  if(App.zoneType==='circ')result=clipPolyToEllipse(pts);
+  else if(App.zoneType==='hex')result=clipPolyToEllipse(pts);
+  else result=clipPolyToRect(pts);
+  // Fallback: if clipping returned empty BUT the polygon contains the zone center,
+  // the polygon is larger than the zone (Seine!). Return zone boundary as the result.
+  if(result.length<3){
+    if(pointInPolyXZ(0,0,pts)){
+      const avgY=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+      return getZoneBoundary(avgY);
+    }
+  }
+  return result;
+}
+
+function pointInPolyXZ(x,z,pts){
+  let inside=false;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+    const xi=pts[i].x,zi=pts[i].z;
+    const xj=pts[j].x,zj=pts[j].z;
+    if(((zi>z)!==(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi||1e-9)+xi))inside=!inside;
+  }
+  return inside;
+}
+
+function getZoneBoundary(refY){
+  const W=App.wMm/2,D=App.dMm/2;
+  const y=refY||(Cache.BASE_H+MIN_SURF);
+  if(App.zoneType==='circ'){
+    const N=64,pts=[];
+    for(let i=0;i<N;i++){const a=i/N*Math.PI*2;pts.push({x:W*Math.cos(a),z:D*Math.sin(a),y,lat:0,lon:0})}
+    return pts;
+  }
+  if(App.zoneType==='hex'){
+    const pts=[];
+    for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6;pts.push({x:W*Math.cos(a),z:D*Math.sin(a),y,lat:0,lon:0})}
+    return pts;
+  }
+  return [{x:-W,z:-D,y,lat:0,lon:0},{x:W,z:-D,y,lat:0,lon:0},{x:W,z:D,y,lat:0,lon:0},{x:-W,z:D,y,lat:0,lon:0}];
+}
+
+/* Tag-based polygon detection — more reliable than first/last vertex check */
+function tagsLookLikePolygon(tags){
+  if(!tags)return false;
+  if(tags.building||tags['building:part'])return true;
+  if(tags.area==='yes')return true;
+  if(tags.natural&&['water','wood','grassland','beach','sand','wetland','scree','bare_rock','rock','glacier','snowfield','heath','fell','scrub','coastline'].includes(tags.natural))return true;
+  if(tags.water)return true;
+  if(tags.waterway&&['riverbank','dock'].includes(tags.waterway))return true;
+  if(tags.landuse)return true;
+  if(tags.leisure&&['park','garden','pitch','golf_course','playground','sports_centre','stadium','nature_reserve'].includes(tags.leisure))return true;
+  if(tags.tourism&&['attraction','monument','artwork','museum'].includes(tags.tourism))return true;
+  if(tags.historic&&!['memorial'].includes(tags.historic))return true;
+  if(tags.man_made&&['pier','breakwater','jetty','bridge'].includes(tags.man_made))return true;
+  return false;
+}
+
+/* Polygon area m² */
+function polyAreaM2(geom){
+  if(!geom||geom.length<3)return 0;
+  let a=0;
+  for(let i=0,j=geom.length-1;i<geom.length;j=i++){a+=geom[j].lon*geom[i].lat-geom[i].lon*geom[j].lat}
+  return Math.abs(a)/2*111320*111320*Math.cos(geom[0].lat*Math.PI/180);
+}
+
+/* ═══════════════════ CLEAR 3D ═══════════════════ */
+function clearTG(){
+  if(!App.tg)return;
+  while(App.tg.children.length){
+    const o=App.tg.children[0];App.tg.remove(o);
+    o.geometry?.dispose();
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.dispose());
+  }
+}
+
+/* ═══════════════════ BUILD MESHES ═══════════════════ */
+function buildMeshes(){
+  if(!Cache.ready||!App.tg)return;
+  const st=S();
+  clearTG();
+  buildBase(st);
+  buildTerrain(st);
+  buildSideWalls(st); // works for ALL zone shapes via boundary-edge detection
+  buildOSM(st);
+  buildGPXMesh(st);
+  buildFrame(st);
+  buildContours(st);
+}
+
+/* Terrain surface minimum height — 0 means the lowest terrain point is flush with the base top */
+const MIN_SURF = 0; // mm (0 = terrain starts exactly at base level, flush with the frame)
+
+/* BASE */
+function buildBase(st){
+  const W=App.wMm,D=App.dMm,BASE=st.baseH,s=App.zoneType;
+  let geo;
+  if(s==='circ'){
+    geo=new THREE.CylinderGeometry(W/2,W/2,BASE,128);
+    geo.translate(0,BASE/2,0);
+    // Add a thin rim disk at the terrain minimum level to close any boundary gap
+    const rimGeo=new THREE.CylinderGeometry(W/2+0.3,W/2,0.3,128);
+    rimGeo.translate(0,BASE+0.15,0);
+    const rimMesh=new THREE.Mesh(rimGeo,new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.6}));
+    rimMesh.name='BASE_RIM';
+    App.tg.add(rimMesh);
+  } else if(s==='hex'){
+    geo=new THREE.CylinderGeometry(W/2,W/2,BASE,6);
+    geo.translate(0,BASE/2,0);
+  } else {
+    geo=new THREE.BoxGeometry(W,BASE,D);
+    geo.translate(0,BASE/2,0);
+  }
+  const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55,metalness:0}));
+  m.name='BASE';m.receiveShadow=false;App.tg.add(m);
+}
+
+/* TERRAIN SURFACE */
+function buildTerrain(st){
+  const{elevs,GRID,minE,elevRange,elevScaleMm,BASE_H}=Cache;
+  const W=App.wMm,D=App.dMm;
+  const geo=new THREE.PlaneGeometry(W,D,GRID-1,GRID-1);
+  geo.rotateX(-Math.PI/2);
+  const pos=geo.attributes.position;
+  const cols=[];
+  const isIn=[]; // track per-vertex inside/outside
+
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),z=pos.getZ(i);
+    const inside=inZone(x,z);
+    isIn.push(inside);
+    const e=elevs[i]??minE;
+    const n=Math.max(0,Math.min(1,(e-minE)/elevRange));
+    // MIN_SURF=0: terrain minimum is FLUSH with base top (no gap)
+    pos.setY(i, inside ? BASE_H + MIN_SURF + n*elevScaleMm : BASE_H);
+    const c=inside?tColor(n,st):new THREE.Color(st.cBase);
+    cols.push(c.r,c.g,c.b);
+  }
+
+  // ─── KEY FIX: remove triangles with any outside vertex for non-rectangular zones ───
+  // This gives the terrain exactly the shape of the zone (circle/hex/poly) when seen from above
+  const s=App.zoneType;
+  if((s==='circ'||s==='hex'||s==='poly')&&geo.index){
+    const orig=geo.index.array;
+    const kept=[];
+    for(let i=0;i<orig.length;i+=3){
+      const a=orig[i],b=orig[i+1],c=orig[i+2];
+      if(isIn[a]&&isIn[b]&&isIn[c]) kept.push(a,b,c);
+    }
+    geo.setIndex(kept);
+  }
+
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
+  geo.computeVertexNormals();
+  // polygonOffset pushes terrain slightly behind features — prevents z-fighting "white zone"
+  const terrMat=new THREE.MeshStandardMaterial({
+    vertexColors:true,roughness:.85,metalness:0,
+    polygonOffset:true,polygonOffsetFactor:2,polygonOffsetUnits:2
+  });
+  const mesh=new THREE.Mesh(geo,terrMat);
+  mesh.name='TERRAIN';mesh.receiveShadow=true;
+  App.tg.add(mesh);
+  return geo;
+}
+
+/* SIDE WALLS — builds walls from terrain boundary edges down to y=0
+   Uses edge-detection on the actual terrain mesh index (works for any shape: rect, circ, hex, poly)
+   Outward normals ensured by DoubleSide material */
+function buildSideWalls(st){
+  const terrMesh=App.tg.getObjectByName('TERRAIN');
+  if(!terrMesh||!terrMesh.geometry.index)return;
+
+  const pos=terrMesh.geometry.attributes.position;
+  const idx=terrMesh.geometry.index.array;
+
+  // Find boundary edges: appear exactly once in the triangle list
+  const edgeCnt={};
+  for(let i=0;i<idx.length;i+=3){
+    const a=idx[i],b=idx[i+1],c=idx[i+2];
+    [[a,b],[b,c],[c,a]].forEach(([p,q])=>{
+      const k=p<q?`${p},${q}`:`${q},${p}`;
+      edgeCnt[k]=(edgeCnt[k]||0)+1;
+    });
+  }
+
+  const verts=[],wallIdx=[];let vi=0;
+  for(const [k,cnt] of Object.entries(edgeCnt)){
+    if(cnt!==1)continue; // skip interior (shared) edges
+    const [a,b]=k.split(',').map(Number);
+    const p1={x:pos.getX(a),y:pos.getY(a),z:pos.getZ(a)};
+    const p2={x:pos.getX(b),y:pos.getY(b),z:pos.getZ(b)};
+    // Determine winding so normal faces OUTWARD from zone center
+    const mx=(p1.x+p2.x)/2,mz=(p1.z+p2.z)/2;
+    // Edge tangent × (0,1,0) gives horizontal normal candidate
+    const tx=p2.x-p1.x,tz=p2.z-p1.z;
+    // Normal should point away from center (mx,mz direction)
+    const outward=mx*tz - mz*tx; // if positive, p1→p2 winding gives outward normal; reverse if negative
+    let [pa,pb]=outward>=0?[p1,p2]:[p2,p1];
+    // Wall quad: top-left→top-right→bottom-right→bottom-left (CCW from outside)
+    verts.push(pa.x,pa.y,pa.z, pb.x,pb.y,pb.z, pb.x,0,pb.z, pa.x,0,pa.z);
+    wallIdx.push(vi,vi+1,vi+2, vi,vi+2,vi+3);vi+=4;
+  }
+
+  if(!verts.length)return;
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+  geo.setIndex(wallIdx);geo.computeVertexNormals();
+  const mat=new THREE.MeshStandardMaterial({
+    color:new THREE.Color(st.cBase),roughness:.6,
+    side:THREE.DoubleSide // visible from both sides regardless of winding
+  });
+  const m=new THREE.Mesh(geo,mat);m.name='WALLS';App.tg.add(m);
+}
+
+/* OSM ELEMENTS */
+function buildOSM(st){
+  if(!Cache.osm?.elements)return;
+  const{BASE_H,mmPerMeter,toLocal,terrYAt}=Cache;
+  const rGs=[],wGs=[],grassGs=[],forestGs=[],rockGs=[],snowGs=[],bGs=[],sGs=[],pGs=[],pedGs=[];
+  // Restrict fallback to water only (prevents white zones from large land polygons)
+  const _origClipFn=clipPolyToZone;
+  function clipPolyWaterSafe(pts,isWater){
+    const res=_origClipFn(pts);
+    if(res.length>=3)return res;
+    // Only fall back to zone boundary for WATER (not land features which would create white zones)
+    if(isWater&&pointInPolyXZ(0,0,pts)){
+      const avgY=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+      return getZoneBoundary(avgY);
+    }
+    return res;
+  }
+
+  // Pre-pass: collect building:part centroids (used to detect landmarks like Tour Eiffel)
+  Cache._buildPartCentroids=[];
+  Cache.osm.elements.forEach(way=>{
+    if(!way.geometry||way.geometry.length<3)return;
+    const t=way.tags||{};
+    if(t['building:part']&&t['building:part']!=='no'){
+      const cLat=way.geometry.reduce((s,n)=>s+n.lat,0)/way.geometry.length;
+      const cLon=way.geometry.reduce((s,n)=>s+n.lon,0)/way.geometry.length;
+      Cache._buildPartCentroids.push({lat:cLat,lon:cLon});
+    }
+  });
+
+  Cache.osm.elements.forEach(way=>{
+    if(!way.geometry||way.geometry.length<2)return;
+    const tags=way.tags||{};
+    const lps=way.geometry.map(n=>{const lc=toLocal(n.lat,n.lon);return{x:lc.x,z:lc.z,y:terrYAt(n.lat,n.lon),lat:n.lat,lon:n.lon}});
+    const cx=lps.reduce((s,p)=>s+p.x,0)/lps.length;
+    const cz=lps.reduce((s,p)=>s+p.z,0)/lps.length;
+    // Include if centroid inside, ANY vertex inside, OR polygon crosses through zone
+    const anyVertexIn=lps.some(p=>inZone(p.x,p.z));
+    if(!inZone(cx,cz)&&!anyVertexIn)return;
+    // PROPER POLYGON CLIPPING — critical for large polygons like the Seine
+    // Tag-based detection: more reliable than checking first/last vertex coordinates
+    const looksLikePolygon=tagsLookLikePolygon(tags);
+    const looksLikeLine=tags.highway||(tags.waterway&&['river','stream','canal','drain','ditch','stream_end'].includes(tags.waterway));
+    const isClosedByCoords=way.geometry.length>=3 &&
+      Math.abs(way.geometry[0].lat-way.geometry[way.geometry.length-1].lat)<1e-6 &&
+      Math.abs(way.geometry[0].lon-way.geometry[way.geometry.length-1].lon)<1e-6;
+    const treatAsPolygon=looksLikePolygon||(isClosedByCoords&&!looksLikeLine);
+    let clipped;
+    if(treatAsPolygon){
+      // Strip closing duplicate point if present
+      const pts0=isClosedByCoords?lps.slice(0,-1):lps.slice();
+      clipped=clipPolyToZone(pts0);
+    } else {
+      clipped=lps.filter(p=>inZone(p.x,p.z));
+    }
+    if(clipped.length<2)return;
+    if(treatAsPolygon&&clipped.length<3)return;
+    const avgY=clipped.reduce((s,p)=>s+p.y,0)/clipped.length;
+    // extrudePolys: uses clipped geometry (already properly clipped to zone)
+    function extrudePolys(bucket,h){
+      try{const sh=new THREE.Shape();clipped.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
+        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
+        g.rotateX(-Math.PI/2);g.translate(0,avgY,0);
+        if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
+    }
+    // extrudeWater — handles large river polygons, uses minimum terrain height
+    function extrudeWater(bucket,h){
+      let pts=clipped;
+      if(pts.length<3&&lps.length>=3){
+        const orig=looksLikePolygon?lps.slice(0,-1):lps;
+        if(pointInPolyXZ(0,0,orig)){const minYf=orig.reduce((mn,p)=>Math.min(mn,p.y),Infinity);pts=getZoneBoundary(minYf);}
+      }
+      if(pts.length<3)return;
+      const minY=pts.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
+      try{const sh=new THREE.Shape();pts.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
+        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
+        g.rotateX(-Math.PI/2);g.translate(0,minY+LAYER_Z.water,0);
+        if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
+    }
+    // (extrudeOnLayer is defined above in the ALTITUDE LAYERS section)
+    // Legacy wrapper kept for embankment/pier calls that use non-layer-specific offsets
+    function extrudeOnTerrain(bucket,h,zOffset){
+      const minY2=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
+      try{const sh=new THREE.Shape();clipped.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
+        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
+        g.rotateX(-Math.PI/2);g.translate(0,minY2+(zOffset||0),0);
+        if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
+    }
+    // ── ALTITUDE LAYERS ──
+    // Each feature type has a fixed z-offset above terrain.
+    // This stacks layers correctly (water→grass→sand→roads→buildings) with no overlap or white patches.
+    const LAYER_Z = {
+      water:    0.02,  // water sits just above terrain (lowest)
+      wetland:  0.03,
+      sand:     0.04,
+      grass:    0.06,  // grass above water
+      forest:   0.08,  // forest slightly above grass
+      rock:     0.07,
+      snow:     0.09,
+      ped:      0.10,  // pedestrian areas above sand/grass
+      pier:     0.12,
+      road:     0.15,  // roads clearly above ground features
+      bridge:   0.25,  // bridges above roads
+      building: 0.18   // buildings start above road surface
+    };
+    function extrudeOnLayer(bucket, h, layerZ){
+      // Use MINIMUM Y of polygon to avoid floating features on slopes
+      const minY=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
+      try{const sh=new THREE.Shape();clipped.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
+        const g=new THREE.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});
+        g.rotateX(-Math.PI/2);g.translate(0,minY+layerZ,0);
+        if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
+    }
+
+    // ROADS — dynamic width from OSM real data
+    if(tags.highway&&st.roadsOn){
+      const hw=tags.highway;
+      const isBridge=tags.bridge&&tags.bridge!=='no'&&tags.bridge!=='0';
+      const isPed=['footway','path','cycleway','track','bridleway','steps','pedestrian'].includes(hw);
+
+      if(!isPed||st.roadPaths){
+        // Priority: OSM width tag > lanes×3.5m > type default
+        const typeW={'motorway':12,'trunk':10,'primary':8,'secondary':7,'tertiary':6,
+          'residential':4,'service':3,'living_street':4,'unclassified':4,
+          'footway':1.5,'path':1.2,'cycleway':2,'track':3,'bridleway':2,'steps':2,'pedestrian':6}[hw]||3;
+        let roadWidthM=typeW;
+        if(tags.width&&parseFloat(tags.width))roadWidthM=parseFloat(tags.width);
+        else if(tags.lanes&&parseInt(tags.lanes))roadWidthM=parseInt(tags.lanes)*3.5;
+        // Convert to mm using real model scale
+        const wMm=Math.max(st.roadMW, roadWidthM*Cache.mmPerMeter*(st.roadWM||1));
+        // Bridge: elevated above water; road: at road layer height
+        const yOff=isBridge
+          ? LAYER_Z.bridge+st.roadH   // bridges clearly above everything
+          : (st.roadDepth>0?-(st.roadDepth*0.3):(LAYER_Z.road+st.roadH));
+        const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+yOff,p.z));
+        const g=mkRibbon(v3,wMm);if(g)rGs.push(g);
+      }
+      // Pedestrian AREAS (closed polygon highways) = light pavement surface
+      if(hw==='pedestrian'&&treatAsPolygon){
+        extrudeOnLayer(pedGs,0.15,LAYER_Z.ped);
+      }
+    }
+
+    // EMBANKMENTS / QUAIS / BERGES — important for rivers like Seine
+    if(tags.man_made==='embankment'||tags.waterway==='bank'||tags.natural==='cliff'&&tags.waterway){
+      if(clipped.length>=2){
+        const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+0.5,p.z));
+        const g=mkRibbon(v3,1.5);if(g)rGs.push(g);
+      }
+    }
+    if(tags.man_made==='quay'||tags.man_made==='pier'||tags.man_made==='jetty'){
+      extrudeOnLayer(pGs,st.pierH||0.8,LAYER_Z.pier);
+    }
+    // WATER — comprehensive detection (natural=water, water=river/lake, waterway, etc.)
+    if(st.waterOn){
+      const ww=tags.waterway;
+      // All water polygon types including water=river (Seine in Paris uses this)
+      const isWaterPoly=tags.natural==='water'||tags.waterway==='riverbank'
+        ||tags.landuse==='reservoir'||tags.landuse==='basin'
+        ||tags.man_made==='dock'||tags.man_made==='fish_pond'
+        ||(tags.water&&['river','lake','canal','pond','reservoir','lagoon','oxbow'].includes(tags.water))
+        ||(tags.natural==='coastline'&&st.waterSea);
+      const isWaterLine=ww&&['river','stream','canal','drain','ditch'].includes(ww);
+      // Water sits at terrain level — use extrudeWater which handles large river polygons correctly
+      if(isWaterPoly){const area=polyAreaM2(way.geometry.map(n=>({lat:n.lat,lon:n.lon})));if(area>=st.waterMA)extrudeOnLayer(wGs,st.waterH,LAYER_Z.water);}
+      if(isWaterLine){
+        const bw=ww==='river'?2.5:ww==='canal'?1.5:.5;
+        const minYw=clipped.reduce((mn,p)=>Math.min(mn,p.y),Infinity);
+        const v3=clipped.map(p=>new THREE.Vector3(p.x,minYw+LAYER_Z.water+st.waterH,p.z));
+        const g=mkRibbon(v3,Math.max(st.waterMW,bw));if(g)wGs.push(g);
+      }
+    }
+    // GRASS (light green) and FOREST (dark green) — slightly higher than water
+    if(st.grassOn){
+      const lu=tags.landuse||'',nat=tags.natural||'',lei=tags.leisure||'';
+      const isForest=lu.match(/forest|wood/)||nat==='wood';
+      const isGrass=lu.match(/grass|meadow|village_green|recreation/)||nat.match(/grassland|heath/)||lei.match(/park|garden|pitch|golf_course|playground/);
+      if(isForest) extrudeOnLayer(forestGs,st.grassH+0.15,LAYER_Z.forest);
+      else if(isGrass) extrudeOnLayer(grassGs,st.grassH,LAYER_Z.grass);
+    }
+    // ROCKY AREAS — gray, raised slightly
+    if(tags.natural&&['scree','bare_rock','rock'].includes(tags.natural)) extrudeOnLayer(rockGs,0.4,LAYER_Z.rock);
+    // SNOW / GLACIERS — white, raised slightly
+    if(tags.natural&&['glacier','snowfield'].includes(tags.natural)) extrudeOnLayer(snowGs,0.5,LAYER_Z.snow);
+    // BUILDINGS & BUILDING:PARTS — proper min_height support for landmarks (Tour Eiffel etc.)
+    const isBuilding=tags.building&&tags.building!=='no';
+    const isBuildPart=tags['building:part']&&tags['building:part']!=='no';
+    if((isBuilding||isBuildPart)&&st.buildOn){
+      const area=polyAreaM2(way.geometry.map(n=>({lat:n.lat,lon:n.lon})));
+      if(area<st.buildMA)return;
+      // Skip main building ONLY for true TOWERS (like Tour Eiffel: man_made=tower + height>150m)
+      // NOT for tourism=attraction, historic, museums etc — those must always render their footprint
+      if(isBuilding&&!isBuildPart){
+        const isTrueTower=tags.man_made==='tower';
+        if(isTrueTower){
+          const taggedHeight=parseFloat(tags.height||tags['building:height']||0)||0;
+          if(taggedHeight>150){
+            const hasPart=Cache._buildPartCentroids&&Cache._buildPartCentroids.some(bp=>{
+              const lats=way.geometry.map(n=>n.lat),lons=way.geometry.map(n=>n.lon);
+              const minLa=Math.min(...lats),maxLa=Math.max(...lats);
+              const minLo=Math.min(...lons),maxLo=Math.max(...lons);
+              if(bp.lat<minLa||bp.lat>maxLa||bp.lon<minLo||bp.lon>maxLo)return false;
+              let inside=false;
+              for(let i=0,j=way.geometry.length-1;i<way.geometry.length;j=i++){
+                const xi=way.geometry[i].lon,yi=way.geometry[i].lat;
+                const xj=way.geometry[j].lon,yj=way.geometry[j].lat;
+                if(((yi>bp.lat)!==(yj>bp.lat))&&(bp.lon<(xj-xi)*(bp.lat-yi)/(yj-yi)+xi))inside=!inside;
+              }
+              return inside;
+            });
+            if(hasPart)return; // Skip main polygon — building:parts render the tower structure
+          }
+        }
+      }
+      // Parse heights — min_height for stacking parts (Tour Eiffel legs, platforms, spire)
+      const minHm=parseFloat(tags['building:min_height']||tags['min_height']||0)||0;
+      let maxHm=5;
+      if(tags['building:height'])maxHm=parseFloat(tags['building:height'])||5;
+      else if(tags['height'])maxHm=parseFloat(tags['height'])||5;
+      else if(tags['building:levels']){
+        const minLvl=parseInt(tags['building:min_level']||0)||0;
+        const lvls=parseInt(tags['building:levels'])||1;
+        maxHm=lvls*3.2;
+      }
+      const partHm=Math.max(0.5,maxHm-minHm);
+      const maxBuildMm=Math.max(10,App.wMm*0.25);
+      const hMm=Math.min(maxBuildMm,Math.max(st.buildMH,partHm*mmPerMeter*(st.buildHS||1)));
+      const baseOffMm=minHm*mmPerMeter*(st.buildHS||1);
+      try{
+        let pts2=clipped;
+        if(st.buildSS&&st.buildSS!==1){const bx=pts2.reduce((s,p)=>s+p.x,0)/pts2.length,bz=pts2.reduce((s,p)=>s+p.z,0)/pts2.length;pts2=pts2.map(p=>({...p,x:bx+(p.x-bx)*st.buildSS,z:bz+(p.z-bz)*st.buildSS}));}
+        const baseY=pts2.reduce((s,p)=>Math.max(s,p.y),0);
+        const sh=new THREE.Shape();pts2.forEach((p,i)=>i===0?sh.moveTo(p.x,-p.z):sh.lineTo(p.x,-p.z));
+        const bev=st.buildRoofs&&hMm>1&&minHm===0;
+        const g=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:bev,bevelSize:bev?.2:0,bevelThickness:bev?.12:0,bevelSegments:1});
+        // Place at terrain + building layer offset + min_height offset
+        g.rotateX(-Math.PI/2);g.translate(0,baseY+LAYER_Z.building+baseOffMm,0);
+        // TAPER: apply to thin tall building:parts (tower spires, upper sections)
+        // Lower thresholds to work at typical print scale (mmPerMeter ≈ 0.1-0.2mm/m)
+        const xs=pts2.map(p=>p.x),zs=pts2.map(p=>p.z);
+        const fpW=Math.max(...xs)-Math.min(...xs);
+        const fpD=Math.max(...zs)-Math.min(...zs);
+        const fpSize=Math.max(fpW,fpD);
+        // Spire: part is taller than 2× its footprint width, and >2mm tall
+        const isSpire=isBuildPart&&hMm>fpSize*2&&hMm>2;
+        // Tower top: part starts above 30m physical height and is tall relative to footprint
+        const isTowerTop=isBuildPart&&minHm>30&&hMm>fpSize*0.7;
+        if(isSpire||isTowerTop){
+          const pos=g.attributes.position;
+          const cx2=xs.reduce((s,x)=>s+x,0)/xs.length;
+          const cz2=zs.reduce((s,z)=>s+z,0)/zs.length;
+          const yMin=baseY+0.05+baseOffMm;
+          const yMax=yMin+hMm;
+          for(let i=0;i<pos.count;i++){
+            const py=pos.getY(i);
+            const t=Math.max(0,Math.min(1,(py-yMin)/(yMax-yMin)));
+            // Taper to 30% at top for spires, 50% for tower sections
+            const tScale=isSpire?0.70:0.50;
+            const scale=1.0-t*tScale;
+            const px=pos.getX(i),pz=pos.getZ(i);
+            pos.setX(i,cx2+(px-cx2)*scale);
+            pos.setZ(i,cz2+(pz-cz2)*scale);
+          }
+          g.computeVertexNormals();
+        }
+        if(g.attributes.uv)g.deleteAttribute('uv');bGs.push(g);
+      }catch(e){}
+    }
+    // SAND
+    if(st.sandOn&&(tags.natural==='beach'||tags.natural==='sand')) extrudeOnLayer(sGs,st.sandH,LAYER_Z.sand);
+    // PIERS
+    if(st.pierOn&&tags.man_made&&['pier','breakwater','jetty'].includes(tags.man_made)) extrudePolys(pGs,st.pierH);
+  });
+  function addLayer(geos,col,name){
+    const mg=mergeGeos(geos);if(!mg)return;
+    const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
+      color:new THREE.Color(col),roughness:.92,metalness:0,flatShading:false
+    }));
+    m.name=name;App.tg.add(m);
+  }
+  if(st.waterOn) addLayer(wGs,    st.waterCol, 'WATER');
+  if(st.grassOn) addLayer(grassGs, st.grassCol,'GRASS');   // light green (from settings)
+  if(st.grassOn) addLayer(forestGs,'#1f5c1f',  'FOREST');  // dark green
+  addLayer(rockGs,  '#9a9a9a','ROCK');
+  addLayer(snowGs,  '#f8f8f8','SNOW');
+  if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
+  if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
+  // Pedestrian areas — light warm cream, distinct from buildings
+  addLayer(pedGs, '#c4c0b8', 'PED_AREA'); // light gray — clearly lighter than buildings (#727272)
+  if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
+  if(st.buildOn) addLayer(bGs,    st.buildCol, 'BUILDINGS');
+}
+
+
+/* GPX MESH */
+function buildGPXMesh(st){
+  const pts=App.gpxPoints;
+  if(!pts.length||!Cache.ready)return;
+  const old=App.tg.getObjectByName('GPX');
+  if(old){App.tg.remove(old);old.geometry?.dispose();old.material?.dispose()}
+  const{mmPerMeter,toLocal,terrYAt}=Cache;
+  const tubeR=Math.max(st.gpxMW/2,st.gpxTW*mmPerMeter/2);
+  const v3s=pts
+    .map(p=>{const lc=toLocal(p.lat,p.lon);return new THREE.Vector3(lc.x,terrYAt(p.lat,p.lon)+st.gpxH,lc.z)})
+    .filter(v=>isFinite(v.x)&&isFinite(v.z));
+  if(v3s.length<2)return;
+  // Use ribbon for better flat appearance
+  const col=new THREE.Color(st.gpxCol);
+  const g=mkRibbon(v3s,tubeR*2);
+  if(g){
+    const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:col,roughness:.3,metalness:.1,emissive:col,emissiveIntensity:.08}));
+    m.name='GPX';m.castShadow=true;App.tg.add(m);
+  }
+}
+
+/* FRAME */
+function buildFrame(st){
+  if(!st.frameOn)return;
+  const W=App.wMm,D=App.dMm,T=st.frameTh,H=st.frameH,BASE=Cache.BASE_H;
+  const s=App.zoneType||'rect';
+  try{
+    const outer=new THREE.Shape(),hole=new THREE.Path();
+    if(s==='circ'){
+      // High-res circle (128 pts) for smooth ring
+      const N=128,OR=W/2+T,IR=W/2-0.3;
+      for(let i=0;i<=N;i++){const a=i/N*Math.PI*2;i===0?outer.moveTo(OR*Math.cos(a),OR*Math.sin(a)):outer.lineTo(OR*Math.cos(a),OR*Math.sin(a))}
+      for(let i=0;i<=N;i++){const a=i/N*Math.PI*2;i===0?hole.moveTo(IR*Math.cos(a),IR*Math.sin(a)):hole.lineTo(IR*Math.cos(a),IR*Math.sin(a))}
+    } else if(s==='hex'){
+      for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6,R=W/2+T;i===0?outer.moveTo(R*Math.cos(a),R*Math.sin(a)):outer.lineTo(R*Math.cos(a),R*Math.sin(a))}
+      outer.closePath();
+      for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6,r=W/2-.5;i===0?hole.moveTo(r*Math.cos(a),r*Math.sin(a)):hole.lineTo(r*Math.cos(a),r*Math.sin(a))}
+      hole.closePath();
+    } else {
+      const R=st.frameRnd?Math.min(T*.7,5):0;
+      const ox=-(W/2+T),oy=-(D/2+T),ow=W+2*T,oh=D+2*T;
+      if(R>0){
+        outer.moveTo(ox+R,oy);outer.lineTo(ox+ow-R,oy);outer.quadraticCurveTo(ox+ow,oy,ox+ow,oy+R);
+        outer.lineTo(ox+ow,oy+oh-R);outer.quadraticCurveTo(ox+ow,oy+oh,ox+ow-R,oy+oh);
+        outer.lineTo(ox+R,oy+oh);outer.quadraticCurveTo(ox,oy+oh,ox,oy+oh-R);
+        outer.lineTo(ox,oy+R);outer.quadraticCurveTo(ox,oy,ox+R,oy);
+      } else {
+        outer.moveTo(ox,oy);outer.lineTo(ox+ow,oy);outer.lineTo(ox+ow,oy+oh);outer.lineTo(ox,oy+oh);outer.closePath();
+      }
+      hole.moveTo(-W/2,-D/2);hole.lineTo(W/2,-D/2);hole.lineTo(W/2,D/2);hole.lineTo(-W/2,D/2);hole.closePath();
+    }
+    outer.holes.push(hole);
+    // Frame starts at bottom of model (0) and extends up H mm
+    const geo=new THREE.ExtrudeGeometry(outer,{depth:H,bevelEnabled:false});
+    geo.rotateX(-Math.PI/2);
+    const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.frameCol),roughness:.65});
+    const mesh=new THREE.Mesh(geo,mat);mesh.name='FRAME';App.tg.add(mesh);
+
+    // Text on frame
+    if(st.frameTxtOn&&st.frameTxt){
+      const canvas=document.createElement('canvas');canvas.width=1024;canvas.height=128;
+      const ctx=canvas.getContext('2d');
+      const fs=Math.max(16,Math.min(96,T*3.5));
+      ctx.fillStyle=st.frameCol;ctx.font=`bold ${fs}px 'Inter',sans-serif`;
+      ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(st.frameTxt,512,64);
+      const tex=new THREE.CanvasTexture(canvas);
+      const plW=W+T*2,plH=T*.85;
+      const pmesh=new THREE.Mesh(new THREE.PlaneGeometry(plW,plH),new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false}));
+      pmesh.rotateX(-Math.PI/2);
+      const zPos=st.frameTxtPos==='top'?-(D/2+T*.5):D/2+T*.5;
+      pmesh.position.set(0,H+0.3,zPos);
+      pmesh.name='FRAME_TXT';App.tg.add(pmesh);
+    }
+  }catch(e){console.warn('Frame:',e)}
+}
+
+/* ═══════════════════ CONTOUR LINES — marching squares ═══════════════════ */
+function buildContours(st){
+  const old=App.tg.getObjectByName('CONTOURS');
+  if(old){App.tg.remove(old);old.geometry?.dispose();old.material?.dispose()}
+  if(!st.ctOn||!Cache.ready)return;
+  const{elevs,GRID,minE,maxE,BASE_H,bounds,terrYAt}=Cache;
+  if(!elevs||GRID<4)return;
+  const latD=bounds.maxLat-bounds.minLat,lonD=bounds.maxLon-bounds.minLon;
+  const cLat=(bounds.minLat+bounds.maxLat)/2,cLon=(bounds.minLon+bounds.maxLon)/2;
+  const la2mm=App.dMm/latD,lo2mm=App.wMm/lonD;
+  const hRaise=st.ctH,hw=st.ctW/2,interval=st.ctInterval;
+  const firstLvl=Math.ceil(minE/interval)*interval;
+  const lastLvl=Math.floor(maxE/interval)*interval;
+  if(firstLvl>lastLvl||interval<=0)return;
+
+  function toXZ(lat,lon){return{x:(lon-cLon)*lo2mm,z:-(lat-cLat)*la2mm};}
+  function interpPt(r0,c0,e0,r1,c1,e1,level){
+    const t=Math.max(0,Math.min(1,(level-e0)/(e1-e0)));
+    const lat=bounds.minLat+(r0+t*(r1-r0))/(GRID-1)*latD;
+    const lon=bounds.minLon+(c0+t*(c1-c0))/(GRID-1)*lonD;
+    const{x,z}=toXZ(lat,lon);
+    return{x,z,y:terrYAt(lat,lon)+hRaise};
+  }
+
+  const allVerts=[],allIdx=[];let vi=0;
+
+  function pushQuad(p1,p2){
+    if(!p1||!p2)return;
+    const mx=(p1.x+p2.x)/2,mz=(p1.z+p2.z)/2;
+    if(!inZone(mx,mz))return;
+    const dx=p2.x-p1.x,dz=p2.z-p1.z,len=Math.sqrt(dx*dx+dz*dz);
+    if(len<1e-6)return;
+    const rx=dz/len*hw,rz=-dx/len*hw;
+    allVerts.push(
+      p1.x+rx,p1.y,p1.z+rz, p1.x-rx,p1.y,p1.z-rz,
+      p2.x-rx,p2.y,p2.z-rz, p2.x+rx,p2.y,p2.z+rz
+    );
+    allIdx.push(vi,vi+1,vi+2, vi,vi+2,vi+3);vi+=4;
+  }
+
+  for(let level=firstLvl;level<=lastLvl;level+=interval){
+    for(let r=0;r<GRID-1;r++){
+      for(let c=0;c<GRID-1;c++){
+        const eTL=elevs[r*GRID+c],eTR=elevs[r*GRID+(c+1)];
+        const eBL=elevs[(r+1)*GRID+c],eBR=elevs[(r+1)*GRID+(c+1)];
+        const bTL=eTL>=level?8:0,bTR=eTR>=level?4:0;
+        const bBR=eBR>=level?2:0,bBL=eBL>=level?1:0;
+        const ms=bTL|bTR|bBR|bBL;
+        if(ms===0||ms===15)continue;
+        const eT=()=>interpPt(r,c,eTL,r,c+1,eTR,level);
+        const eR=()=>interpPt(r,c+1,eTR,r+1,c+1,eBR,level);
+        const eB=()=>interpPt(r+1,c,eBL,r+1,c+1,eBR,level);
+        const eL=()=>interpPt(r,c,eTL,r+1,c,eBL,level);
+        switch(ms){
+          case 1:case 14:pushQuad(eL(),eB());break;
+          case 2:case 13:pushQuad(eR(),eB());break;
+          case 3:case 12:pushQuad(eL(),eR());break;
+          case 4:case 11:pushQuad(eT(),eR());break;
+          case 5:pushQuad(eT(),eL());pushQuad(eR(),eB());break;
+          case 6:case 9:pushQuad(eT(),eB());break;
+          case 7:case 8:pushQuad(eT(),eL());break;
+          case 10:pushQuad(eT(),eR());pushQuad(eB(),eL());break;
+        }
+      }
+    }
+  }
+
+  if(!allVerts.length)return;
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(allVerts,3));
+  geo.setIndex(allIdx);geo.computeVertexNormals();
+  const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.ctCol),roughness:.75,metalness:0});
+  const m=new THREE.Mesh(geo,mat);m.name='CONTOURS';App.tg.add(m);
+}
+
+/* ═══════════════════ DEBOUNCED AUTO-REFRESH ═══════════════════ */
+let _dbt=null;
+function debouncedBuild(){
+  clearTimeout(_dbt);
+  _dbt=setTimeout(()=>{if(App.generated&&Cache.ready&&App.tg)buildMeshes();},500);
+}
+document.querySelectorAll('#sp input,#sp select').forEach(el=>{
+  el.addEventListener('input',debouncedBuild);
+  el.addEventListener('change',debouncedBuild);
+});
+
+/* ═══════════════════ GENERATE ═══════════════════ */
+$('btn-gen').addEventListener('click',async()=>{
+  if(!App.bounds){modal('ZONE MANQUANTE','Dessinez d\'abord une zone sur la carte\n(Rectangle, Carré, Rond, Hexagone ou Polygone).');return}
+  const btn=$('btn-gen');btn.disabled=true;
+  $('empty3d').classList.add('h');
+  try{
+    await ensureThree();
+    if(!App.tg)throw new Error('Visualiseur 3D non prêt');
+    const st=S();
+    if(App.realW&&App.realH){const _sc=st.maxDim/Math.max(App.realH,App.realW);App.wMm=Math.round(App.realW*_sc);App.dMm=Math.round(App.realH*_sc);}
+    setP(5,'ÉTAPE 1/5','Calcul des coordonnées...');await tick();
+    const bounds=App.bounds;
+    const cLat=(bounds.maxLat+bounds.minLat)/2,cLon=(bounds.maxLon+bounds.minLon)/2;
+    const latDiff=bounds.maxLat-bounds.minLat,lonDiff=bounds.maxLon-bounds.minLon;
+    const la2mm=App.dMm/latDiff,lo2mm=App.wMm/lonDiff;
+    const realW=lonDiff*Math.cos(cLat*Math.PI/180)*111320;
+    Cache.mmPerMeter=App.wMm/realW;
+    Cache.bounds=bounds;
+    Cache.toLocal=(lat,lon)=>({x:(lon-cLon)*lo2mm,z:-(lat-cLat)*la2mm});
+
+    setP(14,'ÉTAPE 2/5','Téléchargement des altitudes...');await tick();
+    const GRID=st.tRes;Cache.GRID=GRID;
+    const latLons=[];
+    for(let r=0;r<GRID;r++) for(let c=0;c<GRID;c++)
+      latLons.push([bounds.minLat+(r/(GRID-1))*latDiff,bounds.minLon+(c/(GRID-1))*lonDiff]);
+    // Use user-specified max zoom
+    const zoom=Math.min(st.tZoom,15);
+    let elevs;
+    try{elevs=await sampleElevs(latLons,zoom,st.tSrc)}catch(e){elevs=latLons.map(()=>0)}
+    // Apply smoothing
+    elevs=smoothElevs(elevs,GRID,st.tSmooth);
+    Cache.elevs=elevs;
+    const minE=Math.min(...elevs),maxE=Math.max(...elevs),eRange=maxE-minE||1;
+    // Raw elevation scale based on real data + user exaggeration
+    const rawScale=eRange*Cache.mmPerMeter*st.tExag;
+    // AUTO-CAP: limit total terrain variation to 12% of model width
+    // This prevents mountain zones from producing absurdly tall models
+    // while keeping urban areas flat and mountainous areas impressively hilly
+    const MAX_ELEV_HEIGHT=App.wMm*0.20;
+    const scaleMm=Math.min(rawScale, MAX_ELEV_HEIGHT);
+    Cache.minE=minE;Cache.maxE=maxE;Cache.elevRange=eRange;Cache.elevScaleMm=scaleMm;
+    Cache.BASE_H=st.baseH;
+    // Bilinear interpolation for precise placement
+    Cache.terrYAt=makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,st.baseH,minE,eRange,scaleMm);
+
+    setP(38,'ÉTAPE 3/5','Données OpenStreetMap...');await tick();
+    const bbox=`${bounds.minLat},${bounds.minLon},${bounds.maxLat},${bounds.maxLon}`;
+    // Enhanced OSM query — includes RELATIONS for multipolygons (Seine!) + recursion
+    const q=`[out:json][timeout:55];(`+
+      `way["highway"](${bbox});`+
+      `way["building"](${bbox});`+
+      `way["building:part"](${bbox});`+
+      // Water WAYS
+      `way["natural"="water"](${bbox});`+
+      `way["water"~"^(river|lake|canal|pond|reservoir|lagoon|oxbow)$"](${bbox});`+
+      `way["waterway"~"^(river|stream|canal|drain|ditch|riverbank|dock|fish_pass)$"](${bbox});`+
+      `way["landuse"~"^(reservoir|basin)$"](${bbox});`+
+      `way["natural"="coastline"](${bbox});`+
+      `way["man_made"~"^(dock|fish_pond)$"](${bbox});`+
+      // Water RELATIONS (the Seine is one!)
+      `relation["natural"="water"](${bbox});`+
+      `relation["water"](${bbox});`+
+      `relation["waterway"](${bbox});`+
+      `relation["landuse"~"^(reservoir|basin)$"](${bbox});`+
+      // Berges / Embankments / Quays
+      `way["man_made"~"^(embankment|quay|pier|breakwater|jetty)$"](${bbox});`+
+      `way["waterway"="bank"](${bbox});`+
+      `way["embankment"](${bbox});`+
+      // Vegetation
+      `way["natural"~"^(wood|grassland|beach|sand|wetland|scree|bare_rock|rock|glacier|snowfield)$"](${bbox});`+
+      `way["landuse"~"^(grass|meadow|forest|wood|village_green|recreation_ground|farmland|cemetery|allotments)$"](${bbox});`+
+      `way["leisure"~"^(park|garden|pitch|golf_course|playground|sports_centre|stadium|nature_reserve)$"](${bbox});`+
+      // Vegetation RELATIONS
+      `relation["landuse"~"^(forest|wood|farmland)$"](${bbox});`+
+      `relation["leisure"~"^(park|garden|nature_reserve)$"](${bbox});`+
+      // Structures
+      `way["man_made"~"^(tower|bridge)$"](${bbox});`+
+      `way["tourism"~"^(attraction|monument|artwork|museum)$"](${bbox});`+
+      `way["historic"](${bbox});`+
+    `);(._;>;);out geom qt;`;
+    let osmData={elements:[]};
+    try{const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});if(res.ok)osmData=await res.json()}catch(e){}
+
+    // Expand relations: assemble ALL outer member ways into ONE closed ring per relation
+    // (Critical for Seine multipolygon — each member is a short open segment, not a polygon)
+    const expanded=[];
+    osmData.elements.forEach(elem=>{
+      if(elem.type==='way'&&elem.geometry){
+        expanded.push(elem);
+      } else if(elem.type==='relation'&&Array.isArray(elem.members)&&elem.tags){
+        // Stitch all outer member geometries into one closed polygon ring
+        const outerGeom=[];
+        elem.members.forEach(m=>{
+          if(m.type==='way'&&Array.isArray(m.geometry)&&m.geometry.length>=2&&m.role==='outer'){
+            // Skip the last point to avoid duplicates at junctions between segments
+            outerGeom.push(...m.geometry.slice(0,-1));
+          }
+        });
+        if(outerGeom.length>=3){
+          outerGeom.push({...outerGeom[0]}); // close the ring
+          expanded.push({type:'way',tags:{...elem.tags},geometry:outerGeom});
+        }
+      }
+    });
+    Cache.osm={elements:expanded};
+
+    setP(72,'ÉTAPE 4/5','Construction du modèle 3D...');await tick();
+    Cache.ready=true;buildMeshes();
+
+    setP(96,'ÉTAPE 5/5','Finalisation...');await tick();
+
+    // Frame camera
+    const maxH=st.baseH+scaleMm;
+    App.controls.target.set(0,maxH*.25,0);
+    App.camera.position.set(0,maxH+App.wMm*.55,App.dMm*.9+maxH*.5);
+    App.controls.update();
+
+    const eb=$('elev');
+    eb.innerHTML=`Alt. min <span class="ev">${Math.round(minE)}m</span><br>Alt. max <span class="ev">${Math.round(maxE)}m</span><br>Δ <span class="ev">+${Math.round(eRange)}m</span>`;
+    eb.style.display='block';
+    const h=$('hint3d');h.style.display='block';setTimeout(()=>h.style.display='none',5000);
+    setP(null);App.generated=true;btn.disabled=false;
+  }catch(err){
+    setP(null);$('empty3d').classList.remove('h');btn.disabled=false;
+    modal('ERREUR DE GÉNÉRATION','Échec :\n'+(err.message||'Inconnue')+'\n\nEssayez de zoomer ou de réduire la zone.');
+    console.error(err);
+  }
+});
+
+/* ═══════════════════ EXPORT 3MF ═══════════════════ */
+$('btn-export').addEventListener('click',async()=>{
+  if(!App.tg||!App.tg.children.length){modal('EXPORT','Générez d\'abord le terrain 3D.');return}
+  const btn=$('btn-export');btn.disabled=true;btn.textContent='⏳ Génération...';
+  try{
+    const objects=[];let oid=1;
+    App.tg.traverse(obj=>{
+      if(!(obj instanceof THREE.Mesh))return;
+      const geo=obj.geometry.clone();
+      obj.updateWorldMatrix(true,false);geo.applyMatrix4(obj.matrixWorld);
+      let col='E4DFD8';
+      if(obj.material&&obj.material.vertexColors)
+        col=($('c-base').value||'#e4dfd8').replace('#','').toUpperCase();
+      else if(obj.material&&obj.material.color)
+        col=obj.material.color.getHexString().toUpperCase();
+      const pos=geo.attributes.position,idx=geo.index;
+      if(!pos||pos.count<3){geo.dispose();return}
+      let vx='',tr='';
+      if(idx){
+        for(let i=0;i<pos.count;i++)vx+=`<vertex x="${pos.getX(i).toFixed(4)}" y="${pos.getZ(i).toFixed(4)}" z="${pos.getY(i).toFixed(4)}"/>`;
+        for(let i=0;i<idx.count;i+=3)tr+=`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i+1)}" v3="${idx.getX(i+2)}"/>`;
+      }else{
+        for(let i=0;i<pos.count;i++)vx+=`<vertex x="${pos.getX(i).toFixed(4)}" y="${pos.getZ(i).toFixed(4)}" z="${pos.getY(i).toFixed(4)}"/>`;
+        for(let i=0;i<pos.count;i+=3)tr+=`<triangle v1="${i}" v2="${i+1}" v3="${i+2}"/>`;
+      }
+      geo.dispose();if(!tr)return;
+      objects.push({id:oid++,name:obj.name||'mesh',col,vx,tr});
+    });
+    if(!objects.length){modal('EXPORT','Aucun maillage.');btn.textContent='💾 Exporter .3MF (AMS)';btn.disabled=false;return}
+
+    // AMS-compatible 3MF
+    const matGroups=objects.map(o=>`<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}" />`+`</basematerials>`).join('\n');
+    const resObjs=objects.map(o=>`<object id="${o.id}" type="model" p:pid="${o.id+1000}" p:pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
+    const buildItems=objects.map(o=>`<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`).join('\n');
+    const model=`<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"><metadata name="Title">Terrain3D</metadata><metadata name="Application">Terrain3D Pro</metadata><resources>\n${matGroups}\n${resObjs}\n</resources><build>\n${buildItems}\n</build></model>`;
+    const rels=`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
+    const ct=`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-3mfdocument"/></Types>`;
+
+    const zip=new JSZip();
+    zip.file('[Content_Types].xml',ct);zip.folder('_rels').file('.rels',rels);
+    zip.folder('3D').file('3dmodel.model',model);
+    const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download=`Terrain3D_AMS_${Date.now()}.3mf`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(a.href);
+    btn.textContent='✅ Téléchargé !';
+    setTimeout(()=>{btn.textContent='💾 Exporter .3MF (AMS)';btn.disabled=false},3000);
+  }catch(err){
+    modal('ERREUR EXPORT','Échec : '+(err.message||''));
+    btn.textContent='💾 Exporter .3MF (AMS)';btn.disabled=false;
+  }
+});
+</script>
+</body>
+</html>
