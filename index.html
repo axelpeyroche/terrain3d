@@ -309,6 +309,8 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
+<script src="https://unpkg.com/pbf@3/dist/pbf.js"></script>
 
 <script>
 'use strict';
@@ -668,15 +670,15 @@ function ll2tile(lat,lon,z){
 function pxIn(lat,lon,z,tx,ty){
   const n=2**z,xF=(lon+180)/360*n-tx,r=lat*Math.PI/180;
   const yF=(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n-ty;
-  return{px:Math.max(0,Math.min(255,Math.floor(xF*256))),py:Math.max(0,Math.min(255,Math.floor(yF*256)))};
+  return{px:Math.max(0,Math.min(511,Math.floor(xF*512))),py:Math.max(0,Math.min(511,Math.floor(yF*512)))};
 }
 async function fetchTile(z,x,y){
   const img=new Image();img.crossOrigin='anonymous';
-  img.src=`https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${z}/${x}/${y}.png`;
+  img.src=`https://tiles.mapterhorn.com/${z}/${x}/${y}.webp`;
   await new Promise((ok,er)=>{img.onload=ok;img.onerror=er});
-  const cv=document.createElement('canvas');cv.width=cv.height=256;
+  const cv=document.createElement('canvas');cv.width=cv.height=512;
   const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);
-  return ctx.getImageData(0,0,256,256);
+  return ctx.getImageData(0,0,512,512);
 }
 async function sampleElevs(latLons,zoom){
   const tm={};
@@ -686,7 +688,7 @@ async function sampleElevs(latLons,zoom){
     const t=ll2tile(la,lo,zoom),tile=tm[`${t.x}_${t.y}`];
     if(!tile?.d)return 0;
     const{px,py}=pxIn(la,lo,zoom,t.x,t.y);
-    const i=(py*256+px)*4;
+    const i=(py*512+px)*4;
     return(tile.d.data[i]*256+tile.d.data[i+1]+tile.d.data[i+2]/256)-32768;
   });
 }
@@ -881,42 +883,140 @@ function clipLineToZone(pts){
   return out;
 }
 
-/* Tag-based polygon detection */
-function tagsLookLikePolygon(tags){
-  if(!tags)return false;
-  if(tags.building||tags['building:part'])return true;
-  if(tags.area==='yes')return true;
-  if(tags.natural&&['water','wood','grassland','beach','sand','wetland','scree','bare_rock','rock','glacier','snowfield','heath','fell','scrub'].includes(tags.natural))return true;
-  if(tags.water)return true;
-  if(tags.waterway&&['riverbank','dock'].includes(tags.waterway))return true;
-  if(tags.landuse)return true;
-  if(tags.leisure&&['park','garden','pitch','golf_course','playground','sports_centre','stadium','nature_reserve'].includes(tags.leisure))return true;
-  if(tags.man_made&&['pier','breakwater','jetty'].includes(tags.man_made))return true;
-  return false;
+/* ═══════════════════ OVERTURE MAPS (PMTiles + MVT) ═══════════════════ */
+const OVERTURE_RELEASE='2025-03-19.0'; // update from overturemaps.org/releases
+
+function tilesForBBox(minLon,minLat,maxLon,maxLat,z){
+  const n=2**z;
+  function lonX(lon){return Math.floor((lon+180)/360*n)}
+  function latY(lat){const r=lat*Math.PI/180;return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n)}
+  const x0=lonX(minLon),x1=lonX(maxLon),y0=latY(maxLat),y1=latY(minLat);
+  const tiles=[];
+  for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)tiles.push({z,x,y});
+  return tiles;
 }
-function polyAreaM2(geom){
-  if(!geom||geom.length<3)return 0;
-  let a=0;
-  for(let i=0,j=geom.length-1;i<geom.length;j=i++)a+=geom[j].lon*geom[i].lat-geom[i].lon*geom[j].lat;
-  return Math.abs(a)/2*111320*111320*Math.cos(geom[0].lat*Math.PI/180);
+
+function tileCoordToLL(px,py,z,tx,ty,extent=4096){
+  const n=2**z;
+  const lon=(tx+px/extent)/n*360-180;
+  const latRad=Math.atan(Math.sinh(Math.PI*(1-2*(ty+py/extent)/n)));
+  return{lat:latRad*180/Math.PI,lon};
 }
-function stitchWaySegments(segs){
-  if(!segs.length)return[];
-  if(segs.length===1)return segs[0].pts.slice();
-  const EPS=1e-6,eq=(a,b)=>Math.abs(a.lat-b.lat)<EPS&&Math.abs(a.lon-b.lon)<EPS;
-  const used=new Array(segs.length).fill(false);
-  let ring=segs[0].pts.slice();used[0]=true;
-  for(let iter=0;iter<segs.length*2;iter++){
-    const tail=ring[ring.length-1];let found=false;
-    for(let j=0;j<segs.length;j++){
-      if(used[j])continue;
-      const pts=segs[j].pts;
-      if(eq(tail,pts[0])){ring.push(...pts.slice(1));used[j]=true;found=true;break}
-      else if(eq(tail,pts[pts.length-1])){ring.push(...pts.slice(0,-1).reverse());used[j]=true;found=true;break}
+
+async function decompressGzip(buffer){
+  try{
+    const ds=new DecompressionStream('gzip');
+    const writer=ds.writable.getWriter(),reader=ds.readable.getReader();
+    writer.write(new Uint8Array(buffer));writer.close();
+    const chunks=[];
+    while(true){const{done,value}=await reader.read();if(done)break;chunks.push(value)}
+    const len=chunks.reduce((s,c)=>s+c.length,0);
+    const out=new Uint8Array(len);let off=0;
+    for(const c of chunks){out.set(c,off);off+=c.length}
+    return out.buffer;
+  }catch(e){return buffer}
+}
+
+function decodeMVTGeometry(cmds){
+  const rings=[];let ring=null,x=0,y=0,i=0;
+  while(i<cmds.length){
+    const cmdLen=cmds[i++],cmd=cmdLen&0x7,count=cmdLen>>3;
+    if(cmd===1){
+      if(ring&&ring.length>1)rings.push(ring);ring=[];
+      for(let j=0;j<count;j++){
+        x+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        y+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        ring.push({x,y});
+      }
+    }else if(cmd===2){
+      for(let j=0;j<count;j++){
+        x+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        y+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        ring.push({x,y});
+      }
+    }else if(cmd===7){
+      if(ring&&ring.length>1){ring.push({...ring[0]});rings.push(ring);ring=null}
     }
-    if(!found)break;
   }
-  return ring;
+  if(ring&&ring.length>1)rings.push(ring);
+  return rings;
+}
+
+function decodeMVT(buffer){
+  const tile={layers:{}};
+  function readValue(tag,obj,pb){
+    if(tag===1)obj.val=pb.readString();
+    else if(tag===2)obj.val=pb.readFloat();
+    else if(tag===3)obj.val=pb.readDouble();
+    else if(tag===5)obj.val=pb.readVarint();
+    else if(tag===6)obj.val=pb.readSVarint();
+    else if(tag===7)obj.val=pb.readBoolean();
+  }
+  function readFeature(tag,feat,pb){
+    if(tag===1)feat.id=pb.readVarint();
+    else if(tag===2)feat.rawTags=pb.readPackedVarint();
+    else if(tag===3)feat.type=pb.readVarint();
+    else if(tag===4)feat.geometryCmds=pb.readPackedVarint();
+  }
+  function readLayer(tag,layer,pb){
+    if(tag===2)layer.name=pb.readString();
+    else if(tag===3){const feat=pb.readMessage(readFeature,{id:null,rawTags:[],type:0,geometryCmds:[]});layer.featuresRaw.push(feat)}
+    else if(tag===4)layer.keys.push(pb.readString());
+    else if(tag===5){const v=pb.readMessage(readValue,{val:null});layer.values.push(v.val)}
+    else if(tag===15)layer.extent=pb.readVarint();
+  }
+  function readTile(tag,tile,pb){
+    if(tag===3){
+      const layer=pb.readMessage(readLayer,{name:'',extent:4096,keys:[],values:[],featuresRaw:[]});
+      layer.features=layer.featuresRaw.map(f=>{
+        const props={};
+        for(let i=0;i<f.rawTags.length;i+=2){
+          const k=layer.keys[f.rawTags[i]],v=layer.values[f.rawTags[i+1]];
+          if(k!==undefined&&v!==undefined)props[k]=v;
+        }
+        return{type:f.type,properties:props,geometry:decodeMVTGeometry(f.geometryCmds)};
+      });
+      delete layer.featuresRaw;
+      if(layer.name)tile.layers[layer.name]=layer;
+    }
+  }
+  const pb=new Pbf(buffer instanceof ArrayBuffer?new Uint8Array(buffer):buffer);
+  pb.readFields(readTile,tile);
+  return tile;
+}
+
+async function fetchOvertureTheme(theme,bounds,zoom){
+  const url=`https://overturemaps-tiles-us-west-2-beta.s3.amazonaws.com/${OVERTURE_RELEASE}/${theme}.pmtiles`;
+  const pm=new pmtiles.PMTiles(url);
+  const tiles=tilesForBBox(bounds.minLon,bounds.minLat,bounds.maxLon,bounds.maxLat,zoom);
+  const features=[];
+  for(const{z,x,y}of tiles){
+    try{
+      const resp=await pm.getZxy(z,x,y);
+      if(!resp||!resp.data)continue;
+      const data=await decompressGzip(resp.data);
+      const vt=decodeMVT(data);
+      for(const[layerName,layer]of Object.entries(vt.layers)){
+        for(const feat of layer.features){
+          const rings=feat.geometry.map(ring=>
+            ring.map(pt=>tileCoordToLL(pt.x,pt.y,z,x,y,layer.extent))
+          );
+          features.push({layer:layerName,type:feat.type,properties:feat.properties,rings});
+        }
+      }
+    }catch(e){console.warn('Overture tile error:',theme,z,x,y,e.message)}
+  }
+  return features;
+}
+
+async function fetchOverture(bounds){
+  const Z=14;
+  const[buildings,transport,base]=await Promise.all([
+    fetchOvertureTheme('buildings',bounds,Z),
+    fetchOvertureTheme('transportation',bounds,Z),
+    fetchOvertureTheme('base',bounds,Z)
+  ]);
+  return[...buildings,...transport,...base];
 }
 
 /* ═══════════════════ CLEAR 3D ═══════════════════ */
@@ -1001,9 +1101,9 @@ function buildSideWalls(st){
   }
 }
 
-/* ═══════════════════ BUILD OSM ═══════════════════ */
-function buildOSM(st){
-  if(!Cache.osm?.elements)return;
+/* ═══════════════════ BUILD OVERTURE ═══════════════════ */
+function buildOverture(st){
+  if(!Cache.overture?.length)return;
   const{mmPerMeter,toLocal,terrYAt}=Cache;
   const waterGs=[],grassGs=[],forestGs=[],roadGs=[],buildGs=[];
 
@@ -1037,94 +1137,77 @@ function buildOSM(st){
     }catch(e){}
   }
 
-  Cache.osm.elements.forEach(way=>{
-    if(!way.geometry||way.geometry.length<2)return;
-    const tags=way.tags||{};
-    const lps=way.geometry.map(n=>{
-      const lc=toLocal(n.lat,n.lon);
-      return{x:lc.x,z:lc.z,y:terrYAt(n.lat,n.lon),lat:n.lat,lon:n.lon};
+  for(const feat of Cache.overture){
+    const{layer,type,properties:p,rings}=feat;
+    if(!rings||!rings[0]||rings[0].length<2)continue;
+    const outerRing=rings[0].map(({lat,lon})=>{
+      const lc=toLocal(lat,lon);
+      return{x:lc.x,z:lc.z,y:terrYAt(lat,lon),lat,lon};
     });
-    const cx=lps.reduce((s,p)=>s+p.x,0)/lps.length;
-    const cz=lps.reduce((s,p)=>s+p.z,0)/lps.length;
-    if(!inZone(cx,cz)&&!lps.some(p=>inZone(p.x,p.z)))return;
+    const cx=outerRing.reduce((s,pt)=>s+pt.x,0)/outerRing.length;
+    const cz=outerRing.reduce((s,pt)=>s+pt.z,0)/outerRing.length;
+    if(!inZone(cx,cz)&&!outerRing.some(pt=>inZone(pt.x,pt.z)))continue;
 
-    const isClosedCoords=way.geometry.length>=3&&
-      Math.abs(way.geometry[0].lat-way.geometry[way.geometry.length-1].lat)<1e-6&&
-      Math.abs(way.geometry[0].lon-way.geometry[way.geometry.length-1].lon)<1e-6;
-    const looksLikePoly=tagsLookLikePolygon(tags);
-    const looksLikeLine=tags.highway||(tags.waterway&&['river','stream','canal','drain','ditch'].includes(tags.waterway));
-    const treatAsPolygon=looksLikePoly||(isClosedCoords&&!looksLikeLine);
-
+    const isPoly=type===3,isLine=type===2;
     let clipped;
-    if(treatAsPolygon){
-      const pts0=isClosedCoords?lps.slice(0,-1):lps.slice();
-      clipped=clipPolyToZone(pts0);
+    if(isPoly){
+      /* Drop closing duplicate vertex if present */
+      const pts=outerRing.length>1&&
+        Math.abs(outerRing[0].lat-outerRing[outerRing.length-1].lat)<1e-6&&
+        Math.abs(outerRing[0].lon-outerRing[outerRing.length-1].lon)<1e-6
+        ?outerRing.slice(0,-1):outerRing;
+      clipped=clipPolyToZone(pts);
     }else{
-      clipped=clipLineToZone(lps);
+      clipped=clipLineToZone(outerRing);
     }
-    if(clipped.length<2)return;
-    if(treatAsPolygon&&clipped.length<3)return;
-
-    /* ── WATER ── */
-    if(st.waterOn){
-      const isWaterPoly=tags.natural==='water'||tags.waterway==='riverbank'||
-        ['reservoir','basin'].includes(tags.landuse)||
-        (tags.water&&['river','lake','canal','pond','reservoir','lagoon','oxbow'].includes(tags.water));
-      const isWaterLine=tags.waterway&&['river','stream','canal','drain'].includes(tags.waterway)&&!treatAsPolygon;
-      if(isWaterPoly&&treatAsPolygon){extrudeTerrain(waterGs,clipped,st.waterH);return}
-      if(isWaterLine){
-        const wM={river:4,canal:2,stream:0.8,drain:0.5}[tags.waterway]||1;
-        const wMm=Math.max(0.5,wM*mmPerMeter);
-        const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+st.waterH,p.z));
-        const g=mkRibbon(v3,wMm,st.waterH+1.5);if(g)waterGs.push(g);
-        return;
-      }
-    }
-
-    /* ── GRASS / FOREST ── */
-    if(st.grassOn&&treatAsPolygon){
-      const lu=tags.landuse||'',nat=tags.natural||'',lei=tags.leisure||'';
-      const isForest=/forest|wood/.test(lu)||nat==='wood';
-      const isGrass=/grass|meadow|village_green|recreation_ground|cemetery|allotments|farmland/.test(lu)||
-        /grassland|heath|scrub/.test(nat)||
-        /park|garden|pitch|golf_course|playground|sports_centre|stadium|nature_reserve/.test(lei);
-      if(isForest){extrudeTerrain(forestGs,clipped,st.grassH+0.1);return}
-      if(isGrass){extrudeTerrain(grassGs,clipped,st.grassH);return}
-    }
-
-    /* ── ROADS ── */
-    if(st.roadsOn&&tags.highway&&!treatAsPolygon){
-      const hw=tags.highway;
-      const typeW={motorway:12,trunk:10,primary:8,secondary:7,tertiary:6,
-        residential:4,service:3,unclassified:4,living_street:4,
-        footway:1.5,path:1.2,cycleway:2,pedestrian:6,track:3,steps:2}[hw]||3;
-      let roadWM=typeW;
-      if(tags.width&&parseFloat(tags.width))roadWM=parseFloat(tags.width);
-      else if(tags.lanes&&parseInt(tags.lanes))roadWM=parseInt(tags.lanes)*3.5;
-      const wMm=Math.max(st.roadMW,roadWM*mmPerMeter);
-      const v3=clipped.map(p=>new THREE.Vector3(p.x,p.y+st.roadH,p.z));
-      const g=mkRibbon(v3,wMm,st.roadH+1.5);if(g)roadGs.push(g);
-      return;
-    }
+    if(clipped.length<2)continue;
+    if(isPoly&&clipped.length<3)continue;
 
     /* ── BUILDINGS ── */
-    if(st.buildOn&&tags.building&&tags.building!=='no'&&treatAsPolygon){
-      const area=polyAreaM2(way.geometry.map(n=>({lat:n.lat,lon:n.lon})));
-      if(area<5)return;
+    if(layer==='building'&&st.buildOn&&isPoly){
       let hM=5;
-      if(tags.height)hM=parseFloat(tags.height)||5;
-      else if(tags['building:levels'])hM=(parseInt(tags['building:levels'])||1)*3.2;
+      if(p.height)hM=parseFloat(p.height)||5;
+      else if(p.num_floors)hM=parseFloat(p.num_floors)*3.2;
       const hMm=Math.min(App.wMm*0.10,Math.max(0.6,hM*mmPerMeter*st.buildHS));
       try{
-        const baseY=clipped.reduce((s,p)=>Math.max(s,p.y),-Infinity);
-        const sh=new THREE.Shape(clipped.map(p=>new THREE.Vector2(p.x,-p.z)));
+        const baseY=clipped.reduce((s,pt)=>Math.max(s,pt.y),-Infinity);
+        const sh=new THREE.Shape(clipped.map(pt=>new THREE.Vector2(pt.x,-pt.z)));
         const geo=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:false});
         geo.rotateX(-Math.PI/2);geo.translate(0,baseY+0.1,0);
         if(geo.attributes.uv)geo.deleteAttribute('uv');
         buildGs.push(geo);
       }catch(e){}
     }
-  });
+
+    /* ── ROADS ── */
+    else if(layer==='segment'&&st.roadsOn&&isLine){
+      const cls=p.class||p.subtype||'residential';
+      const typeW={motorway:12,trunk:10,primary:8,secondary:7,tertiary:6,
+        residential:4,service:3,track:3,path:1.2,cycleway:2,
+        footway:1.5,pedestrian:6,living_street:4,unclassified:4}[cls]||3;
+      const wMm=Math.max(st.roadMW,typeW*mmPerMeter);
+      const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+st.roadH,pt.z));
+      const g=mkRibbon(v3,wMm,st.roadH+1.5);if(g)roadGs.push(g);
+    }
+
+    /* ── WATER ── */
+    else if(layer==='water'&&st.waterOn){
+      if(isPoly)extrudeTerrain(waterGs,clipped,st.waterH);
+      else if(isLine){
+        const wMm=Math.max(0.5,2*mmPerMeter);
+        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+st.waterH,pt.z));
+        const g=mkRibbon(v3,wMm,st.waterH+1.5);if(g)waterGs.push(g);
+      }
+    }
+
+    /* ── LAND USE (grass, forest, parks) ── */
+    else if(layer==='land_use'&&st.grassOn&&isPoly){
+      const sub=(p.subtype||p.class||'').toLowerCase();
+      if(/forest|wood|tree/.test(sub))extrudeTerrain(forestGs,clipped,st.grassH+0.1);
+      else if(/park|garden|nature|recreation|pitch|golf|playground|grass|meadow|farmland|cemetery|allotment/.test(sub))
+        extrudeTerrain(grassGs,clipped,st.grassH);
+    }
+  }
 
   function addLayer(geos,col,name){
     const mg=mergeGeos(geos);if(!mg)return;
@@ -1162,7 +1245,7 @@ function buildMeshes(){
   buildBase(st);
   buildTerrain(st);
   buildSideWalls(st);
-  buildOSM(st);
+  buildOverture(st);
   buildGPXMesh(st);
 }
 
@@ -1210,53 +1293,15 @@ $('btn-gen').addEventListener('click',async()=>{
     Cache.BASE_H=st.baseH;
     Cache.terrYAt=makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,st.baseH,minE,eRange,scaleMm);
 
-    setP(40,'OPENSTREETMAP','Récupération des données cartographiques...');await tick();
-    const bbox=`${bounds.minLat},${bounds.minLon},${bounds.maxLat},${bounds.maxLon}`;
-    const q=`[out:json][timeout:55];(`+
-      `way["highway"](${bbox});`+
-      `way["building"](${bbox});`+
-      `way["natural"="water"](${bbox});`+
-      `way["water"~"^(river|lake|canal|pond|reservoir|lagoon|oxbow)$"](${bbox});`+
-      `way["waterway"~"^(river|stream|canal|drain|riverbank)$"](${bbox});`+
-      `way["landuse"~"^(reservoir|basin)$"](${bbox});`+
-      `relation["natural"="water"](${bbox});`+
-      `relation["water"](${bbox});`+
-      `relation["waterway"](${bbox});`+
-      `way["natural"~"^(wood|grassland|scrub|heath)$"](${bbox});`+
-      `way["landuse"~"^(grass|meadow|forest|wood|village_green|recreation_ground|cemetery|allotments|farmland)$"](${bbox});`+
-      `way["leisure"~"^(park|garden|pitch|golf_course|playground|sports_centre|stadium|nature_reserve)$"](${bbox});`+
-      `relation["landuse"~"^(forest|wood|farmland)$"](${bbox});`+
-      `relation["leisure"~"^(park|garden|nature_reserve)$"](${bbox});`+
-    `);(._;>;);out geom qt;`;
-
-    let osmData={elements:[]};
-    const MIRRORS=['https://overpass-api.de/api/interpreter','https://lz4.overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
-    for(const url of MIRRORS){
-      try{
-        const r=await fetch(url,{method:'POST',body:q,signal:AbortSignal.timeout(58000)});
-        const t=await r.text();
-        if(!t.trim().startsWith('<')){osmData=JSON.parse(t);break}
-      }catch(e){console.warn('OSM mirror failed:',url,e.message)}
+    setP(40,'OVERTURE MAPS','Récupération des données cartographiques...');await tick();
+    let overtureFeatures=[];
+    try{
+      overtureFeatures=await fetchOverture(bounds);
+      console.log(`Overture: ${overtureFeatures.length} features loaded`);
+    }catch(e){
+      console.warn('Overture fetch failed:',e.message);
     }
-
-    /* Expand relations into closed rings */
-    const expanded=[];
-    osmData.elements.forEach(elem=>{
-      if(elem.type==='way'&&elem.geometry){expanded.push(elem)}
-      else if(elem.type==='relation'&&Array.isArray(elem.members)&&elem.tags){
-        const outerSegs=[];
-        elem.members.forEach(m=>{if(m.type==='way'&&Array.isArray(m.geometry)&&m.geometry.length>=2&&m.role==='outer')outerSegs.push({pts:m.geometry})});
-        if(outerSegs.length>=1){
-          const ring=stitchWaySegments(outerSegs);
-          if(ring.length>=3){
-            const first=ring[0],last=ring[ring.length-1];
-            if(Math.abs(first.lat-last.lat)>1e-7||Math.abs(first.lon-last.lon)>1e-7)ring.push({...first});
-            expanded.push({type:'way',tags:{...elem.tags},geometry:ring});
-          }
-        }
-      }
-    });
-    Cache.osm={elements:expanded};
+    Cache.overture=overtureFeatures;
 
     setP(72,'MODÈLE 3D','Construction du modèle...');await tick();
     Cache.ready=true;buildMeshes();
