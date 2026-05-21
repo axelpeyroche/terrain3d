@@ -124,7 +124,7 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
 .pld{width:10px;height:10px;border-radius:2px;flex-shrink:0}
 
 /* ─ 3D VIEWER ─ */
-#vp{flex:1 1 0;position:relative;background:#94afc0;overflow:hidden;min-width:0}
+#vp{flex:1 1 0;position:relative;background:#b8d4e8;overflow:hidden;min-width:0}
 #c3d{position:absolute;top:0;left:0;width:100%!important;height:100%!important;display:block}
 #gen-wrap{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:100}
 #empty3d{position:absolute;inset:0;z-index:5;pointer-events:none;
@@ -134,7 +134,7 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
 #empty3d svg{opacity:.2;width:50px;height:50px}
 #empty3d p{font-family:var(--mono);font-size:9px;letter-spacing:1px;text-align:center;line-height:2.2}
 #prog{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
-  background:rgba(148,175,192,.75);backdrop-filter:blur(4px)}
+  background:rgba(184,212,232,.75);backdrop-filter:blur(4px)}
 #pc{background:var(--p1);border:1px solid var(--b2);border-radius:10px;padding:24px 32px;
   min-width:280px;display:flex;flex-direction:column;gap:12px}
 #ps{font-family:var(--mono);font-size:9px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
@@ -291,7 +291,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
 <div class="sec">
   <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Terrain</span><span class="sc o" id="ca-topo">▼</span></div>
   <div class="sb" id="sb-topo">
-    <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#c6bfae"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#eeebe6"></div>
     <div class="r"><label>Résolution</label>
       <select id="t-res"><option value="56">Rapide (56²)</option><option value="96">Normale (96²)</option><option value="128" selected>Haute (128²)</option><option value="256">Max (256²)</option></select></div>
     <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
@@ -309,11 +309,11 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('road')"><span class="si">🛣️</span><span class="sn">Routes</span>
     <input type="checkbox" id="road-on" checked onclick="ev(event)"><span class="sc o" id="ca-road">▼</span></div>
   <div class="sb" id="sb-road">
-    <div class="r"><label>Couleur</label><input type="color" id="road-col" value="#2a2a2a"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="road-col" value="#262626"></div>
     <!-- Hardcoded defaults -->
-    <input type="hidden" id="road-h" value="0.4">
+    <input type="hidden" id="road-h" value="0.8">
     <input type="hidden" id="road-depth" value="0">
-    <input type="hidden" id="road-mw" value="0.4">
+    <input type="hidden" id="road-mw" value="0.5">
     <input type="hidden" id="road-wm" value="1">
     <input type="checkbox" id="road-paths" checked style="display:none">
   </div>
@@ -324,8 +324,8 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('water')"><span class="si">💧</span><span class="sn">Eau</span>
     <input type="checkbox" id="water-on" checked onclick="ev(event)"><span class="sc o" id="ca-water">▼</span></div>
   <div class="sb h" id="sb-water">
-    <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#2e92d0"></div>
-    <input type="hidden" id="water-h" value="0.8">
+    <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#3399ff"></div>
+    <input type="hidden" id="water-h" value="0.6">
     <input type="hidden" id="water-depth" value="0">
     <input type="hidden" id="water-mw" value="0.5">
     <input type="hidden" id="water-ma" value="10">
@@ -338,7 +338,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('grass')"><span class="si">🌿</span><span class="sn">Parcs / Végétation</span>
     <input type="checkbox" id="grass-on" checked onclick="ev(event)"><span class="sc o" id="ca-grass">▼</span></div>
   <div class="sb h" id="sb-grass">
-    <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#54aa38"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#0fe300"></div>
     <input type="hidden" id="grass-h" value="0.4">
   </div>
 </div>
@@ -348,10 +348,10 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('build')"><span class="si">🏛️</span><span class="sn">Bâtiments</span>
     <input type="checkbox" id="build-on" checked onclick="ev(event)"><span class="sc o" id="ca-build">▼</span></div>
   <div class="sb h" id="sb-build">
-    <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#9a9a9a"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#b8b8b8"></div>
     <div class="r"><label>Hauteur ×</label><input type="number" id="build-hs" value="1" step="0.1" min="0.1" max="5"></div>
     <input type="hidden" id="build-ss" value="1">
-    <input type="hidden" id="build-mh" value="0.5">
+    <input type="hidden" id="build-mh" value="0.6">
     <input type="hidden" id="build-ma" value="5">
     <input type="checkbox" id="build-roofs" style="display:none">
   </div>
@@ -365,7 +365,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
     <div class="r"><label>Intervalle</label><input type="number" id="ct-int" value="50" step="10" min="5"><span>m</span></div>
     <input type="hidden" id="ct-h" value="0.3">
     <input type="hidden" id="ct-w" value="0.4">
-    <input type="hidden" id="ct-col" value="#8a7860">
+    <input type="hidden" id="ct-col" value="#c0bab2">
   </div>
 </div>
 
@@ -385,7 +385,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
   <div class="sh" onclick="ts('frame')"><span class="si">🖼️</span><span class="sn">Cadre</span>
     <input type="checkbox" id="frame-on" onclick="ev(event)"><span class="sc o" id="ca-frame">▼</span></div>
   <div class="sb h" id="sb-frame">
-    <div class="r"><label>Couleur</label><input type="color" id="frame-col" value="#c8c2b8"></div>
+    <div class="r"><label>Couleur</label><input type="color" id="frame-col" value="#d8d4ce"></div>
     <div class="r"><label>Hauteur</label><input type="number" id="frame-hh" value="8" step="1" min="1"><span>mm</span></div>
     <div class="r"><label>Épaisseur</label><input type="number" id="frame-th" value="5" step="1" min="1"><span>mm</span></div>
     <input type="hidden" id="frame-rnd" value="">
@@ -1129,8 +1129,8 @@ function ensureThree(){
       const W=vp.clientWidth,H=vp.clientHeight;
       if(!W||!H){setTimeout(tryIt,100);return}
       const scene=new THREE.Scene();
-      scene.background=new THREE.Color(0x94afc0);
-      scene.fog=new THREE.Fog(0x94afc0,1200,4000);
+      scene.background=new THREE.Color(0xb8d4e8);
+      scene.fog=new THREE.Fog(0xb8d4e8,1200,4000);
       App.scene=scene;
       const camera=new THREE.PerspectiveCamera(40,W/H,0.5,8000);
       camera.position.set(0,180,280);App.camera=camera;
@@ -2054,17 +2054,17 @@ function buildOSM(st){
   }
   if(st.waterOn) addLayer(wGs,    st.waterCol, 'WATER');
   if(st.grassOn) addLayer(grassGs, st.grassCol,'GRASS');
-  if(st.grassOn) addLayer(forestGs,'#2a6e1e',  'FOREST');  // deep green, clearly darker than parks
-  addLayer(rockGs,  '#a0a0a0','ROCK');
-  addLayer(snowGs,  '#f6f6f6','SNOW');
+  if(st.grassOn) addLayer(forestGs,'#098a00',  'FOREST');  // dark forest green, clearly distinct from vivid park green
+  addLayer(rockGs,  '#b8b4ae','ROCK');
+  addLayer(snowGs,  '#f4f4f4','SNOW');
   if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
   if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
-  // Urban landuse — subtle tints so OSM zones read but don't overwhelm
-  addLayer(resGs, '#d4cabb', 'RESIDENTIAL'); // light warm stone
-  addLayer(comGs, '#c89a60', 'COMMERCIAL');  // warm amber
-  addLayer(indGs, '#8098b0', 'INDUSTRIAL');  // slate blue-gray
-  // Pedestrian areas — neutral paving tone
-  addLayer(pedGs, '#cec4b2', 'PED_AREA');
+  // Urban landuse — very subtle on near-white base
+  addLayer(resGs, '#e0dbd4', 'RESIDENTIAL');
+  addLayer(comGs, '#ddd0b8', 'COMMERCIAL');
+  addLayer(indGs, '#ccd4dc', 'INDUSTRIAL');
+  // Pedestrian areas — light pavement tone
+  addLayer(pedGs, '#dedad4', 'PED_AREA');
   if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
   if(st.buildOn) addLayer(bGs,    st.buildCol, 'BUILDINGS');
 }
