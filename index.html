@@ -294,9 +294,9 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
     <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#eeebe6"></div>
     <div class="r"><label>Résolution</label>
       <select id="t-res"><option value="56">Rapide (56²)</option><option value="96">Normale (96²)</option><option value="128" selected>Haute (128²)</option><option value="256">Max (256²)</option></select></div>
-    <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
-    <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="2"><span class="rv" id="t-smooth-v">2</span></div>
-    <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
+    <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="1" step="0.5" min="0.5" max="10"></div>
+    <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="1"><span class="rv" id="t-smooth-v">1</span></div>
+    <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="1" step="1" min="1"><span>mm</span></div>
     <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
     <!-- Technical defaults (not shown) -->
     <input type="hidden" id="t-zoom" value="15">
@@ -360,7 +360,7 @@ hr.sp{border:none;border-top:1px solid var(--mut);margin:2px 0}
 <!-- ── COURBES DE NIVEAU ── -->
 <div class="sec">
   <div class="sh" onclick="ts('ct')"><span class="si">〰️</span><span class="sn">Courbes de niveau</span>
-    <input type="checkbox" id="ct-on" checked onclick="ev(event)"><span class="sc o" id="ca-ct">▼</span></div>
+    <input type="checkbox" id="ct-on" onclick="ev(event)"><span class="sc o" id="ca-ct">▼</span></div>
   <div class="sb" id="sb-ct">
     <div class="r"><label>Intervalle</label><input type="number" id="ct-int" value="50" step="10" min="5"><span>m</span></div>
     <input type="hidden" id="ct-h" value="0.3">
@@ -1617,7 +1617,7 @@ function buildTerrain(st){
   // Single flat terrain color — OSM features provide all color variation on top
   const terrMat=new THREE.MeshStandardMaterial({
     color:new THREE.Color(st.cBase),roughness:.92,metalness:0,
-    polygonOffset:true,polygonOffsetFactor:12,polygonOffsetUnits:12
+    polygonOffset:true,polygonOffsetFactor:20,polygonOffsetUnits:20
   });
   const mesh=new THREE.Mesh(geo,terrMat);
   mesh.name='TERRAIN';App.tg.add(mesh);
@@ -1809,7 +1809,7 @@ function buildOSM(st){
         if(!tris||!tris.length)return;
         // SINK bottom 2mm below terrain: the cap is a solid plug going INTO the terrain body.
         // This prevents z-fighting (white patches) AND terrain bleeding through on any slope.
-        const SINK=2.0;
+        const SINK=3.0;
         const verts=new Float32Array(n*6); // top[0..n-1] + bottom[n..2n-1]
         for(let i=0;i<n;i++){
           const yBase=sampleTerrainY(deduped[i].x,deduped[i].z)+layerZ;
@@ -1854,7 +1854,7 @@ function buildOSM(st){
         // ── DENSE TERRAIN-FOLLOWING RESAMPLING ──────────────────────────────────
         // OSM waypoints can be 10-100m apart. Between them, terrain may rise or fall.
         // We resample every terrain-grid cell width to get exact intermediate heights.
-        const ROAD_SINK=2.0; // sink ribbon 2mm into terrain — same as surface caps
+        const ROAD_SINK=3.0; // sink ribbon 3mm into terrain — deeper for clean slopes
         const cellW=Math.max(0.5,App.wMm/(Cache.GRID-1||47));
         const v3raw=clipped.map(p=>new THREE.Vector3(p.x,p.y+yOff,p.z));
         const v3=[];
@@ -1902,8 +1902,9 @@ function buildOSM(st){
       const isWaterLine=ww&&['river','stream','canal','drain','ditch'].includes(ww);
       // Water sits at terrain level — use extrudeWater which handles large river polygons correctly
       if(isWaterPoly){const area=polyAreaM2(way.geometry.map(n=>({lat:n.lat,lon:n.lon})));if(area>=st.waterMA)extrudeOnLayer(wGs,st.waterH,LAYER_Z.water);}
-      if(isWaterLine){
-        const bw=ww==='river'?2.5:ww==='canal'?1.5:.5;
+      // Water lines (rivers/canals without polygon) — ribbon only for small waterways; large rivers come as polygons
+      if(isWaterLine&&ww!=='river'){
+        const bw=ww==='canal'?1.5:.5;
         const waterYOff=LAYER_Z.water+st.waterH;
         // Dense terrain-following for waterway lines + 2mm sink
         const cellW2=Math.max(0.5,App.wMm/(Cache.GRID-1||47));
@@ -2048,7 +2049,7 @@ function buildOSM(st){
     const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
       color:new THREE.Color(col),roughness:.96,metalness:0,flatShading:false,
       side:THREE.DoubleSide,
-      polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4
+      polygonOffset:true,polygonOffsetFactor:-8,polygonOffsetUnits:-8
     }));
     m.name=name;App.tg.add(m);
   }
@@ -2059,12 +2060,11 @@ function buildOSM(st){
   addLayer(snowGs,  '#f4f4f4','SNOW');
   if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
   if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
-  // Urban landuse — very subtle on near-white base
-  addLayer(resGs, '#e0dbd4', 'RESIDENTIAL');
-  addLayer(comGs, '#ddd0b8', 'COMMERCIAL');
-  addLayer(indGs, '#ccd4dc', 'INDUSTRIAL');
-  // Pedestrian areas — light pavement tone
-  addLayer(pedGs, '#dedad4', 'PED_AREA');
+  // Urban landuse & pedestrian areas suppressed — map2model renders only water/grass/roads/buildings
+  // addLayer(resGs, ...) — disabled for visual cleanliness
+  // addLayer(comGs, ...) — disabled
+  // addLayer(indGs, ...) — disabled
+  // addLayer(pedGs, ...) — disabled
   if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
   if(st.buildOn) addLayer(bGs,    st.buildCol, 'BUILDINGS');
 }
