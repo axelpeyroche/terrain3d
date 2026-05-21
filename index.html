@@ -673,11 +673,13 @@ function pxIn(lat,lon,z,tx,ty){
   return{px:Math.max(0,Math.min(511,Math.floor(xF*512))),py:Math.max(0,Math.min(511,Math.floor(yF*512)))};
 }
 async function fetchTile(z,x,y){
-  const img=new Image();img.crossOrigin='anonymous';
-  img.src=`https://tiles.mapterhorn.com/${z}/${x}/${y}.webp`;
-  await new Promise((ok,er)=>{img.onload=ok;img.onerror=er});
+  /* fetch+createImageBitmap évite le canvas taint lié à crossOrigin */
+  const resp=await fetch(`https://tiles.mapterhorn.com/${z}/${x}/${y}.webp`);
+  if(!resp.ok)throw new Error(`Mapterhorn ${z}/${x}/${y}: HTTP ${resp.status}`);
+  const blob=await resp.blob();
+  const bmp=await createImageBitmap(blob);
   const cv=document.createElement('canvas');cv.width=cv.height=512;
-  const ctx=cv.getContext('2d');ctx.drawImage(img,0,0);
+  const ctx=cv.getContext('2d');ctx.drawImage(bmp,0,0);
   return ctx.getImageData(0,0,512,512);
 }
 async function sampleElevs(latLons,zoom){
@@ -987,13 +989,15 @@ function decodeMVT(buffer){
 
 async function fetchOvertureTheme(theme,bounds,zoom){
   const url=`https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_RELEASE}/${theme}.pmtiles`;
+  console.log(`Fetching Overture [${theme}]:`,url);
   const pm=new pmtiles.PMTiles(url);
   const tiles=tilesForBBox(bounds.minLon,bounds.minLat,bounds.maxLon,bounds.maxLat,zoom);
+  console.log(`  → ${tiles.length} tile(s) at z${zoom}`);
   const features=[];
   for(const{z,x,y}of tiles){
     try{
       const resp=await pm.getZxy(z,x,y);
-      if(!resp||!resp.data)continue;
+      if(!resp||!resp.data){console.warn(`  tile ${z}/${x}/${y}: no data`);continue;}
       const data=await decompressGzip(resp.data);
       const vt=decodeMVT(data);
       for(const[layerName,layer]of Object.entries(vt.layers)){
@@ -1004,8 +1008,11 @@ async function fetchOvertureTheme(theme,bounds,zoom){
           features.push({layer:layerName,type:feat.type,properties:feat.properties,rings});
         }
       }
-    }catch(e){console.warn('Overture tile error:',theme,z,x,y,e.message)}
+    }catch(e){console.error(`Overture tile error [${theme}] ${z}/${x}/${y}:`,e.message)}
   }
+  if(features.length)console.log(`  → [${theme}] ${features.length} features, layers:`,
+    [...new Set(features.map(f=>f.layer))].join(', '));
+  else console.warn(`  → [${theme}] 0 features`);
   return features;
 }
 
@@ -1297,11 +1304,13 @@ $('btn-gen').addEventListener('click',async()=>{
     let overtureFeatures=[];
     try{
       overtureFeatures=await fetchOverture(bounds);
-      console.log(`Overture: ${overtureFeatures.length} features loaded`);
+      console.log(`Overture OK: ${overtureFeatures.length} features`);
+      console.table(overtureFeatures.slice(0,5).map(f=>({layer:f.layer,type:f.type,props:JSON.stringify(f.properties).slice(0,80)})));
     }catch(e){
-      console.warn('Overture fetch failed:',e.message);
+      console.error('Overture fetch failed:',e);
     }
     Cache.overture=overtureFeatures;
+    console.log('Elevation range:',minE,'→',maxE,'m  (exag:',st.tExag,')');
 
     setP(72,'MODÈLE 3D','Construction du modèle...');await tick();
     Cache.ready=true;buildMeshes();
