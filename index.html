@@ -986,7 +986,7 @@ function decodeMVT(buffer){
 }
 
 async function fetchOvertureTheme(theme,bounds,zoom){
-  const url=`https://overturemaps-tiles-us-west-2-beta.s3.amazonaws.com/${OVERTURE_RELEASE}/${theme}.pmtiles`;
+  const url=`https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_RELEASE}/${theme}.pmtiles`;
   const pm=new pmtiles.PMTiles(url);
   const tiles=tilesForBBox(bounds.minLon,bounds.minLat,bounds.maxLon,bounds.maxLat,zoom);
   const features=[];
