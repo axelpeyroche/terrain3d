@@ -1771,6 +1771,36 @@ function buildOSM(st){
         g.rotateX(-Math.PI/2);g.translate(0,minY2+(zOffset||0),0);
         if(g.attributes.uv)g.deleteAttribute('uv');bucket.push(g);}catch(e){}
     }
+    // ── POLYGON OUTSET ──
+    // Expands a 2D {x,z} polygon ring outward by `d` mm using miter joints.
+    // Purpose: fill the micro-gaps that exist in OSM data between adjacent polygons
+    // (e.g. between the Seine water polygon and the Champ-de-Mars grass polygon).
+    // A 0.35mm outset at 150mm model scale is invisible but seals all boundaries.
+    function outsetRing(pts, d) {
+      const n = pts.length;
+      if (n < 3 || d < 1e-6) return pts;
+      let area = 0;
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        area += pts[i].x * pts[j].z - pts[j].x * pts[i].z;
+      }
+      const sign = area < 0 ? 1 : -1; // determines which side is "outward"
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const a = pts[(i - 1 + n) % n], b = pts[i], c = pts[(i + 1) % n];
+        const ax = b.x-a.x, az = b.z-a.z, la = Math.sqrt(ax*ax+az*az)||1;
+        const bx = c.x-b.x, bz = c.z-b.z, lb = Math.sqrt(bx*bx+bz*bz)||1;
+        const n1x = sign*az/la, n1z = -sign*ax/la; // outward normal of incoming edge
+        const n2x = sign*bz/lb, n2z = -sign*bx/lb; // outward normal of outgoing edge
+        const mx = n1x+n2x, mz = n1z+n2z, ml = Math.sqrt(mx*mx+mz*mz)||1;
+        const cosH = n1x*(mx/ml) + n1z*(mz/ml);
+        // Scale bisector so perpendicular offset = d; cap at 4× to avoid explosions at sharp corners
+        const scale = cosH > 0.15 ? Math.min(d/cosH, d*4) : d*2;
+        out.push({x: b.x + mx/ml*scale, z: b.z + mz/ml*scale});
+      }
+      return out;
+    }
+
     // ── ALTITUDE LAYERS ──
     // Each feature type has a fixed z-offset above terrain.
     // This stacks layers correctly (water→grass→sand→roads→buildings) with no overlap or white patches.
@@ -1795,28 +1825,27 @@ function buildOSM(st){
       industrial:   0.0
     };
     function extrudeOnLayer(bucket, h, layerZ){
-      // Terrain-following extrusion: each polygon vertex sits at its sampled terrain height.
-      // Color cap is exactly h mm thick above the terrain surface — nothing floats, nothing sinks.
+      // Terrain-following extrusion with polygon outset to seal OSM boundary gaps.
       if(clipped.length<3)return;
       try{
-        // Deduplicate near-identical vertices to prevent earcut triangulation failures
+        // 1. Deduplicate
         const deduped=[];
         for(const p of clipped){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p);}
         if(deduped.length<3)return;
-        const n=deduped.length;
-        const contour=deduped.map(p=>new THREE.Vector2(p.x,-p.z));
+        // 2. Expand polygon 0.35mm outward to fill micro-gaps between adjacent OSM zones
+        const pts=outsetRing(deduped,0.35);
+        if(pts.length<3)return;
+        const n=pts.length;
+        const contour=pts.map(p=>new THREE.Vector2(p.x,-p.z));
         const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
         if(!tris||!tris.length)return;
-        // SINK bottom 2mm below terrain: the cap is a solid plug going INTO the terrain body.
-        // This prevents z-fighting (white patches) AND terrain bleeding through on any slope.
+        // 3. Build terrain-following geometry with deep SINK to prevent z-fighting
         const SINK=3.0;
-        const verts=new Float32Array(n*6); // top[0..n-1] + bottom[n..2n-1]
+        const verts=new Float32Array(n*6);
         for(let i=0;i<n;i++){
-          const yBase=sampleTerrainY(deduped[i].x,deduped[i].z)+layerZ;
-          // top vertex — sits exactly at terrain surface + feature height
-          verts[i*3]=deduped[i].x; verts[i*3+1]=yBase+h; verts[i*3+2]=deduped[i].z;
-          // bottom vertex — 2mm below terrain so terrain can never poke through
-          verts[(n+i)*3]=deduped[i].x; verts[(n+i)*3+1]=yBase-SINK; verts[(n+i)*3+2]=deduped[i].z;
+          const yBase=sampleTerrainY(pts[i].x,pts[i].z)+layerZ;
+          verts[i*3]=pts[i].x; verts[i*3+1]=yBase+h; verts[i*3+2]=pts[i].z;
+          verts[(n+i)*3]=pts[i].x; verts[(n+i)*3+1]=yBase-SINK; verts[(n+i)*3+2]=pts[i].z;
         }
         const idxArr=[];
         for(const t of tris) idxArr.push(t[0],t[1],t[2]); // top face
@@ -1922,7 +1951,7 @@ function buildOSM(st){
             }
           }
         }
-        const g=mkRibbon(v3w,Math.max(st.waterMW,bw),(st.waterH||0.8)+2.0);if(g)wGs.push(g);
+        const g=mkRibbon(v3w,Math.max(st.waterMW,bw)+0.7,(st.waterH||0.6)+3.0);if(g)wGs.push(g);
       }
     }
     // GRASS (light green) and FOREST (dark green) — slightly higher than water
