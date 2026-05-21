@@ -1832,8 +1832,8 @@ function buildOSM(st){
         const deduped=[];
         for(const p of clipped){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p);}
         if(deduped.length<3)return;
-        // 2. Expand polygon 0.35mm outward to fill micro-gaps between adjacent OSM zones
-        const pts=outsetRing(deduped,0.35);
+        // 2. Expand polygon 0.8mm outward — covers OSM data gaps between adjacent features
+        const pts=outsetRing(deduped,0.80);
         if(pts.length<3)return;
         const n=pts.length;
         const contour=pts.map(p=>new THREE.Vector2(p.x,-p.z));
@@ -2089,11 +2089,12 @@ function buildOSM(st){
   addLayer(snowGs,  '#f4f4f4','SNOW');
   if(st.sandOn)  addLayer(sGs,    st.sandCol,  'SAND');
   if(st.pierOn)  addLayer(pGs,    st.pierCol,  'PIER');
-  // Urban landuse & pedestrian areas suppressed — map2model renders only water/grass/roads/buildings
-  // addLayer(resGs, ...) — disabled for visual cleanliness
-  // addLayer(comGs, ...) — disabled
-  // addLayer(indGs, ...) — disabled
-  // addLayer(pedGs, ...) — disabled
+  // Urban landuse zones rendered in terrain base color — act as invisible gap-fillers
+  // Covers unclassified OSM areas (streets, courtyards, squares) without adding visual noise
+  addLayer(resGs, st.cBase, 'RESIDENTIAL');
+  addLayer(comGs, st.cBase, 'COMMERCIAL');
+  addLayer(indGs, st.cBase, 'INDUSTRIAL');
+  addLayer(pedGs, st.cBase, 'PED_AREA');
   if(st.roadsOn) addLayer(rGs,    st.roadCol,  'ROADS');
   if(st.buildOn) addLayer(bGs,    st.buildCol, 'BUILDINGS');
 }
