@@ -677,7 +677,7 @@ async function fetchTile(z,x,y){
   const resp=await fetch(`https://tiles.mapterhorn.com/${z}/${x}/${y}.webp`);
   if(!resp.ok)throw new Error(`Mapterhorn ${z}/${x}/${y}: HTTP ${resp.status}`);
   const blob=await resp.blob();
-  const bmp=await createImageBitmap(blob);
+  const bmp=await createImageBitmap(blob,{colorSpaceConversion:'none'});
   const cv=document.createElement('canvas');cv.width=cv.height=512;
   const ctx=cv.getContext('2d');ctx.drawImage(bmp,0,0);
   return ctx.getImageData(0,0,512,512);
@@ -961,11 +961,12 @@ function decodeMVT(buffer){
     else if(tag===4)feat.geometryCmds=pb.readPackedVarint();
   }
   function readLayer(tag,layer,pb){
-    if(tag===2)layer.name=pb.readString();
-    else if(tag===3){const feat=pb.readMessage(readFeature,{id:null,rawTags:[],type:0,geometryCmds:[]});layer.featuresRaw.push(feat)}
-    else if(tag===4)layer.keys.push(pb.readString());
-    else if(tag===5){const v=pb.readMessage(readValue,{val:null});layer.values.push(v.val)}
-    else if(tag===15)layer.extent=pb.readVarint();
+    // MVT Layer spec: 1=name, 2=features, 3=keys, 4=values, 5=extent, 15=version
+    if(tag===1)layer.name=pb.readString();
+    else if(tag===2){const feat=pb.readMessage(readFeature,{id:null,rawTags:[],type:0,geometryCmds:[]});layer.featuresRaw.push(feat)}
+    else if(tag===3)layer.keys.push(pb.readString());
+    else if(tag===4){const v=pb.readMessage(readValue,{val:null});layer.values.push(v.val)}
+    else if(tag===5)layer.extent=pb.readVarint();
   }
   function readTile(tag,tile,pb){
     if(tag===3){
