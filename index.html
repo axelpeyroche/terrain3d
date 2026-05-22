@@ -1110,10 +1110,25 @@ function buildSideWalls(st){
 }
 
 /* ═══════════════════ BUILD OVERTURE ═══════════════════ */
+/* Largeurs réelles (mètres) par classe de route Overture */
+const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
+  residential:5,living_street:4,unclassified:5,service:3,track:3,
+  pedestrian:5,footway:1.5,cycleway:2,path:1.2,steps:1.5};
+/* Largeur minimale imprimable (mm) par classe */
+const ROAD_W_MIN={motorway:1.8,trunk:1.5,primary:1.2,secondary:1.0,tertiary:0.8,
+  residential:0.55,living_street:0.45,unclassified:0.55,service:0.35,track:0.35,
+  pedestrian:0.5,footway:0.22,cycleway:0.28,path:0.18,steps:0.2};
+/* Palettes couleur des espaces */
+const COL_PARK   ='#4caf4c'; // parcs, jardins, terrains de sport
+const COL_FOREST ='#1d6b1d'; // forêt, bois
+const COL_GRASS  ='#8ecf5a'; // pelouse, prairie, herbe
+const COL_FARM   ='#c9da82'; // agriculture, champs
+const COL_WATER_L='#5fb3f5'; // cours d'eau (ligne)
+
 function buildOverture(st){
   if(!Cache.overture?.length)return;
   const{mmPerMeter,toLocal,terrYAt}=Cache;
-  const waterGs=[],grassGs=[],forestGs=[],roadGs=[],buildGs=[];
+  const waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],roadGs=[],buildGs=[];
 
   /* Terrain-following polygon extrusion — no outset, simple SINK */
   function extrudeTerrain(bucket,clipped,h){
@@ -1190,10 +1205,8 @@ function buildOverture(st){
     /* ── ROADS ── */
     else if(layer==='segment'&&st.roadsOn&&isLine){
       const cls=p.class||p.subtype||'residential';
-      const typeW={motorway:12,trunk:10,primary:8,secondary:7,tertiary:6,
-        residential:4,service:3,track:3,path:1.2,cycleway:2,
-        footway:1.5,pedestrian:6,living_street:4,unclassified:4}[cls]||3;
-      const wMm=Math.max(st.roadMW,typeW*mmPerMeter);
+      const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
+      const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
       const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+st.roadH,pt.z));
       const g=mkRibbon(v3,wMm,st.roadH+1.5);if(g)roadGs.push(g);
     }
@@ -1202,32 +1215,42 @@ function buildOverture(st){
     else if(layer==='water'&&st.waterOn){
       if(isPoly)extrudeTerrain(waterGs,clipped,st.waterH);
       else if(isLine){
-        const wMm=Math.max(0.5,2*mmPerMeter);
+        const wMm=Math.max(0.4,1.5*mmPerMeter);
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+st.waterH,pt.z));
         const g=mkRibbon(v3,wMm,st.waterH+1.5);if(g)waterGs.push(g);
       }
     }
 
-    /* ── LAND USE (grass, forest, parks) ── */
+    /* ── LAND USE ── */
     else if(layer==='land_use'&&st.grassOn&&isPoly){
       const sub=(p.subtype||p.class||'').toLowerCase();
-      if(/forest|wood|tree/.test(sub))extrudeTerrain(forestGs,clipped,st.grassH+0.1);
-      else if(/park|garden|nature|recreation|pitch|golf|playground|grass|meadow|farmland|cemetery|allotment/.test(sub))
+      if(/wood/.test(sub))
+        extrudeTerrain(forestGs,clipped,st.grassH+0.15);
+      else if(/park|urban_park|garden|nature|recreation|sport|golf|playground|pitch/.test(sub))
+        extrudeTerrain(parkGs,clipped,st.grassH+0.05);
+      else if(/grass|lawn|meadow|wetland|cemetery/.test(sub))
         extrudeTerrain(grassGs,clipped,st.grassH);
+      else if(/agriculture|farm|horticulture/.test(sub))
+        extrudeTerrain(farmGs,clipped,st.grassH);
     }
   }
 
   function addLayer(geos,col,name){
     const mg=mergeGeos(geos);if(!mg)return;
     const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
-      color:new THREE.Color(col),roughness:.96,metalness:0,
+      color:new THREE.Color(col),roughness:.95,metalness:0,
       side:THREE.DoubleSide,
       polygonOffset:true,polygonOffsetFactor:-8,polygonOffsetUnits:-8
     }));
     m.name=name;App.tg.add(m);
   }
   if(st.waterOn)addLayer(waterGs,st.waterCol,'WATER');
-  if(st.grassOn){addLayer(grassGs,st.grassCol,'GRASS');addLayer(forestGs,'#098a00','FOREST')}
+  if(st.grassOn){
+    addLayer(parkGs,COL_PARK,'PARKS');
+    addLayer(forestGs,COL_FOREST,'FOREST');
+    addLayer(grassGs,COL_GRASS,'GRASS');
+    addLayer(farmGs,COL_FARM,'FARM');
+  }
   if(st.roadsOn)addLayer(roadGs,st.roadCol,'ROADS');
   if(st.buildOn)addLayer(buildGs,st.buildCol,'BUILDINGS');
 }
