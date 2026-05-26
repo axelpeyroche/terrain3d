@@ -291,8 +291,8 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
   <div class="sh" onclick="ts('gpx2')"><span class="si">🔴</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx2">▼</span></div>
   <div class="sb h" id="sb-gpx2">
     <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff0000"></div>
-    <input type="hidden" id="gpx-h" value="2">
-    <input type="hidden" id="gpx-mw" value="1.2">
+    <input type="hidden" id="gpx-h" value="1.2">
+    <input type="hidden" id="gpx-mw" value="0.5">
     <input type="hidden" id="gpx-tw" value="10">
   </div>
 </div>
@@ -1276,13 +1276,13 @@ function buildOverture(st){
       const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
       if(PED_CLASSES.has(cls)){
-        /* Trottoirs/chemins : +0.40mm au-dessus terrain, s'ancre 0.5mm dans le sol */
+        /* Trottoirs/chemins : +0.40mm au-dessus terrain */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
-        const g=mkRibbon(v3,wMm,H_PED+0.5);if(g)pedGs.push(g);
+        const g=mkRibbon(v3,wMm,0.5);if(g)pedGs.push(g);
       }else if(VEHICLE_CLASSES.has(cls)){
-        /* Routes : +0.80mm au-dessus terrain (map2model standard), s'ancre dans le sol */
+        /* Routes : +0.80mm au-dessus terrain (map2model standard) */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
-        const g=mkRibbon(v3,wMm,H_ROAD+0.5);if(g)roadGs.push(g);
+        const g=mkRibbon(v3,wMm,0.5);if(g)roadGs.push(g);
       }
     }
 
@@ -1293,7 +1293,7 @@ function buildOverture(st){
       else if(isLine){
         const wMm=Math.max(0.5,1.5*mmPerMeter);
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
-        const g=mkRibbon(v3,wMm,H_WATER+0.5);if(g)waterGs.push(g);
+        const g=mkRibbon(v3,wMm,0.5);if(g)waterGs.push(g);
       }
     }
 
@@ -1352,16 +1352,44 @@ function buildGPXMesh(st){
   const pts=App.gpxPoints;if(!pts.length||!Cache.ready)return;
   const old=App.tg.getObjectByName('GPX');
   if(old){App.tg.remove(old);old.geometry?.dispose();old.material?.dispose()}
-  const{toLocal,terrYAt}=Cache;
-  const v3s=pts.map(p=>{const lc=toLocal(p.lat,p.lon);return new THREE.Vector3(lc.x,terrYAt(p.lat,p.lon)+st.gpxH,lc.z)}).filter(v=>isFinite(v.x)&&isFinite(v.z));
-  if(v3s.length<2)return;
+  const{toLocal}=Cache;
+
+  /* 1. Convertir en coordonnées modèle */
+  const raw=pts.map(p=>{const lc=toLocal(p.lat,p.lon);return{x:lc.x,z:lc.z}})
+               .filter(p=>isFinite(p.x)&&isFinite(p.z));
+  if(raw.length<2)return;
+
+  /* 2. Lissage par moyenne glissante (fenêtre=9) sur X,Z */
+  const W=9,half=Math.floor(W/2);
+  const smoothed=raw.map((_,i)=>{
+    const s=Math.max(0,i-half),e=Math.min(raw.length-1,i+half),cnt=e-s+1;
+    let sx=0,sz=0;
+    for(let j=s;j<=e;j++){sx+=raw[j].x;sz+=raw[j].z;}
+    const nx=sx/cnt,nz=sz/cnt;
+    /* Rééchantillonner le terrain sur la position lissée */
+    return new THREE.Vector3(nx,sampleTerrainY(nx,nz)+st.gpxH,nz);
+  });
+
+  /* 3. Simplifier (Douglas-Peucker léger) → supprimer points trop proches */
+  const MIN_D=0.05; // 0.05mm minimum entre 2 points consécutifs
+  const simp=[smoothed[0]];
+  for(let i=1;i<smoothed.length;i++){
+    const p=simp[simp.length-1],q=smoothed[i];
+    if(Math.hypot(q.x-p.x,q.z-p.z)>=MIN_D)simp.push(q);
+  }
+  simp.push(smoothed[smoothed.length-1]);
+  if(simp.length<2)return;
+
+  /* 4. Ruban fin : largeur = tubeW, profondeur = 0.5mm */
   const tubeW=Math.max(st.gpxMW,st.gpxTW*Cache.mmPerMeter);
-  // depth=tubeW+1.5 pour que la trace soit bien visible au-dessus des routes
-  const g=mkRibbon(v3s,tubeW*2,tubeW+1.5);
-  if(g){const col=new THREE.Color(st.gpxCol);const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
-    color:col,roughness:.25,metalness:.15,
-    polygonOffset:true,polygonOffsetFactor:-14,polygonOffsetUnits:-14
-  }));m.name='GPX';App.tg.add(m)}
+  const g=mkRibbon(simp,tubeW,0.5);
+  if(g){
+    const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+      color:new THREE.Color(st.gpxCol),roughness:.3,metalness:.1,
+      polygonOffset:true,polygonOffsetFactor:-15,polygonOffsetUnits:-15
+    }));
+    m.name='GPX';App.tg.add(m);
+  }
 }
 
 /* ═══════════════════ BUILD ALL MESHES ═══════════════════ */
