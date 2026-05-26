@@ -1114,9 +1114,9 @@ const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
   residential:5,living_street:4,unclassified:5,service:3,track:3,
   pedestrian:5,footway:2,cycleway:2.5,path:1.5,steps:2};
 /* Largeur minimale imprimable (mm) */
-const ROAD_W_MIN={motorway:1.8,trunk:1.5,primary:1.2,secondary:1.0,tertiary:0.8,
-  residential:0.55,living_street:0.45,unclassified:0.55,service:0.35,track:0.35,
-  pedestrian:0.5,footway:0.25,cycleway:0.3,path:0.2,steps:0.2};
+const ROAD_W_MIN={motorway:3.0,trunk:2.5,primary:2.0,secondary:1.5,tertiary:1.2,
+  residential:0.8,living_street:0.6,unclassified:0.8,service:0.5,track:0.5,
+  pedestrian:0.6,footway:0.4,cycleway:0.5,path:0.3,steps:0.4};
 /* Classes véhicules (à suréléver de 1mm / espaces verts) */
 const VEHICLE_CLASSES=new Set(['motorway','motorway_link','trunk','trunk_link',
   'primary','primary_link','secondary','secondary_link','tertiary','tertiary_link',
@@ -1129,13 +1129,21 @@ const COL_FOREST ='#1d6b1d'; // forêt, bois
 const COL_GRASS  ='#8ecf5a'; // pelouse, prairie
 const COL_FARM   ='#c9da82'; // agriculture
 const COL_PED    ='#c8c0b0'; // trottoirs, pistes cyclables
+const COL_LAND   ='#d8d0c4'; // sol urbain — fond universel (rues, bâti non classifié)
+
+/* Hauteurs absolues (mm) — hiérarchie d'impression 3D */
+const H_LAND  =0.05; // fond universel
+const H_WATER =0.15; // eau (sera remplacé par st.waterH si besoin)
+const H_GRASS =0.30; // pelouse, prairie, agriculture
+const H_PARK  =0.42; // parcs, jardins
+const H_FOREST=0.55; // forêt, bois
+const H_PED   =0.65; // trottoirs, pistes cyclables
+const H_ROAD  =1.80; // routes véhicules
 
 function buildOverture(st){
   if(!Cache.overture?.length)return;
   const{mmPerMeter,toLocal,terrYAt}=Cache;
-  const waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],roadGs=[],pedGs=[],buildGs=[];
-  const ROAD_H=st.grassH+1.0;  // routes 1mm au-dessus des espaces verts
-  const PED_H =st.grassH+0.2;  // trottoirs légèrement au-dessus de la végétation
+  const landGs=[],waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],roadGs=[],pedGs=[],buildGs=[];
 
   /* Terrain-following polygon extrusion — no outset, simple SINK */
   function extrudeTerrain(bucket,clipped,h){
@@ -1198,7 +1206,7 @@ function buildOverture(st){
       let hM=5;
       if(p.height)hM=parseFloat(p.height)||5;
       else if(p.num_floors)hM=parseFloat(p.num_floors)*3.2;
-      const hMm=Math.min(App.wMm*0.10,Math.max(0.6,hM*mmPerMeter*st.buildHS));
+      const hMm=Math.min(App.wMm*0.10,Math.max(2.0,hM*mmPerMeter*st.buildHS));
       try{
         const baseY=clipped.reduce((s,pt)=>Math.max(s,pt.y),-Infinity);
         const sh=new THREE.Shape(clipped.map(pt=>new THREE.Vector2(pt.x,-pt.z)));
@@ -1218,40 +1226,46 @@ function buildOverture(st){
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
       if(PED_CLASSES.has(cls)){
         /* Trottoirs, pistes cyclables, chemins → niveau piéton */
-        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+PED_H,pt.z));
-        const g=mkRibbon(v3,wMm,PED_H+0.8);if(g)pedGs.push(g);
+        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
+        const g=mkRibbon(v3,wMm,H_PED+0.8);if(g)pedGs.push(g);
       }else if(VEHICLE_CLASSES.has(cls)){
-        /* Routes véhicules → 1mm au-dessus des espaces verts */
-        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+ROAD_H,pt.z));
-        const g=mkRibbon(v3,wMm,ROAD_H+1.2);if(g)roadGs.push(g);
+        /* Routes véhicules — nettement surélevées pour l'impression 3D */
+        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
+        const g=mkRibbon(v3,wMm,H_ROAD+1.2);if(g)roadGs.push(g);
       }
     }
 
     /* ── WATER ── */
     else if(layer==='water'&&st.waterOn){
-      if(isPoly)extrudeTerrain(waterGs,clipped,st.waterH);
+      if(isPoly)extrudeTerrain(waterGs,clipped,H_WATER);
       else if(isLine){
         const wMm=Math.max(0.4,1.5*mmPerMeter);
-        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+st.waterH,pt.z));
-        const g=mkRibbon(v3,wMm,st.waterH+1.5);if(g)waterGs.push(g);
+        const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
+        const g=mkRibbon(v3,wMm,H_WATER+1.5);if(g)waterGs.push(g);
       }
+    }
+
+    /* ── LAND (fond universel — couvre TOUT le sol non-eau) ── */
+    else if(layer==='land'&&st.grassOn&&isPoly){
+      extrudeTerrain(landGs,clipped,H_LAND);
     }
 
     /* ── LAND USE ── */
     else if(layer==='land_use'&&st.grassOn&&isPoly){
       const sub=(p.subtype||p.class||'').toLowerCase();
-      if(/wood/.test(sub))extrudeTerrain(forestGs,clipped,st.grassH+0.15);
-      else if(/park|urban_park|garden|nature|recreation|sport|golf|playground|pitch/.test(sub))extrudeTerrain(parkGs,clipped,st.grassH+0.05);
-      else if(/grass|lawn|meadow|wetland|cemetery/.test(sub))extrudeTerrain(grassGs,clipped,st.grassH);
-      else if(/agriculture|farm|horticulture/.test(sub))extrudeTerrain(farmGs,clipped,st.grassH);
+      if(/wood|forest/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
+      else if(/park|urban_park|garden|nature|recreation|sport|golf|playground|pitch/.test(sub))extrudeTerrain(parkGs,clipped,H_PARK);
+      else if(/grass|lawn|meadow|wetland|cemetery/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
+      else if(/agriculture|farm|horticulture/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
+      else extrudeTerrain(landGs,clipped,H_LAND); // type non reconnu → fond urbain
     }
 
     /* ── LAND COVER (végétation naturelle) ── */
     else if(layer==='land_cover'&&st.grassOn&&isPoly){
-      const sub=(p.subtype||'').toLowerCase();
-      if(/tree/.test(sub))extrudeTerrain(forestGs,clipped,st.grassH+0.1);
-      else if(/grass|scrub|moss/.test(sub))extrudeTerrain(grassGs,clipped,st.grassH);
-      else if(/crop/.test(sub))extrudeTerrain(farmGs,clipped,st.grassH);
+      const sub=(p.subtype||p.class||'').toLowerCase();
+      if(/tree|wood/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
+      else if(/grass|scrub|moss/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
+      else if(/crop/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
     }
   }
 
@@ -1264,16 +1278,18 @@ function buildOverture(st){
     }));
     m.name=name;App.tg.add(m);
   }
-  if(st.waterOn)addLayer(waterGs,st.waterCol,'WATER',-10);
+  /* Ordre de rendu : couches basses en premier (pof le plus négatif = dessus) */
+  if(st.grassOn) addLayer(landGs,  COL_LAND,   'LAND',    -2); // fond universel — le plus bas
+  if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);
   if(st.grassOn){
-    addLayer(farmGs, COL_FARM,  'FARM',  -6);
-    addLayer(grassGs,COL_GRASS, 'GRASS', -7);
-    addLayer(parkGs, COL_PARK,  'PARKS', -7);
-    addLayer(forestGs,COL_FOREST,'FOREST',-8);
+    addLayer(farmGs,  COL_FARM,   'FARM',    -5);
+    addLayer(grassGs, COL_GRASS,  'GRASS',   -6);
+    addLayer(parkGs,  COL_PARK,   'PARKS',   -7);
+    addLayer(forestGs,COL_FOREST, 'FOREST',  -8);
   }
   if(st.roadsOn){
-    addLayer(pedGs, COL_PED,    'PEDEST',-9);
-    addLayer(roadGs,st.roadCol, 'ROADS', -10);
+    addLayer(pedGs,  COL_PED,    'PEDEST',  -9);
+    addLayer(roadGs, st.roadCol, 'ROADS',  -10);
   }
   if(st.buildOn)addLayer(buildGs,st.buildCol,'BUILDINGS',-12);
 }
