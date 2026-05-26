@@ -885,6 +885,28 @@ function clipLineToZone(pts){
   return out;
 }
 
+/* drapeRibbon : intercale des points terrain entre chaque paire de waypoints d'un ruban.
+   Résout le problème "la route traverse la colline" quand deux waypoints Overture sont loin.
+   STEP ≈ 1.2× la résolution de la grille terrain (env. 1.4 mm pour un modèle 150 mm / 128²). */
+function drapeRibbon(seg){
+  if(!Cache.ready||seg.length<2)return seg;
+  const STEP=Math.max(App.wMm,App.dMm)/(Cache.GRID-1)*1.2;
+  const out=[];
+  for(let i=0;i<seg.length;i++){
+    out.push(seg[i]);
+    if(i<seg.length-1){
+      const a=seg[i],b=seg[i+1];
+      const dx=b.x-a.x,dz=b.z-a.z,dist=Math.hypot(dx,dz);
+      const nSteps=Math.min(8,Math.floor(dist/STEP)); // cap à 8 pts intermédiaires
+      for(let k=1;k<nSteps;k++){
+        const f=k/nSteps,mx=a.x+dx*f,mz=a.z+dz*f;
+        out.push({x:mx,y:sampleTerrainY(mx,mz),z:mz,lat:0,lon:0});
+      }
+    }
+  }
+  return out;
+}
+
 /* clipLineToSegments : comme clipLineToZone mais retourne un tableau de segments.
    Chaque fois que la ligne sort puis ré-entre dans la zone, un nouveau segment est créé.
    Évite les liaisons parasites qui traversent le modèle en diagonale. */
@@ -1224,8 +1246,20 @@ function buildOverture(st){
   function extrudeTerrain(bucket,clipped,h){
     if(clipped.length<3)return;
     try{
+      /* Subdiviser les grandes arêtes du polygone pour mieux suivre le relief entre sommets.
+         STEP ≈ 2.5× la maille terrain (~3 mm pour 150 mm/128²) — balance précision/perf. */
+      const PSUB=Math.max(App.wMm,App.dMm)/(Cache.GRID-1)*2.5;
+      const dense=[];
+      const n0=clipped.length;
+      for(let i=0;i<n0;i++){
+        dense.push(clipped[i]);
+        const nx=clipped[(i+1)%n0];
+        const dx=nx.x-clipped[i].x,dz=nx.z-clipped[i].z,dist=Math.hypot(dx,dz);
+        const ns=Math.min(5,Math.floor(dist/PSUB));
+        for(let k=1;k<ns;k++){const f=k/ns;dense.push({x:clipped[i].x+dx*f,z:clipped[i].z+dz*f})}
+      }
       const deduped=[];
-      for(const p of clipped){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p)}
+      for(const p of dense){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p)}
       if(deduped.length<3)return;
       const n=deduped.length;
       const contour=deduped.map(p=>new THREE.Vector2(p.x,-p.z));
@@ -1283,10 +1317,8 @@ function buildOverture(st){
       else if(p.num_floors)hM=parseFloat(p.num_floors)*3.2;
       const hMm=Math.min(App.wMm*0.10,Math.max(2.0,hM*mmPerMeter*st.buildHS));
       try{
-        /* Hauteur de base = terrain au centroïde du bâtiment (géographiquement correct) */
-        const bcx=clipped.reduce((s,pt)=>s+pt.x,0)/clipped.length;
-        const bcz=clipped.reduce((s,pt)=>s+pt.z,0)/clipped.length;
-        const baseY=sampleTerrainY(bcx,bcz);
+        /* Base = min du terrain sur tous les vertices → le bâtiment ne flotte jamais en pente */
+        const baseY=clipped.reduce((mn,pt)=>Math.min(mn,sampleTerrainY(pt.x,pt.z)),Infinity);
         const sh=new THREE.Shape(clipped.map(pt=>new THREE.Vector2(pt.x,-pt.z)));
         const geo=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:false});
         geo.rotateX(-Math.PI/2);geo.translate(0,baseY,0);
@@ -1302,13 +1334,14 @@ function buildOverture(st){
       const cls=p.class||'residential';
       const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
-      /* Un ruban par segment contigu — évite les liaisons inter-entrées/sorties */
+      /* Un ruban drapé par segment contigu — suit le relief entre waypoints */
       for(const seg of clipLineToSegments(outerRing)){
+        const draped=drapeRibbon(seg);
         if(PED_CLASSES.has(cls)){
-          const v3=seg.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
+          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
           const g=mkRibbon(v3,wMm,H_PED+0.3);if(g)pedGs.push(g);
         }else if(VEHICLE_CLASSES.has(cls)){
-          const v3=seg.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
+          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
           const g=mkRibbon(v3,wMm,H_ROAD+0.3);if(g)roadGs.push(g);
         }
       }
@@ -1320,9 +1353,10 @@ function buildOverture(st){
       if(isPoly)extrudeTerrain(waterGs,clipped,H_WATER);
       else if(isLine){
         const wMm=Math.max(0.5,1.5*mmPerMeter);
-        /* Un ruban par segment contigu — évite les rivières parasites */
+        /* Un ruban drapé par segment — les rivières suivent les vallées */
         for(const seg of clipLineToSegments(outerRing)){
-          const v3=seg.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
+          const draped=drapeRibbon(seg);
+          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
           const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
         }
       }
