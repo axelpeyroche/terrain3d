@@ -643,7 +643,7 @@ function ensureThree() {
       App.renderer=renderer;
       const ctrl=new THREE.OrbitControls(camera,canvas);
       ctrl.enableDamping=true;ctrl.dampingFactor=0.07;ctrl.minDistance=10;ctrl.maxDistance=4000;ctrl.screenSpacePanning=true;
-      ctrl.maxPolarAngle=Math.PI*0.82; // empêche de passer sous le modèle
+      ctrl.maxPolarAngle=Math.PI/2; // bloque exactement à l'horizontale — impossible de passer sous le modèle
       App.controls=ctrl;
       scene.add(new THREE.AmbientLight(0xffffff,0.78));
       const sun=new THREE.DirectionalLight(0xfffaf4,0.95);sun.position.set(-250,700,200);scene.add(sun);
@@ -765,20 +765,25 @@ function sampleTerrainY(x,z){
 /* Flat ribbon for roads / waterways — miter-jointed */
 function mkRibbon(pts3d,width,depth){
   if(pts3d.length<2)return null;
-  const hw=width/2,d=depth||0.4,n=pts3d.length;
+  /* Déduplification : supprime les points trop proches (miter instable sur micro-segments) */
+  const MIN_PT=Math.max(0.05,width*0.10);
+  const filt=[pts3d[0]];
+  for(let i=1;i<pts3d.length;i++){const p=pts3d[i],q=filt[filt.length-1];if(Math.hypot(p.x-q.x,p.z-q.z)>=MIN_PT)filt.push(p);}
+  if(filt.length<2)return null;
+  const hw=width/2,d=depth||0.4,n=filt.length;
   function segN(p,q){const dx=q.x-p.x,dz=q.z-p.z,l=Math.sqrt(dx*dx+dz*dz);return l<1e-8?{x:1,z:0}:{x:-dz/l,z:dx/l}}
   const pos=[],idx=[];
   for(let i=0;i<n;i++){
     let nx,nz;
-    if(n<3||i===0){const s=segN(pts3d[0],pts3d[1]);nx=s.x;nz=s.z}
-    else if(i===n-1){const s=segN(pts3d[n-2],pts3d[n-1]);nx=s.x;nz=s.z}
+    if(n<3||i===0){const s=segN(filt[0],filt[1]);nx=s.x;nz=s.z}
+    else if(i===n-1){const s=segN(filt[n-2],filt[n-1]);nx=s.x;nz=s.z}
     else{
-      const s1=segN(pts3d[i-1],pts3d[i]),s2=segN(pts3d[i],pts3d[i+1]);
+      const s1=segN(filt[i-1],filt[i]),s2=segN(filt[i],filt[i+1]);
       const mx=s1.x+s2.x,mz=s1.z+s2.z,ml=Math.sqrt(mx*mx+mz*mz);
       if(ml<0.01){nx=s2.x;nz=s2.z}
       else{const dot=(mx/ml)*s2.x+(mz/ml)*s2.z,scale=Math.min(3.0,1/Math.max(0.35,dot));nx=mx/ml*scale;nz=mz/ml*scale}
     }
-    const p=pts3d[i],y=p.y,b=p.y-d;
+    const p=filt[i],y=p.y,b=p.y-d;
     pos.push(p.x-nx*hw,y,p.z-nz*hw, p.x+nx*hw,y,p.z+nz*hw, p.x-nx*hw,b,p.z-nz*hw, p.x+nx*hw,b,p.z+nz*hw);
   }
   for(let i=0;i<n-1;i++){
@@ -1105,12 +1110,24 @@ function buildTerrain(st){
   geo.rotateX(-Math.PI/2);
   const pos=geo.attributes.position;
   const isIn=[];
+  /* Vertex colors : beige → gris roche basé sur l'altitude normalisée */
+  const cLand=new THREE.Color(COL_LAND); // #f0ede8
+  const cRock=new THREE.Color(COL_ROCK); // #c0bbb5
+  const ROCK_LO=0.62,ROCK_HI=0.82;      // plage de transition
+  const colArr=new Float32Array(pos.count*3);
   for(let i=0;i<pos.count;i++){
     const x=pos.getX(i),z=pos.getZ(i),inside=inZone(x,z);
     isIn.push(inside);
-    const e=elevs[i]??minE,n=Math.max(0,Math.min(1,(e-minE)/elevRange));
+    const e=elevs[i]??minE,n=Math.max(0,Math.min(1,(e-minE)/Math.max(0.001,elevRange)));
     pos.setY(i,inside?BASE_H+MIN_SURF+n*elevScaleMm:BASE_H);
+    /* Couleur selon altitude */
+    let r,g,b;
+    if(!inside||n<ROCK_LO){r=cLand.r;g=cLand.g;b=cLand.b;}
+    else if(n>=ROCK_HI){r=cRock.r;g=cRock.g;b=cRock.b;}
+    else{const t=(n-ROCK_LO)/(ROCK_HI-ROCK_LO);r=cLand.r+(cRock.r-cLand.r)*t;g=cLand.g+(cRock.g-cLand.g)*t;b=cLand.b+(cRock.b-cLand.b)*t;}
+    colArr[i*3]=r;colArr[i*3+1]=g;colArr[i*3+2]=b;
   }
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(colArr,3));
   if(geo.index){
     const orig=geo.index.array,kept=[];
     for(let i=0;i<orig.length;i+=3){const a=orig[i],b=orig[i+1],c=orig[i+2];if(isIn[a]||isIn[b]||isIn[c])kept.push(a,b,c)}
@@ -1122,7 +1139,7 @@ function buildTerrain(st){
   }
   geo.computeVertexNormals();
   const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
-    color:new THREE.Color(st.cBase),roughness:.92,metalness:0,
+    vertexColors:true,roughness:.92,metalness:0,
     flatShading:true,side:THREE.DoubleSide,
     polygonOffset:true,polygonOffsetFactor:20,polygonOffsetUnits:20
   }));
@@ -1383,7 +1400,7 @@ function buildOverture(st){
       for(const seg of clipLineToSegments(outerRing)){
         /* Filtrer les segments trop courts (artefacts, diagonales parasites) */
         const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
-        if(segLen<0.4)continue;
+        if(segLen<1.0)continue;
         const draped=drapeRibbon(seg);
         if(PED_CLASSES.has(cls)){
           const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
@@ -1404,7 +1421,7 @@ function buildOverture(st){
         /* Un ruban drapé par segment — les rivières suivent les vallées */
         for(const seg of clipLineToSegments(outerRing)){
           const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
-          if(segLen<0.4)continue;
+          if(segLen<1.0)continue;
           const draped=drapeRibbon(seg);
           const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
           const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
@@ -1518,59 +1535,12 @@ function buildGPXMesh(st){
   }
 }
 
-/* ═══════════════════ BUILD INNER SHELL ═══════════════════ */
-/* Cylindre/prisme intérieur opaque — bouche les éventuels interstices entre
-   le maillage terrain et les parois latérales, empêche de voir à travers. */
-function buildInnerShell(st){
-  const W=App.wMm,D=App.dMm,BASE=Cache.BASE_H;
-  const topH=BASE+Cache.elevScaleMm+4; // bien au-dessus du terrain max
-  const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55,side:THREE.BackSide});
-  const s=App.zoneType;
-  let pts=[];
-  if(s==='circ'){
-    const N=256,R=W/2*0.999;
-    for(let i=0;i<N;i++){const a=i/N*Math.PI*2;pts.push([R*Math.cos(a),R*Math.sin(a)]);}
-  }else if(s==='hex'){
-    const R=W/2*0.999;
-    for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6;pts.push([R*Math.cos(a),R*Math.sin(a)]);}
-  }else if(App.zonePts&&App.zonePts.length>=3&&Cache.bounds){
-    const{bounds}=Cache;
-    const cLat=(bounds.minLat+bounds.maxLat)/2,cLon=(bounds.minLon+bounds.maxLon)/2;
-    const la2mm=App.dMm/(bounds.maxLat-bounds.minLat),lo2mm=App.wMm/(bounds.maxLon-bounds.minLon);
-    pts=App.zonePts.map(p=>{
-      const lat=Array.isArray(p)?p[0]:p.lat,lon=Array.isArray(p)?p[1]:(p.lng||p.lon);
-      return[(lon-cLon)*lo2mm*0.999,-(lat-cLat)*la2mm*0.999];
-    });
-  }
-  if(pts.length<3)return;
-  const n=pts.length;
-  const verts=[];const idx=[];
-  for(let i=0;i<n;i++){
-    verts.push(pts[i][0],0,pts[i][1]);          // bas
-    verts.push(pts[i][0],topH,pts[i][1]);        // haut
-  }
-  for(let i=0;i<n;i++){
-    const a=i*2,b=((i+1)%n)*2;
-    idx.push(a,a+1,b+1, a,b+1,b);
-  }
-  // Cap inférieur (plancher opaque)
-  const base=n*2;
-  for(let i=0;i<n;i++)verts.push(pts[i][0],0,pts[i][1]);
-  const tris=THREE.ShapeUtils.triangulateShape(pts.map(p=>new THREE.Vector2(p[0],-p[1])),[]);
-  for(const t of tris)idx.push(base+t[2],base+t[1],base+t[0]);
-  const geo=new THREE.BufferGeometry();
-  geo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(verts),3));
-  geo.setIndex(idx);geo.computeVertexNormals();
-  const m=new THREE.Mesh(geo,mat);m.name='INNER_SHELL';App.tg.add(m);
-}
-
 /* ═══════════════════ BUILD ALL MESHES ═══════════════════ */
 function buildMeshes(){
   if(!Cache.ready||!App.tg)return;
   const st=S();
   clearTG();
   buildBase(st);
-  buildInnerShell(st); // coquille intérieure — ferme les interstices entre terrain et parois
   buildTerrain(st);
   buildSideWalls(st);
   buildGroundFill(st); // fond terrain-following complet avant les couches Overture
