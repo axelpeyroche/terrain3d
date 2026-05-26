@@ -1111,7 +1111,7 @@ function buildSideWalls(st){
 /* ═══════════════════ BUILD GROUND FILL ═══════════════════ */
 /* Maillage terrain-following couvrant TOUTE la zone sélectionnée.
    Résolution ~2mm → 75×75 quads pour un modèle 150mm.
-   H_LAND=0 → surface exactement au niveau du terrain (pas de flottement). */
+   Couleur terrain clair (#f0ede8) — végétation/eau/routes s'élèvent par-dessus. */
 function buildGroundFill(st){
   if(!st.grassOn||!Cache.ready)return;
   const W=App.wMm/2,D=App.dMm/2;
@@ -1168,12 +1168,12 @@ const VEHICLE_CLASSES=new Set(['motorway','motorway_link','trunk','trunk_link',
 /* Classes piétons/cycles (au niveau des espaces verts) */
 const PED_CLASSES=new Set(['pedestrian','footway','cycleway','path','steps']);
 /* Palettes couleur */
-const COL_PARK   ='#4caf4c'; // parcs, jardins, sport
-const COL_FOREST ='#1d6b1d'; // forêt, bois
-const COL_GRASS  ='#8ecf5a'; // pelouse, prairie
-const COL_FARM   ='#c9da82'; // agriculture
-const COL_PED    ='#c8c0b0'; // trottoirs, pistes cyclables
-const COL_LAND   ='#d8d0c4'; // sol urbain — fond universel (rues, bâti non classifié)
+const COL_PARK   ='#0fe300'; // parcs, jardins, sport
+const COL_FOREST ='#0fe300'; // forêt, bois
+const COL_GRASS  ='#0fe300'; // pelouse, prairie
+const COL_FARM   ='#0fe300'; // agriculture
+const COL_PED    ='#262626'; // trottoirs, pistes cyclables
+const COL_LAND   ='#f0ede8'; // sol — fond universel (terrain nu)
 
 /* Hauteurs relatives au terrain (mm)
    Principe : tout est AU NIVEAU DU TERRAIN (h=0).
@@ -1181,12 +1181,12 @@ const COL_LAND   ='#d8d0c4'; // sol urbain — fond universel (rues, bâti non c
    La séparation visuelle est assurée par polygonOffset, pas par la hauteur.
    Seules les routes sont légèrement au-dessus (0.3mm) pour l'impression AMS. */
 const H_LAND  =0;    // sol     — exactement sur le terrain
-const H_WATER =0;    // eau     — exactement sur le terrain (rivières dans les vallées)
-const H_GRASS =0;    // prairie — sur le terrain
-const H_PARK  =0;    // parc    — sur le terrain
-const H_FOREST=0;    // forêt   — sur le terrain
-const H_PED   =0.10; // trottoir— 0.1mm au-dessus (filament distinct pour impression)
-const H_ROAD  =0.30; // route   — 0.3mm au-dessus (clairement au-dessus du sol)
+const H_WATER =0.60; // eau     — 0.60mm au-dessus terrain (standard map2model)
+const H_GRASS =0.40; // prairie — 0.40mm au-dessus terrain (standard map2model)
+const H_PARK  =0.40; // parc    — 0.40mm au-dessus terrain
+const H_FOREST=0.40; // forêt   — 0.40mm au-dessus terrain
+const H_PED   =0.40; // trottoir— 0.40mm au-dessus terrain
+const H_ROAD  =0.80; // route   — 0.80mm au-dessus terrain (standard map2model)
 
 function buildOverture(st){
   if(!Cache.overture?.length)return;
@@ -1276,11 +1276,11 @@ function buildOverture(st){
       const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
       if(PED_CLASSES.has(cls)){
-        /* Trottoirs/chemins : 0.1mm au-dessus du sol, s'ancre 0.5mm dans le terrain */
+        /* Trottoirs/chemins : +0.40mm au-dessus terrain, s'ancre 0.5mm dans le sol */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
         const g=mkRibbon(v3,wMm,H_PED+0.5);if(g)pedGs.push(g);
       }else if(VEHICLE_CLASSES.has(cls)){
-        /* Routes : 0.3mm au-dessus du sol, s'ancre 0.5mm dans le terrain */
+        /* Routes : +0.80mm au-dessus terrain (map2model standard), s'ancre dans le sol */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
         const g=mkRibbon(v3,wMm,H_ROAD+0.5);if(g)roadGs.push(g);
       }
@@ -1288,13 +1288,12 @@ function buildOverture(st){
 
     /* ── WATER ── */
     else if(layer==='water'&&st.waterOn){
-      /* Eau au niveau du terrain (h=0) — les cours d'eau coulent au fond des vallées */
+      /* Eau : 0.60mm au-dessus du terrain, s'ancre dans le sol — rivières dans les vallées */
       if(isPoly)extrudeTerrain(waterGs,clipped,H_WATER);
       else if(isLine){
-        const wMm=Math.max(0.4,1.5*mmPerMeter);
-        /* Ribbon au niveau terrain, s'ancre 0.5mm dans le sol (pas de flottement) */
+        const wMm=Math.max(0.5,1.5*mmPerMeter);
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
-        const g=mkRibbon(v3,wMm,0.5);if(g)waterGs.push(g);
+        const g=mkRibbon(v3,wMm,H_WATER+0.5);if(g)waterGs.push(g);
       }
     }
 
@@ -1331,10 +1330,10 @@ function buildOverture(st){
     }));
     m.name=name;App.tg.add(m);
   }
-  /* Ordre visuel par polygonOffset (toutes les surfaces à h=0 sauf routes +0.3mm).
-     pof négatif = vient au premier plan. Terrain mesh = pof+20 (fond). */
-  if(st.grassOn) addLayer(landGs,  COL_LAND,   'LAND',    -2);  // sol urbain (par-dessus fond)
-  if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);  // eau (par-dessus sol)
+  /* Ordre visuel : terrain=0 → végétation+0.40 → eau+0.60 → routes+0.80.
+     polygonOffset = sécurité anti Z-fighting entre couches de même hauteur. */
+  if(st.grassOn) addLayer(landGs,  COL_LAND,   'LAND',    -2);  // sol nu (terrain)
+  if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);  // eau +0.60mm
   if(st.grassOn){
     addLayer(farmGs,  COL_FARM,   'FARM',    -5);
     addLayer(grassGs, COL_GRASS,  'GRASS',   -6);
@@ -1342,8 +1341,8 @@ function buildOverture(st){
     addLayer(forestGs,COL_FOREST, 'FOREST',  -8);
   }
   if(st.roadsOn){
-    addLayer(pedGs,  COL_PED,    'PEDEST',  -9);
-    addLayer(roadGs, st.roadCol, 'ROADS',  -10); // +0.3mm réel + pof → clairement visibles
+    addLayer(pedGs,  COL_PED,    'PEDEST',  -9);  // trottoirs +0.40mm
+    addLayer(roadGs, st.roadCol, 'ROADS',  -10);  // routes +0.80mm
   }
   if(st.buildOn)addLayer(buildGs,st.buildCol,'BUILDINGS',-14);
 }
