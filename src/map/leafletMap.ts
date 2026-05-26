@@ -2,8 +2,9 @@
    LEAFLET MAP — 2D map setup, drawing tools, GPX, geocoding
    ════════════════════════════════════════════ */
 
-import L from 'leaflet';
-import 'leaflet-draw';
+// Leaflet chargé via CDN — on récupère le global L avec ses types
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const L = (window as any).L as typeof import('leaflet');
 import { state } from '../state';
 import type { LatLon } from '../types';
 

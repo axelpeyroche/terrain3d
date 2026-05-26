@@ -10,15 +10,12 @@
   },
   "dependencies": {
     "earcut": "^2.2.4",
-    "leaflet": "^1.9.4",
-    "leaflet-draw": "^1.0.4",
     "pmtiles": "^3.2.1",
     "three": "^0.163.0"
   },
   "devDependencies": {
     "@types/earcut": "^2.1.4",
     "@types/leaflet": "^1.9.12",
-    "@types/leaflet-draw": "^1.0.11",
     "@types/three": "^0.163.0",
     "typescript": "^5.4.5",
     "vite": "^5.2.11"

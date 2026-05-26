@@ -6,18 +6,13 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: {
           three: ['three'],
-          leaflet: ['leaflet'],
           pmtiles: ['pmtiles'],
         },
       },
     },
-  },
-  optimizeDeps: {
-    exclude: ['leaflet-draw'],
   },
 });
