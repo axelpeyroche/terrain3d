@@ -1131,14 +1131,17 @@ function buildTerrain(st){
 function buildSideWalls(st){
   const W=App.wMm,D=App.dMm,BASE=Cache.BASE_H,s=App.zoneType;
   const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55,side:THREE.DoubleSide});
-  function makeWalls(pts2d){
+  /* pts3d : [{x,z,topY}]  topY = hauteur du mur (terrain au bord ou légèrement en retrait) */
+  function makeWalls(pts3d){
     const verts=[],idx=[];let vi=0;
-    const n=pts2d.length;
+    const n=pts3d.length;
     for(let i=0;i<n;i++){
-      const a=pts2d[i],b=pts2d[(i+1)%n];
+      const a=pts3d[i],b=pts3d[(i+1)%n];
       const mx=(a.x+b.x)/2,mz=(a.z+b.z)/2,outward=mx*(b.z-a.z)-mz*(b.x-a.x);
       const[p1,p2]=outward>=0?[a,b]:[b,a];
-      verts.push(p1.x,BASE,p1.z,p2.x,BASE,p2.z,p2.x,0,p2.z,p1.x,0,p1.z);
+      const t1=p1.topY??BASE,t2=p2.topY??BASE;
+      /* Quad : top-left, top-right, bottom-right, bottom-left */
+      verts.push(p1.x,t1,p1.z, p2.x,t2,p2.z, p2.x,0,p2.z, p1.x,0,p1.z);
       idx.push(vi,vi+1,vi+2,vi,vi+2,vi+3);vi+=4;
     }
     if(!verts.length)return;
@@ -1147,13 +1150,28 @@ function buildSideWalls(st){
     geo.setIndex(idx);geo.computeVertexNormals();
     App.tg.add(new THREE.Mesh(geo,mat));
   }
-  if(s==='circ'){const N=256,R=W/2;makeWalls(Array.from({length:N},(_,i)=>({x:R*Math.cos(i/N*Math.PI*2),z:R*Math.sin(i/N*Math.PI*2)})))}
-  else if(s==='hex'){const R=W/2;makeWalls(Array.from({length:6},(_,i)=>({x:R*Math.cos(i/6*Math.PI*2-Math.PI/6),z:R*Math.sin(i/6*Math.PI*2-Math.PI/6)})))}
+  /* Échantillonner le terrain légèrement en retrait du bord (×0.98) pour récupérer
+     la hauteur réelle du terrain à la frontière, pas la valeur forcée BASE_H. */
+  function edgePt(x,z){
+    const topY=Cache.ready?sampleTerrainY(x*0.98,z*0.98):BASE;
+    return{x,z,topY:Math.max(BASE,topY)};
+  }
+  if(s==='circ'){
+    const N=512,R=W/2;
+    makeWalls(Array.from({length:N},(_,i)=>{const a=i/N*Math.PI*2;return edgePt(R*Math.cos(a),R*Math.sin(a))}));
+  }
+  else if(s==='hex'){
+    const R=W/2;
+    makeWalls(Array.from({length:6},(_,i)=>{const a=i/6*Math.PI*2-Math.PI/6;return edgePt(R*Math.cos(a),R*Math.sin(a))}));
+  }
   else if(App.zonePts&&App.zonePts.length>=3&&Cache.bounds){
     const{bounds}=Cache;
     const cLat=(bounds.minLat+bounds.maxLat)/2,cLon=(bounds.minLon+bounds.maxLon)/2;
     const la2mm=App.dMm/(bounds.maxLat-bounds.minLat),lo2mm=App.wMm/(bounds.maxLon-bounds.minLon);
-    makeWalls(App.zonePts.map(p=>{const lat=Array.isArray(p)?p[0]:p.lat,lon=Array.isArray(p)?p[1]:(p.lng||p.lon);return{x:(lon-cLon)*lo2mm,z:-(lat-cLat)*la2mm}}));
+    makeWalls(App.zonePts.map(p=>{
+      const lat=Array.isArray(p)?p[0]:p.lat,lon=Array.isArray(p)?p[1]:(p.lng||p.lon);
+      return edgePt((lon-cLon)*lo2mm,-(lat-cLat)*la2mm);
+    }));
   }
 }
 
@@ -1223,17 +1241,16 @@ const COL_GRASS  ='#0fe300'; // pelouse, prairie
 const COL_FARM   ='#0fe300'; // agriculture
 const COL_PED    ='#262626'; // trottoirs, pistes cyclables
 const COL_LAND   ='#f0ede8'; // sol — fond universel (terrain nu)
+const COL_ROCK   ='#c0bbb5'; // roche, éboulis, glacier — gris clair
 
-/* Hauteurs relatives au terrain (mm)
-   Principe : tout est AU NIVEAU DU TERRAIN (h=0).
-   L'eau coule sur le sol → même hauteur que le sol.
-   La séparation visuelle est assurée par polygonOffset, pas par la hauteur.
-   Seules les routes sont légèrement au-dessus (0.3mm) pour l'impression AMS. */
+/* Hauteurs relatives au terrain (mm) — hiérarchie visuelle claire :
+   Chaque couche a une hauteur UNIQUE → marche physique nette à chaque frontière. */
 const H_LAND  =0;    // sol     — exactement sur le terrain
-const H_WATER =0.60; // eau     — 0.60mm au-dessus terrain (standard map2model)
-const H_GRASS =0.40; // prairie — 0.40mm au-dessus terrain (standard map2model)
-const H_PARK  =0.40; // parc    — 0.40mm au-dessus terrain
-const H_FOREST=0.40; // forêt   — 0.40mm au-dessus terrain
+const H_ROCK  =0.15; // roche / éboulis / glacier — légèrement au-dessus du sol
+const H_WATER =0.60; // eau     — 0.60mm (standard map2model)
+const H_GRASS =0.30; // prairie — marche visible vs roche
+const H_PARK  =0.35; // parc    — marche visible vs prairie
+const H_FOREST=0.40; // forêt   — 0.40mm (standard map2model)
 const H_PED   =0.40; // trottoir— 0.40mm au-dessus terrain
 const H_ROAD  =0.80; // route   — 0.80mm au-dessus terrain (standard map2model)
 
@@ -1283,6 +1300,8 @@ function buildOverture(st){
       bucket.push(geo);
     }catch(e){}
   }
+
+  const rockGs=[];
 
   for(const feat of Cache.overture){
     const{layer,type,properties:p,rings}=feat;
@@ -1370,19 +1389,22 @@ function buildOverture(st){
     /* ── LAND USE ── */
     else if(layer==='land_use'&&st.grassOn&&isPoly){
       const sub=(p.subtype||p.class||'').toLowerCase();
-      if(/wood|forest/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
+      if(/rock|scree|cliff|bare|quarry|talus|glacier|ice/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK);
+      else if(/wood|forest/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
       else if(/park|urban_park|garden|nature|recreation|sport|golf|playground|pitch/.test(sub))extrudeTerrain(parkGs,clipped,H_PARK);
       else if(/grass|lawn|meadow|wetland|cemetery/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
       else if(/agriculture|farm|horticulture/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
-      else extrudeTerrain(landGs,clipped,H_LAND); // type non reconnu → fond urbain
+      else extrudeTerrain(landGs,clipped,H_LAND);
     }
 
-    /* ── LAND COVER (végétation naturelle) ── */
+    /* ── LAND COVER (végétation naturelle + roche) ── */
     else if(layer==='land_cover'&&st.grassOn&&isPoly){
       const sub=(p.subtype||p.class||'').toLowerCase();
-      if(/tree|wood/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
+      if(/rock|scree|cliff|bare|talus|glacier|ice|snow/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK);
+      else if(/tree|wood/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
       else if(/grass|scrub|moss/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
       else if(/crop/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
+      else if(/sand|gravel|mud/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK); // terrain minéral → gris
     }
   }
 
@@ -1395,19 +1417,23 @@ function buildOverture(st){
     }));
     m.name=name;App.tg.add(m);
   }
-  /* Ordre visuel : terrain=0 → végétation+0.40 → eau+0.60 → routes+0.80.
-     polygonOffset = sécurité anti Z-fighting entre couches de même hauteur. */
-  if(st.grassOn) addLayer(landGs,  COL_LAND,   'LAND',    -2);  // sol nu (terrain)
+  /* Ordre visuel (hauteur croissante) :
+     sol=0 → roche=0.15 → prairie=0.30 → parc=0.35 → forêt=0.40 → eau=0.60 → route=0.80
+     Chaque couche a une hauteur UNIQUE → marche physique à chaque frontière de zone. */
+  if(st.grassOn){
+    addLayer(landGs,  COL_LAND,   'LAND',    -2);  // sol nu
+    addLayer(rockGs,  COL_ROCK,   'ROCK',    -3);  // roche/glacier gris +0.15mm
+  }
   if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);  // eau +0.60mm
   if(st.grassOn){
     addLayer(farmGs,  COL_FARM,   'FARM',    -5);
-    addLayer(grassGs, COL_GRASS,  'GRASS',   -6);
-    addLayer(parkGs,  COL_PARK,   'PARKS',   -7);
-    addLayer(forestGs,COL_FOREST, 'FOREST',  -8);
+    addLayer(grassGs, COL_GRASS,  'GRASS',   -6);  // prairie +0.30mm
+    addLayer(parkGs,  COL_PARK,   'PARKS',   -7);  // parc +0.35mm
+    addLayer(forestGs,COL_FOREST, 'FOREST',  -8);  // forêt +0.40mm
   }
   if(st.roadsOn){
-    addLayer(pedGs,  COL_PED,    'PEDEST',  -9);  // trottoirs +0.40mm
-    addLayer(roadGs, st.roadCol, 'ROADS',  -10);  // routes +0.80mm
+    addLayer(pedGs,  COL_PED,    'PEDEST',  -9);
+    addLayer(roadGs, st.roadCol, 'ROADS',  -10);
   }
   if(st.buildOn)addLayer(buildGs,st.buildCol,'BUILDINGS',-14);
 }
@@ -1445,13 +1471,17 @@ function buildGPXMesh(st){
   simp.push(smoothed[smoothed.length-1]);
   if(simp.length<2)return;
 
-  /* 4. Ruban fin : largeur = tubeW, ancré 0.3mm dans le terrain */
+  /* 4. Ruban GPX — légèrement plus large que les chemins pour les couvrir visuellement.
+     Height gpxH (défaut 1.2mm) > H_PED (0.40mm) → GPX toujours AU-DESSUS des sentiers.
+     polygonOffset = -30 : rendu en tout dernier, devant toutes les autres couches. */
   const tubeW=Math.max(st.gpxMW,st.gpxTW*Cache.mmPerMeter);
-  const g=mkRibbon(simp,tubeW,st.gpxH+0.3);
+  const gpxWidth=tubeW+0.3; // +0.3mm pour couvrir le chemin en dessous
+  const g=mkRibbon(simp,gpxWidth,st.gpxH+0.3);
   if(g){
     const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
       color:new THREE.Color(st.gpxCol),roughness:.3,metalness:.1,
-      polygonOffset:true,polygonOffsetFactor:-15,polygonOffsetUnits:-15
+      depthTest:true,
+      polygonOffset:true,polygonOffsetFactor:-30,polygonOffsetUnits:-30
     }));
     m.name='GPX';App.tg.add(m);
   }
