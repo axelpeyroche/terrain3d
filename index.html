@@ -1114,9 +1114,9 @@ const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
   residential:5,living_street:4,unclassified:5,service:3,track:3,
   pedestrian:5,footway:2,cycleway:2.5,path:1.5,steps:2};
 /* Largeur minimale imprimable (mm) */
-const ROAD_W_MIN={motorway:3.0,trunk:2.5,primary:2.0,secondary:1.5,tertiary:1.2,
-  residential:0.8,living_street:0.6,unclassified:0.8,service:0.5,track:0.5,
-  pedestrian:0.6,footway:0.4,cycleway:0.5,path:0.3,steps:0.4};
+const ROAD_W_MIN={motorway:0.8,trunk:0.7,primary:0.6,secondary:0.5,tertiary:0.4,
+  residential:0.3,living_street:0.3,unclassified:0.3,service:0.25,track:0.25,
+  pedestrian:0.3,footway:0.2,cycleway:0.25,path:0.15,steps:0.2};
 /* Classes véhicules (à suréléver de 1mm / espaces verts) */
 const VEHICLE_CLASSES=new Set(['motorway','motorway_link','trunk','trunk_link',
   'primary','primary_link','secondary','secondary_link','tertiary','tertiary_link',
@@ -1133,12 +1133,12 @@ const COL_LAND   ='#d8d0c4'; // sol urbain — fond universel (rues, bâti non c
 
 /* Hauteurs absolues (mm) — hiérarchie d'impression 3D */
 const H_LAND  =0.05; // fond universel
-const H_WATER =0.15; // eau (sera remplacé par st.waterH si besoin)
-const H_GRASS =0.30; // pelouse, prairie, agriculture
-const H_PARK  =0.42; // parcs, jardins
-const H_FOREST=0.55; // forêt, bois
-const H_PED   =0.65; // trottoirs, pistes cyclables
-const H_ROAD  =1.80; // routes véhicules
+const H_WATER =0.15; // eau
+const H_GRASS =0.25; // pelouse, prairie, agriculture
+const H_PARK  =0.35; // parcs, jardins
+const H_FOREST=0.45; // forêt, bois
+const H_PED   =0.55; // trottoirs, pistes cyclables
+const H_ROAD  =0.80; // routes véhicules (surélevées, mais pas excessif)
 
 function buildOverture(st){
   if(!Cache.overture?.length)return;
@@ -1227,11 +1227,11 @@ function buildOverture(st){
       if(PED_CLASSES.has(cls)){
         /* Trottoirs, pistes cyclables, chemins → niveau piéton */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
-        const g=mkRibbon(v3,wMm,H_PED+0.8);if(g)pedGs.push(g);
+        const g=mkRibbon(v3,wMm,H_PED+0.3);if(g)pedGs.push(g);
       }else if(VEHICLE_CLASSES.has(cls)){
-        /* Routes véhicules — nettement surélevées pour l'impression 3D */
+        /* Routes véhicules */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
-        const g=mkRibbon(v3,wMm,H_ROAD+1.2);if(g)roadGs.push(g);
+        const g=mkRibbon(v3,wMm,H_ROAD+0.4);if(g)roadGs.push(g);
       }
     }
 
@@ -1241,7 +1241,7 @@ function buildOverture(st){
       else if(isLine){
         const wMm=Math.max(0.4,1.5*mmPerMeter);
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
-        const g=mkRibbon(v3,wMm,H_WATER+1.5);if(g)waterGs.push(g);
+        const g=mkRibbon(v3,wMm,H_WATER+0.4);if(g)waterGs.push(g);
       }
     }
 
