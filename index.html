@@ -643,6 +643,7 @@ function ensureThree() {
       App.renderer=renderer;
       const ctrl=new THREE.OrbitControls(camera,canvas);
       ctrl.enableDamping=true;ctrl.dampingFactor=0.07;ctrl.minDistance=10;ctrl.maxDistance=4000;ctrl.screenSpacePanning=true;
+      ctrl.maxPolarAngle=Math.PI*0.82; // empêche de passer sous le modèle
       App.controls=ctrl;
       scene.add(new THREE.AmbientLight(0xffffff,0.78));
       const sun=new THREE.DirectionalLight(0xfffaf4,0.95);sun.position.set(-250,700,200);scene.add(sun);
@@ -1122,6 +1123,7 @@ function buildTerrain(st){
   geo.computeVertexNormals();
   const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
     color:new THREE.Color(st.cBase),roughness:.92,metalness:0,
+    flatShading:true,side:THREE.DoubleSide,
     polygonOffset:true,polygonOffsetFactor:20,polygonOffsetUnits:20
   }));
   m.name='TERRAIN';App.tg.add(m);
@@ -1178,23 +1180,45 @@ function buildSideWalls(st){
 /* ═══════════════════ BUILD GROUND FILL ═══════════════════ */
 /* Maillage terrain-following couvrant TOUTE la zone sélectionnée.
    Résolution ~2mm → 75×75 quads pour un modèle 150mm.
-   Couleur terrain clair (#f0ede8) — végétation/eau/routes s'élèvent par-dessus. */
+   Vertex colors : beige (#f0ede8) en bas → gris roche (#c0bbb5) au-dessus de 72% d'altitude.
+   flatShading=true → facettes angulaires réalistes comme map2model. */
 function buildGroundFill(st){
   if(!st.grassOn||!Cache.ready)return;
   const W=App.wMm/2,D=App.dMm/2;
-  // Pas de grille: env. 2mm, adapté à la taille du modèle
   const STEP=Math.max(1.0,Math.min(4.0,App.wMm/60));
   const xN=Math.ceil(App.wMm/STEP)+1;
   const zN=Math.ceil(App.dMm/STEP)+1;
-  const verts=[];
+  const{BASE_H,elevScaleMm}=Cache;
+  /* Seuils d'altitude pour coloration */
+  const ROCK_THR=0.60; // au-dessus de 60% d'élévation → teinte roche
+  const HIGH_THR=0.80; // au-dessus de 80% → gris roche pur
+  const cLand=new THREE.Color(COL_LAND);  // beige #f0ede8
+  const cRock=new THREE.Color(COL_ROCK);  // gris  #c0bbb5
+  const verts=[],colors=[];
   const grid=new Int32Array(xN*zN).fill(-1);
   for(let zi=0;zi<zN;zi++){
     for(let xi=0;xi<xN;xi++){
       const x=-W+(xi/(xN-1))*App.wMm;
       const z=-D+(zi/(zN-1))*App.dMm;
       if(inZone(x,z)){
-        grid[zi*xN+xi]=verts.length/3;
-        verts.push(x,sampleTerrainY(x,z)+H_LAND,z);
+        const vi=verts.length/3;
+        grid[zi*xN+xi]=vi;
+        const y=sampleTerrainY(x,z)+H_LAND;
+        verts.push(x,y,z);
+        /* Ratio d'élévation 0→1 */
+        const ratio=elevScaleMm>0?Math.max(0,Math.min(1,(y-BASE_H)/elevScaleMm)):0;
+        let r,g,b;
+        if(ratio>=HIGH_THR){
+          r=cRock.r;g=cRock.g;b=cRock.b;
+        }else if(ratio>=ROCK_THR){
+          const t=(ratio-ROCK_THR)/(HIGH_THR-ROCK_THR);
+          r=cLand.r+(cRock.r-cLand.r)*t;
+          g=cLand.g+(cRock.g-cLand.g)*t;
+          b=cLand.b+(cRock.b-cLand.b)*t;
+        }else{
+          r=cLand.r;g=cLand.g;b=cLand.b;
+        }
+        colors.push(r,g,b);
       }
     }
   }
@@ -1211,9 +1235,11 @@ function buildGroundFill(st){
   if(!idx.length)return;
   const geo=new THREE.BufferGeometry();
   geo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(verts),3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array(colors),3));
   geo.setIndex(idx);geo.computeVertexNormals();
   const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
-    color:new THREE.Color(COL_LAND),roughness:.95,metalness:0,
+    vertexColors:true,roughness:.95,metalness:0,
+    flatShading:true,
     polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1
   }));
   m.name='GROUND';App.tg.add(m);
@@ -1355,6 +1381,9 @@ function buildOverture(st){
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
       /* Un ruban drapé par segment contigu — suit le relief entre waypoints */
       for(const seg of clipLineToSegments(outerRing)){
+        /* Filtrer les segments trop courts (artefacts, diagonales parasites) */
+        const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
+        if(segLen<0.4)continue;
         const draped=drapeRibbon(seg);
         if(PED_CLASSES.has(cls)){
           const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
@@ -1374,6 +1403,8 @@ function buildOverture(st){
         const wMm=Math.max(0.5,1.5*mmPerMeter);
         /* Un ruban drapé par segment — les rivières suivent les vallées */
         for(const seg of clipLineToSegments(outerRing)){
+          const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
+          if(segLen<0.4)continue;
           const draped=drapeRibbon(seg);
           const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
           const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
@@ -1487,12 +1518,59 @@ function buildGPXMesh(st){
   }
 }
 
+/* ═══════════════════ BUILD INNER SHELL ═══════════════════ */
+/* Cylindre/prisme intérieur opaque — bouche les éventuels interstices entre
+   le maillage terrain et les parois latérales, empêche de voir à travers. */
+function buildInnerShell(st){
+  const W=App.wMm,D=App.dMm,BASE=Cache.BASE_H;
+  const topH=BASE+Cache.elevScaleMm+4; // bien au-dessus du terrain max
+  const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55,side:THREE.BackSide});
+  const s=App.zoneType;
+  let pts=[];
+  if(s==='circ'){
+    const N=256,R=W/2*0.999;
+    for(let i=0;i<N;i++){const a=i/N*Math.PI*2;pts.push([R*Math.cos(a),R*Math.sin(a)]);}
+  }else if(s==='hex'){
+    const R=W/2*0.999;
+    for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6;pts.push([R*Math.cos(a),R*Math.sin(a)]);}
+  }else if(App.zonePts&&App.zonePts.length>=3&&Cache.bounds){
+    const{bounds}=Cache;
+    const cLat=(bounds.minLat+bounds.maxLat)/2,cLon=(bounds.minLon+bounds.maxLon)/2;
+    const la2mm=App.dMm/(bounds.maxLat-bounds.minLat),lo2mm=App.wMm/(bounds.maxLon-bounds.minLon);
+    pts=App.zonePts.map(p=>{
+      const lat=Array.isArray(p)?p[0]:p.lat,lon=Array.isArray(p)?p[1]:(p.lng||p.lon);
+      return[(lon-cLon)*lo2mm*0.999,-(lat-cLat)*la2mm*0.999];
+    });
+  }
+  if(pts.length<3)return;
+  const n=pts.length;
+  const verts=[];const idx=[];
+  for(let i=0;i<n;i++){
+    verts.push(pts[i][0],0,pts[i][1]);          // bas
+    verts.push(pts[i][0],topH,pts[i][1]);        // haut
+  }
+  for(let i=0;i<n;i++){
+    const a=i*2,b=((i+1)%n)*2;
+    idx.push(a,a+1,b+1, a,b+1,b);
+  }
+  // Cap inférieur (plancher opaque)
+  const base=n*2;
+  for(let i=0;i<n;i++)verts.push(pts[i][0],0,pts[i][1]);
+  const tris=THREE.ShapeUtils.triangulateShape(pts.map(p=>new THREE.Vector2(p[0],-p[1])),[]);
+  for(const t of tris)idx.push(base+t[2],base+t[1],base+t[0]);
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(verts),3));
+  geo.setIndex(idx);geo.computeVertexNormals();
+  const m=new THREE.Mesh(geo,mat);m.name='INNER_SHELL';App.tg.add(m);
+}
+
 /* ═══════════════════ BUILD ALL MESHES ═══════════════════ */
 function buildMeshes(){
   if(!Cache.ready||!App.tg)return;
   const st=S();
   clearTG();
   buildBase(st);
+  buildInnerShell(st); // coquille intérieure — ferme les interstices entre terrain et parois
   buildTerrain(st);
   buildSideWalls(st);
   buildGroundFill(st); // fond terrain-following complet avant les couches Overture
