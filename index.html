@@ -241,7 +241,7 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
     <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#eeebe6"></div>
     <div class="r"><label>Résolution</label>
       <select id="t-res"><option value="56">Rapide (56²)</option><option value="96">Normale (96²)</option><option value="128" selected>Haute (128²)</option><option value="256">Max (256²)</option></select></div>
-    <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="1" step="0.5" min="0.5" max="10"></div>
+    <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
     <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="1"><span class="rv" id="t-smooth-v">1</span></div>
     <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
     <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
@@ -291,8 +291,8 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
   <div class="sh" onclick="ts('gpx2')"><span class="si">🔴</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx2">▼</span></div>
   <div class="sb h" id="sb-gpx2">
     <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff0000"></div>
-    <input type="hidden" id="gpx-h" value="1">
-    <input type="hidden" id="gpx-mw" value="0.4">
+    <input type="hidden" id="gpx-h" value="2">
+    <input type="hidden" id="gpx-mw" value="1.2">
     <input type="hidden" id="gpx-tw" value="10">
   </div>
 </div>
@@ -1108,6 +1108,50 @@ function buildSideWalls(st){
   }
 }
 
+/* ═══════════════════ BUILD GROUND FILL ═══════════════════ */
+/* Maillage terrain-following couvrant TOUTE la zone sélectionnée.
+   Remplace le fallback Overture 'land' qui n'est pas fiable.
+   Résolution ~2mm → 75×75 quads pour un modèle 150mm. */
+function buildGroundFill(st){
+  if(!st.grassOn||!Cache.ready)return;
+  const W=App.wMm/2,D=App.dMm/2;
+  // Pas de grille: env. 2mm, adapté à la taille du modèle
+  const STEP=Math.max(1.0,Math.min(4.0,App.wMm/60));
+  const xN=Math.ceil(App.wMm/STEP)+1;
+  const zN=Math.ceil(App.dMm/STEP)+1;
+  const verts=[];
+  const grid=new Int32Array(xN*zN).fill(-1);
+  for(let zi=0;zi<zN;zi++){
+    for(let xi=0;xi<xN;xi++){
+      const x=-W+(xi/(xN-1))*App.wMm;
+      const z=-D+(zi/(zN-1))*App.dMm;
+      if(inZone(x,z)){
+        grid[zi*xN+xi]=verts.length/3;
+        verts.push(x,sampleTerrainY(x,z)+H_LAND,z);
+      }
+    }
+  }
+  if(!verts.length)return;
+  const idx=[];
+  for(let zi=0;zi<zN-1;zi++){
+    for(let xi=0;xi<xN-1;xi++){
+      const a=grid[zi*xN+xi],b=grid[zi*xN+xi+1];
+      const c=grid[(zi+1)*xN+xi],d=grid[(zi+1)*xN+xi+1];
+      if(a>=0&&b>=0&&c>=0){idx.push(a,b,c)}
+      if(b>=0&&d>=0&&c>=0){idx.push(b,d,c)}
+    }
+  }
+  if(!idx.length)return;
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(verts),3));
+  geo.setIndex(idx);geo.computeVertexNormals();
+  const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
+    color:new THREE.Color(COL_LAND),roughness:.95,metalness:0,
+    polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1
+  }));
+  m.name='GROUND';App.tg.add(m);
+}
+
 /* ═══════════════════ BUILD OVERTURE ═══════════════════ */
 /* Largeurs réelles (mètres) par classe Overture */
 const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
@@ -1303,8 +1347,12 @@ function buildGPXMesh(st){
   const v3s=pts.map(p=>{const lc=toLocal(p.lat,p.lon);return new THREE.Vector3(lc.x,terrYAt(p.lat,p.lon)+st.gpxH,lc.z)}).filter(v=>isFinite(v.x)&&isFinite(v.z));
   if(v3s.length<2)return;
   const tubeW=Math.max(st.gpxMW,st.gpxTW*Cache.mmPerMeter);
-  const g=mkRibbon(v3s,tubeW*2,tubeW+0.5);
-  if(g){const col=new THREE.Color(st.gpxCol);const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:col,roughness:.3,metalness:.1}));m.name='GPX';App.tg.add(m)}
+  // depth=tubeW+1.5 pour que la trace soit bien visible au-dessus des routes
+  const g=mkRibbon(v3s,tubeW*2,tubeW+1.5);
+  if(g){const col=new THREE.Color(st.gpxCol);const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+    color:col,roughness:.25,metalness:.15,
+    polygonOffset:true,polygonOffsetFactor:-14,polygonOffsetUnits:-14
+  }));m.name='GPX';App.tg.add(m)}
 }
 
 /* ═══════════════════ BUILD ALL MESHES ═══════════════════ */
@@ -1315,6 +1363,7 @@ function buildMeshes(){
   buildBase(st);
   buildTerrain(st);
   buildSideWalls(st);
+  buildGroundFill(st); // fond terrain-following complet avant les couches Overture
   buildOverture(st);
   buildGPXMesh(st);
 }
@@ -1358,7 +1407,8 @@ $('btn-gen').addEventListener('click',async()=>{
     Cache.elevs=elevs;
     const minE=Math.min(...elevs),maxE=Math.max(...elevs),eRange=maxE-minE||1;
     const rawScale=eRange*Cache.mmPerMeter*st.tExag;
-    const scaleMm=Math.min(rawScale,App.wMm*0.20);
+    // Garantir au moins 4% de la largeur comme relief (zones plates lisibles), cap à 30%
+    const scaleMm=Math.max(App.wMm*0.04,Math.min(rawScale,App.wMm*0.30));
     Cache.minE=minE;Cache.maxE=maxE;Cache.elevRange=eRange;Cache.elevScaleMm=scaleMm;
     Cache.BASE_H=st.baseH;
     Cache.terrYAt=makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,st.baseH,minE,eRange,scaleMm);
