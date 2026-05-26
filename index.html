@@ -1276,13 +1276,13 @@ function buildOverture(st){
       const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
       if(PED_CLASSES.has(cls)){
-        /* Trottoirs/chemins : +0.40mm au-dessus terrain */
+        /* Trottoirs/chemins : +0.40mm au-dessus terrain, ancrage 0.3mm dans sol */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
-        const g=mkRibbon(v3,wMm,0.5);if(g)pedGs.push(g);
+        const g=mkRibbon(v3,wMm,H_PED+0.3);if(g)pedGs.push(g);
       }else if(VEHICLE_CLASSES.has(cls)){
-        /* Routes : +0.80mm au-dessus terrain (map2model standard) */
+        /* Routes : +0.80mm au-dessus terrain, ancrage 0.3mm dans sol */
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
-        const g=mkRibbon(v3,wMm,0.5);if(g)roadGs.push(g);
+        const g=mkRibbon(v3,wMm,H_ROAD+0.3);if(g)roadGs.push(g);
       }
     }
 
@@ -1293,7 +1293,7 @@ function buildOverture(st){
       else if(isLine){
         const wMm=Math.max(0.5,1.5*mmPerMeter);
         const v3=clipped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
-        const g=mkRibbon(v3,wMm,0.5);if(g)waterGs.push(g);
+        const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
       }
     }
 
@@ -1380,9 +1380,9 @@ function buildGPXMesh(st){
   simp.push(smoothed[smoothed.length-1]);
   if(simp.length<2)return;
 
-  /* 4. Ruban fin : largeur = tubeW, profondeur = 0.5mm */
+  /* 4. Ruban fin : largeur = tubeW, ancré 0.3mm dans le terrain */
   const tubeW=Math.max(st.gpxMW,st.gpxTW*Cache.mmPerMeter);
-  const g=mkRibbon(simp,tubeW,0.5);
+  const g=mkRibbon(simp,tubeW,st.gpxH+0.3);
   if(g){
     const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
       color:new THREE.Color(st.gpxCol),roughness:.3,metalness:.1,
