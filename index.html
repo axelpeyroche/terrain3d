@@ -1,20 +1,1678 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Terrain3D · Carte 3D imprimable</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='16,3 30,29 2,29' fill='%2322c55e'/%3E%3Cpolygon points='10,18 22,18 16,6' fill='white' opacity='.7'/%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <!-- leaflet-draw chargé depuis CDN (module UMD incompatible avec ESM bundler) -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Terrain3D · Carte 3D imprimable</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolygon points='16,3 30,29 2,29' fill='%2322c55e'/%3E%3Cpolygon points='10,18 22,18 16,6' fill='white' opacity='.7'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07090f;--p1:#0c1422;--p2:#101b2d;--p3:#152035;
+  --b1:#1c3050;--b2:#254468;--b3:#2e5880;
+  --cyan:#00d8ff;--em:#10b981;--rose:#f43f5e;--amb:#f59e0b;
+  --txt:#c8daea;--dim:#4a6280;--mut:#1a2d44;
+  --mono:'DM Mono',monospace;--ui:'Inter',sans-serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100vh;width:100vw;overflow:hidden;font-family:var(--ui);background:var(--bg);color:var(--txt)}
+body{display:flex;flex-direction:column}
+
+/* TOPBAR */
+#tb{flex:0 0 auto;height:46px;background:var(--p1);border-bottom:1px solid var(--b1);
+  display:flex;align-items:center;padding:0 16px;gap:10px;z-index:3000;flex-shrink:0}
+.logo{font-family:var(--mono);font-size:13px;color:var(--cyan);letter-spacing:3px;
+  flex-shrink:0;border-right:1px solid var(--b1);padding-right:12px;user-select:none}
+.logo span{color:var(--rose)}
+.mleft{margin-left:auto}
+button{font-family:var(--ui);font-size:11px;font-weight:600;border:none;border-radius:5px;
+  padding:5px 13px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn-exp{background:var(--em);color:#000}.btn-exp:hover{background:#34d399;box-shadow:0 0 14px rgba(16,185,129,.4)}
+.btn-exp:disabled{opacity:.35;cursor:not-allowed}
+.btn-gen-f{background:var(--cyan);color:#000;padding:6px 20px;font-size:12px;font-weight:700;border-radius:20px}
+.btn-gen-f:hover{background:#33e5ff;box-shadow:0 0 16px rgba(0,216,255,.45)}
+.btn-gen-f:disabled{opacity:.35;cursor:not-allowed}
+input[type=file]{display:none}
+select,input[type=number],input[type=text],input[type=range]{background:var(--bg);border:1px solid var(--b1);
+  color:var(--txt);border-radius:4px;padding:3px 7px;font-family:var(--mono);font-size:10px;cursor:pointer;outline:none}
+select:focus,input:focus{border-color:var(--cyan)}
+input[type=number]{width:52px;text-align:center}
+input[type=checkbox]{accent-color:var(--cyan);cursor:pointer}
+input[type=range]{padding:2px 5px;width:80px}
+
+/* WORKSPACE */
+#ws{flex:1;display:flex;min-height:0}
+
+/* MAP */
+#mp{flex:1 1 0;position:relative;border-right:1px solid var(--b1);min-width:0}
+#map{position:absolute;inset:0}
+#map.dm,#map.dm .leaflet-interactive{cursor:crosshair!important}
+
+/* SEARCH */
+#srch-wrap{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:900;width:260px}
+#srch-input{width:100%;background:rgba(12,20,34,.97);border:1px solid var(--b2);
+  border-radius:20px;padding:6px 16px;color:var(--txt);font-size:11px;outline:none;text-align:center}
+#srch-input:focus{border-color:var(--cyan);text-align:left}
+#srch-drop{display:none;position:absolute;top:34px;left:0;right:0;
+  background:rgba(12,20,34,.99);border:1px solid var(--b2);border-radius:8px;
+  overflow:hidden;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.srch-item{padding:7px 12px;font-size:10px;cursor:pointer;border-bottom:1px solid var(--b1);color:var(--txt);line-height:1.4}
+.srch-item:hover{background:var(--p3)}
+.srch-item:last-child{border-bottom:none}
+.srch-name{font-weight:500}
+.srch-addr{color:var(--dim);font-size:9px}
+
+/* DRAW PANEL */
+#dt{position:absolute;top:10px;left:10px;z-index:800;
+  background:rgba(12,20,34,.97);border:1px solid var(--b2);border-radius:8px;
+  padding:10px;width:152px;backdrop-filter:blur(10px)}
+#dt h4{font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--cyan);
+  text-transform:uppercase;padding-bottom:5px;border-bottom:1px solid var(--b1);margin-bottom:6px}
+.dg{font-family:var(--mono);font-size:7px;letter-spacing:1px;color:var(--dim);
+  margin:5px 0 3px;padding-left:2px;text-transform:uppercase}
+.dbtn{width:100%;font-size:10px;font-weight:500;color:var(--dim);background:transparent;
+  border:1px solid var(--b1);border-radius:4px;padding:5px 8px;cursor:pointer;
+  text-align:left;transition:all .12s;display:flex;align-items:center;gap:7px;margin-bottom:2px}
+.dbtn:hover,.dbtn.act{background:rgba(0,216,255,.07);border-color:var(--cyan);color:var(--txt)}
+.dbtn .ico{font-size:11px;width:14px;text-align:center;flex-shrink:0}
+.dbtn.red{color:#f87171;border-color:rgba(248,113,113,.2)}
+.dbtn.red:hover{background:rgba(248,113,113,.1);border-color:#f87171}
+hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
+.filebtn{width:100%;display:block;text-align:center;font-size:10px;font-weight:500;
+  color:var(--dim);background:var(--bg);border:1px solid var(--b1);border-radius:4px;
+  padding:5px 8px;cursor:pointer;transition:all .12s;margin-bottom:2px}
+.filebtn:hover,.filebtn.on{border-color:var(--rose);color:var(--rose)}
+#gpx-ctr{display:none;font-family:var(--mono);font-size:9px;color:var(--amb);
+  text-align:center;padding:3px;border:1px solid rgba(245,158,11,.2);border-radius:3px;margin-bottom:2px}
+#dch{position:absolute;bottom:52px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.88);color:#fff;font-family:var(--mono);font-size:9px;
+  padding:4px 12px;border-radius:20px;pointer-events:none;z-index:900;
+  white-space:nowrap;display:none;border:1px solid var(--b2)}
+#snap{position:absolute;width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--cyan);background:rgba(0,216,255,.3);
+  display:none;pointer-events:none;z-index:1200;transform:translate(-50%,-50%)}
+#bot-wrap{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  z-index:700;display:none;gap:6px;align-items:center}
+.bbtn{border-radius:20px;padding:6px 16px;font-size:11px;font-weight:700}
+.bbtn-cyan{background:var(--cyan);color:#000}.bbtn-cyan:hover{background:#33e5ff}
+.bbtn-dim{background:transparent;color:var(--dim);border:1px solid var(--b2)}
+.bbtn-dim:hover{color:var(--txt);border-color:var(--txt)}
+#gpx-badge{display:none;position:absolute;bottom:52px;right:12px;z-index:700;
+  background:rgba(12,20,34,.93);border:1px solid rgba(244,63,94,.3);border-radius:6px;
+  padding:6px 10px;font-family:var(--mono);font-size:9px;color:var(--rose);pointer-events:none}
+
+/* 3D VIEWER */
+#vp{flex:1 1 0;position:relative;background:#b8d4e8;overflow:hidden;min-width:0}
+#c3d{position:absolute;top:0;left:0;width:100%!important;height:100%!important;display:block}
+#gen-wrap{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:100}
+#empty3d{position:absolute;inset:0;z-index:5;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;transition:opacity .3s;color:#456}
+#empty3d.h{opacity:0}
+#empty3d svg{opacity:.2;width:50px;height:50px}
+#empty3d p{font-family:var(--mono);font-size:9px;letter-spacing:1px;text-align:center;line-height:2.2}
+#prog{position:absolute;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+  background:rgba(184,212,232,.75);backdrop-filter:blur(4px)}
+#pc{background:var(--p1);border:1px solid var(--b2);border-radius:10px;padding:24px 32px;
+  min-width:280px;display:flex;flex-direction:column;gap:12px}
+#ps{font-family:var(--mono);font-size:9px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
+#pl{font-size:13px;font-weight:500;color:var(--txt)}
+#pt{height:3px;background:var(--b1);border-radius:2px;overflow:hidden}
+#pb{height:100%;background:linear-gradient(90deg,var(--cyan),#0066ff);width:0;transition:width .3s}
+#pp{font-family:var(--mono);font-size:20px;font-weight:500;color:var(--cyan);text-align:right}
+#elev{display:none;position:absolute;top:52px;right:12px;z-index:15;
+  background:rgba(7,9,15,.88);border:1px solid var(--b2);border-radius:6px;
+  padding:8px 12px;font-family:var(--mono);font-size:10px;line-height:1.9}
+.ev{color:var(--cyan);font-weight:700}
+#hint3d{display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);z-index:15;
+  background:rgba(0,0,0,.6);border-radius:20px;padding:4px 12px;
+  font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.6);pointer-events:none;white-space:nowrap}
+
+/* SETTINGS PANEL */
+#sp{flex:0 0 220px;background:var(--p1);border-left:1px solid var(--b1);display:flex;flex-direction:column;flex-shrink:0}
+#sp-hd{background:var(--p2);border-bottom:1px solid var(--b1);padding:8px 12px;flex-shrink:0;
+  font-family:var(--mono);font-size:8px;color:var(--cyan);letter-spacing:2px;text-transform:uppercase}
+#sp-bd{flex:1;overflow-y:auto}
+#sp-bd::-webkit-scrollbar{width:3px}
+#sp-bd::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+.sec{border-bottom:1px solid var(--b1)}
+.sh{display:flex;align-items:center;gap:7px;padding:7px 10px;cursor:pointer;background:var(--p2);user-select:none;transition:background .12s}
+.sh:hover{background:var(--p3)}
+.si{font-size:11px;flex-shrink:0}.sn{font-size:10px;font-weight:600;color:var(--txt);flex:1}
+.sc{font-size:9px;color:var(--dim);transition:transform .18s}.sc.o{transform:rotate(180deg)}
+.sb{padding:7px 10px;display:flex;flex-direction:column;gap:4px}
+.sb.h{display:none}
+.r{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.r>label:first-child{font-size:9px;color:var(--dim);white-space:nowrap;min-width:80px;flex-shrink:0}
+.r input[type=color]{width:22px;height:18px;border:1px solid var(--b2);border-radius:3px;cursor:pointer;padding:0;background:none;flex-shrink:0}
+.r input[type=number]{flex:1;min-width:0}
+.r input[type=range]{flex:1;min-width:0}
+.r select{flex:1;min-width:0}
+.r span{font-size:9px;color:var(--dim);flex-shrink:0}
+.r .rv{font-family:var(--mono);font-size:9px;color:var(--cyan);width:26px;text-align:right;flex-shrink:0}
+.chk{display:flex;align-items:center;gap:6px;padding:1px 0}
+.chk label{font-size:9px;color:var(--dim)}
+
+/* MODAL */
+#modal{display:none;position:fixed;inset:0;z-index:9999;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.75);backdrop-filter:blur(3px)}
+#mbox{background:var(--p1);border:1px solid var(--b2);border-radius:10px;padding:24px;max-width:380px;text-align:center}
+#mtit{font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--rose);margin-bottom:10px}
+#mmsg{font-size:12px;color:var(--txt);line-height:1.7;margin-bottom:18px;white-space:pre-wrap}
+</style>
 </head>
 <body>
-  <div id="app"></div>
-  <script type="module" src="/src/main.ts"></script>
+
+<!-- TOPBAR -->
+<div id="tb">
+  <div class="logo">TERRAIN<span>3D</span></div>
+  <div class="mleft">
+    <button class="btn-exp" id="btn-export">💾 Exporter .3MF (AMS)</button>
+  </div>
+</div>
+
+<!-- WORKSPACE -->
+<div id="ws">
+
+<!-- MAP -->
+<div id="mp">
+  <div id="map"></div>
+  <div id="snap"></div>
+  <div id="dch"></div>
+  <div id="gpx-badge"></div>
+
+  <div id="srch-wrap">
+    <input type="text" id="srch-input" placeholder="🔍 Rechercher un lieu...">
+    <div id="srch-drop"></div>
+  </div>
+
+  <div id="dt">
+    <h4>🗺 Zone & Tracé</h4>
+    <div class="dg">Zone d'impression</div>
+    <button class="dbtn" id="db-rect"><span class="ico">▭</span>Rectangle</button>
+    <button class="dbtn" id="db-sq"><span class="ico">■</span>Carré</button>
+    <button class="dbtn" id="db-circ"><span class="ico">◯</span>Rond</button>
+    <button class="dbtn" id="db-hex"><span class="ico">⬡</span>Hexagone</button>
+    <button class="dbtn" id="db-poly"><span class="ico">⬟</span>Polygone</button>
+    <hr class="ds">
+    <div class="dg">Trace GPX</div>
+    <label class="filebtn on" id="gpx-lbl" for="gpx-file">📂 Importer .gpx</label>
+    <input type="file" id="gpx-file" accept=".gpx">
+    <button class="dbtn" id="db-trace"><span class="ico">✏️</span>Tracer GPX</button>
+    <div id="gpx-ctr">0 points tracés</div>
+    <button class="dbtn" id="db-cgpx" style="display:none"><span class="ico">⊕</span>Centrer GPX</button>
+    <hr class="ds">
+    <button class="dbtn red" id="db-clear"><span class="ico">🗑</span>Tout effacer</button>
+  </div>
+
+  <div id="bot-wrap">
+    <button class="bbtn bbtn-cyan" id="btn-czone" style="display:none">📍 Centrer zone</button>
+  </div>
+</div>
+
+<!-- 3D VIEWER -->
+<div id="vp">
+  <canvas id="c3d"></canvas>
+  <div id="gen-wrap">
+    <button class="btn-gen-f" id="btn-gen">▶ Générer le Terrain 3D</button>
+  </div>
+  <div id="empty3d">
+    <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.3">
+      <polygon points="32,5 58,52 6,52"/><polygon points="32,5 44,30 20,30" fill="currentColor" opacity=".15"/>
+    </svg>
+    <p>APERÇU 3D<br>Dessinez une zone sur la carte<br>puis cliquez sur Générer</p>
+  </div>
+  <div id="prog"><div id="pc">
+    <div id="ps">INIT</div><div id="pl">Préparation...</div>
+    <div id="pt"><div id="pb"></div></div><div id="pp">0%</div>
+  </div></div>
+  <div id="hint3d">🖱 Gauche=Rotation · Molette=Zoom · Droite=Déplacer</div>
+  <div id="elev"></div>
+</div>
+
+<!-- SETTINGS -->
+<div id="sp">
+<div id="sp-hd">⚙ Paramètres 3D</div>
+<div id="sp-bd">
+
+<div class="sec">
+  <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Terrain</span><span class="sc o" id="ca-topo">▼</span></div>
+  <div class="sb" id="sb-topo">
+    <div class="r"><label>Couleur</label><input type="color" id="c-base" value="#eeebe6"></div>
+    <div class="r"><label>Résolution</label>
+      <select id="t-res"><option value="56">Rapide (56²)</option><option value="96">Normale (96²)</option><option value="128" selected>Haute (128²)</option><option value="256">Max (256²)</option></select></div>
+    <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
+    <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="1"><span class="rv" id="t-smooth-v">1</span></div>
+    <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
+    <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
+    <input type="hidden" id="t-zoom" value="15">
+    <input type="hidden" id="t-src" value="terrarium">
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('water')"><span class="si">💧</span><span class="sn">Eau</span>
+    <input type="checkbox" id="water-on" checked onclick="ev(event)"><span class="sc o" id="ca-water">▼</span></div>
+  <div class="sb h" id="sb-water">
+    <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#3399ff"></div>
+    <input type="hidden" id="water-h" value="0.6">
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('grass')"><span class="si">🌿</span><span class="sn">Parcs / Végétation</span>
+    <input type="checkbox" id="grass-on" checked onclick="ev(event)"><span class="sc o" id="ca-grass">▼</span></div>
+  <div class="sb h" id="sb-grass">
+    <div class="r"><label>Couleur</label><input type="color" id="grass-col" value="#0fe300"></div>
+    <input type="hidden" id="grass-h" value="0.4">
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('road')"><span class="si">🛣️</span><span class="sn">Routes</span>
+    <input type="checkbox" id="road-on" checked onclick="ev(event)"><span class="sc o" id="ca-road">▼</span></div>
+  <div class="sb h" id="sb-road">
+    <div class="r"><label>Couleur</label><input type="color" id="road-col" value="#262626"></div>
+    <input type="hidden" id="road-h" value="0.8">
+    <input type="hidden" id="road-mw" value="0.5">
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('build')"><span class="si">🏛️</span><span class="sn">Bâtiments</span>
+    <input type="checkbox" id="build-on" checked onclick="ev(event)"><span class="sc o" id="ca-build">▼</span></div>
+  <div class="sb h" id="sb-build">
+    <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#b8b8b8"></div>
+    <div class="r"><label>Hauteur ×</label><input type="number" id="build-hs" value="1" step="0.1" min="0.1" max="5"></div>
+  </div>
+</div>
+
+<div class="sec">
+  <div class="sh" onclick="ts('gpx2')"><span class="si">🔴</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx2">▼</span></div>
+  <div class="sb h" id="sb-gpx2">
+    <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff0000"></div>
+    <input type="hidden" id="gpx-h" value="1.2">
+    <input type="hidden" id="gpx-mw" value="0.5">
+    <input type="hidden" id="gpx-tw" value="10">
+  </div>
+</div>
+
+</div></div><!-- end sp -->
+</div><!-- end ws -->
+
+<div id="modal"><div id="mbox">
+  <div id="mtit">INFO</div><div id="mmsg"></div>
+  <button class="btn-gen-f" id="btn-mc" style="margin-top:6px">OK</button>
+</div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
+<script src="https://unpkg.com/pbf@3/dist/pbf.js"></script>
+
+<script>
+'use strict';
+
+/* ═══════════════════ STATE ═══════════════════ */
+const App = {
+  bounds:null, wMm:150, dMm:150, zoneType:'rect',
+  zonePts:[], zoneLayer:null,
+  scene:null, camera:null, renderer:null, controls:null, tg:null,
+  threeReady:false, generated:false,
+  gpxPoints:[], gpxLayer:null, searchMarker:null,
+  realW:0, realH:0
+};
+const Cache = {
+  ready:false, elevs:null, GRID:128,
+  minE:0, maxE:0, elevRange:1, elevScaleMm:0, BASE_H:3,
+  mmPerMeter:1, toLocal:null, terrYAt:null, osm:null, bounds:null
+};
+const MIN_SURF = 0;
+
+/* ═══════════════════ HELPERS ═══════════════════ */
+const $ = id => document.getElementById(id);
+function ev(e) { e.stopPropagation() }
+function ts(n) { $('sb-'+n).classList.toggle('h'); $('ca-'+n).classList.toggle('o') }
+function modal(t,m) { $('mtit').textContent=t; $('mmsg').textContent=m; $('modal').style.display='flex' }
+$('btn-mc').onclick = () => $('modal').style.display='none';
+function setP(p,s,l) {
+  const w=$('prog');
+  if(p===null){w.style.display='none';return}
+  w.style.display='flex';
+  $('pb').style.width=p+'%'; $('pp').textContent=Math.round(p)+'%';
+  if(s) $('ps').textContent=s; if(l) $('pl').textContent=l;
+}
+function tick() { return new Promise(r=>setTimeout(r,16)) }
+
+function S() {
+  const n=i=>parseFloat($(i).value)||0, c=i=>$(i).checked, v=i=>$(i).value;
+  return {
+    tRes:parseInt(v('t-res'))||128, tExag:n('t-exag')||1, tSmooth:n('t-smooth')||0,
+    cBase:v('c-base')||'#eeebe6', baseH:n('t-base-h')||3,
+    maxDim:Math.max(50,Math.min(400,n('t-maxdim')||150)),
+    waterOn:c('water-on'), waterCol:v('water-col'), waterH:n('water-h')||0.6,
+    grassOn:c('grass-on'), grassCol:v('grass-col'), grassH:n('grass-h')||0.4,
+    roadsOn:c('road-on'), roadCol:v('road-col'), roadH:n('road-h')||0.8, roadMW:n('road-mw')||0.5,
+    buildOn:c('build-on'), buildCol:v('build-col'), buildHS:n('build-hs')||1,
+    gpxCol:v('gpx-col'), gpxH:n('gpx-h')||1, gpxMW:n('gpx-mw')||0.4, gpxTW:n('gpx-tw')||10
+  };
+}
+
+$('t-smooth').addEventListener('input',()=>{ $('t-smooth-v').textContent=$('t-smooth').value });
+
+/* ═══════════════════ LEAFLET MAP ═══════════════════ */
+const osmL = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OSM'});
+const satL = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'© Esri'});
+const ignL = L.tileLayer('https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',{maxZoom:19,attribution:'© IGN'});
+const map = L.map('map',{center:[48.8584,2.2945],zoom:15,zoomControl:false,layers:[osmL]});
+L.control.zoom({position:'topright'}).addTo(map);
+L.control.layers({'OSM':osmL,'Satellite':satL,'IGN':ignL},{},{position:'topright'}).addTo(map);
+new ResizeObserver(()=>map.invalidateSize()).observe($('mp'));
+setTimeout(()=>map.invalidateSize(),300);
+
+/* ═══════════════════ SEARCH ═══════════════════ */
+let _srchdeb;
+$('srch-input').addEventListener('input',function(){
+  clearTimeout(_srchdeb);
+  const q=this.value.trim();
+  $('srch-drop').style.display='none';
+  if(q.length<2) return;
+  _srchdeb=setTimeout(()=>doSearch(q),120);
+});
+$('srch-input').addEventListener('blur',()=>setTimeout(()=>$('srch-drop').style.display='none',200));
+async function doSearch(q) {
+  try {
+    const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=6&addressdetails=1`);
+    const d=await r.json();
+    const drop=$('srch-drop');
+    if(!d.length){drop.style.display='none';return}
+    drop.innerHTML=d.map((x,i)=>`<div class="srch-item" data-i="${i}" data-lat="${x.lat}" data-lon="${x.lon}" data-bb="${x.boundingbox}"><div class="srch-name">${x.display_name.split(',')[0]}</div><div class="srch-addr">${x.display_name.split(',').slice(1,3).join(',')}</div></div>`).join('');
+    drop.style.display='block';
+    drop.querySelectorAll('.srch-item').forEach(el=>{
+      el.addEventListener('mousedown',function(e){
+        e.preventDefault();
+        const lat=parseFloat(this.dataset.lat),lon=parseFloat(this.dataset.lon);
+        const bb=this.dataset.bb.split(',').map(parseFloat);
+        if(App.searchMarker){map.removeLayer(App.searchMarker);App.searchMarker=null}
+        App.searchMarker=L.circleMarker([lat,lon],{radius:8,fillColor:'#f43f5e',fillOpacity:.9,color:'#fff',weight:2}).addTo(map);
+        App.searchMarker._latlng=L.latLng(lat,lon);
+        map.fitBounds([[bb[0],bb[2]],[bb[1],bb[3]]],{padding:[60,60],maxZoom:16});
+        $('srch-drop').style.display='none';
+        $('srch-input').value=el.querySelector('.srch-name').textContent;
+      });
+    });
+  } catch(e) { $('srch-drop').style.display='none' }
+}
+
+/* ═══════════════════ DRAWING ═══════════════════ */
+let drawMode=null, drawPt1=null, polyPts=[], prevPoly=null, tracePts=[], firstPolyMarker=null;
+const HINTS={
+  rect:'Cliquez 1er coin puis coin opposé',sq:'Cliquez 1er coin (carré)',
+  circ:'Cliquez centre, glissez pour le rayon',hex:'Cliquez centre, glissez pour le rayon',
+  poly:'Cliquez pour ajouter des points – rejoignez le 1er point pour fermer',
+  trace:'Cliquez pour ajouter des points – double-clic pour finir'
+};
+
+function setMode(m) {
+  if(drawMode&&drawMode!==m){drawPt1=null;polyPts=[];tracePts=[];if(prevPoly){map.removeLayer(prevPoly);prevPoly=null}if(firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}}
+  drawMode=m;
+  ['rect','sq','circ','hex','poly','trace'].forEach(k=>{const el=$('db-'+k);if(el)el.classList.toggle('act',k===m)});
+  $('map').classList.toggle('dm',!!m);
+  const dch=$('dch');dch.style.display=m?'block':'none';if(m)dch.textContent=HINTS[m]||'';
+  $('gpx-ctr').style.display=m==='trace'?'block':'none';
+  if(m!=='trace')$('gpx-ctr').textContent='0 points tracés';
+  if(!m)$('snap').style.display='none';
+}
+
+function resetDraw(rm=true) {
+  if(prevPoly){map.removeLayer(prevPoly);prevPoly=null}
+  if(firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}
+  drawPt1=null;polyPts=[];tracePts=[];
+  if(rm)setMode(null);
+}
+
+function snapDist(ll,target) { if(!target)return 9999; return map.latLngToContainerPoint(ll).distanceTo(map.latLngToContainerPoint(target)) }
+function updateSnapDot(ll,target) {
+  const s=$('snap');
+  if(!target||snapDist(ll,target)>18){s.style.display='none';return}
+  const p=map.latLngToContainerPoint(target);
+  s.style.display='block';s.style.left=p.x+'px';s.style.top=p.y+'px';
+}
+function getSnapTargets() {
+  const t=[];
+  if(polyPts.length>2)t.push(polyPts[0]);
+  if(tracePts.length>2)t.push(tracePts[0]);
+  if(App.searchMarker)t.push(App.searchMarker._latlng);
+  return t;
+}
+function closestSnap(ll) {
+  const targets=getSnapTargets();let best=null,bd=9999;
+  for(const t of targets){const d=snapDist(ll,t);if(d<18&&d<bd){bd=d;best=t}}
+  return best;
+}
+
+map.on('mousemove',e=>{
+  if(!drawMode)return;
+  const ll=e.latlng,snap=closestSnap(ll);
+  updateSnapDot(ll,snap||drawPt1);
+  const ell=snap||ll;
+  if((drawMode==='rect'||drawMode==='sq')&&drawPt1){
+    const pts=drawMode==='sq'?mkSq(drawPt1,ell):mkRect(drawPt1,ell);
+    if(!prevPoly)prevPoly=L.polygon(pts,{color:'#f43f5e',weight:2,fillOpacity:.1}).addTo(map);
+    else prevPoly.setLatLngs(pts);
+  } else if((drawMode==='circ'||drawMode==='hex')&&drawPt1){
+    const pts=drawMode==='circ'?mkCirc(drawPt1,ell,80):mkHex(drawPt1,ell);
+    if(!prevPoly)prevPoly=L.polygon(pts,{color:'#00d8ff',weight:2,fillOpacity:.1}).addTo(map);
+    else prevPoly.setLatLngs(pts);
+  } else if(drawMode==='poly'&&polyPts.length>0){
+    const all=[...polyPts,ell];
+    if(!prevPoly)prevPoly=L.polyline(all,{color:'#f43f5e',weight:2,dashArray:'5,4'}).addTo(map);
+    else prevPoly.setLatLngs(all);
+  } else if(drawMode==='trace'&&tracePts.length>0){
+    const all=[...tracePts,ell];
+    if(!prevPoly)prevPoly=L.polyline(all,{color:'#ff0000',weight:3,dashArray:'4,3'}).addTo(map);
+    else prevPoly.setLatLngs(all);
+  }
+});
+
+let _clickTimer=null;
+map.on('click',e=>{
+  if(!drawMode)return;
+  const ll=e.latlng,snap=closestSnap(ll),ell=snap||ll;
+  if(drawMode==='rect'){if(!drawPt1){drawPt1=ell;return}finalizeZone(mkRect(drawPt1,ell));}
+  else if(drawMode==='sq'){if(!drawPt1){drawPt1=ell;return}finalizeZone(mkSq(drawPt1,ell));}
+  else if(drawMode==='circ'){if(!drawPt1){drawPt1=ell;return}finalizeZone(mkCirc(drawPt1,ell,80));}
+  else if(drawMode==='hex'){if(!drawPt1){drawPt1=ell;return}finalizeZone(mkHex(drawPt1,ell));}
+  else if(drawMode==='poly'){
+    if(polyPts.length>2&&snapDist(ll,polyPts[0])<18){finalizeZone([...polyPts]);return}
+    polyPts.push(snap&&App.searchMarker&&snapDist(ll,App.searchMarker._latlng)<18?App.searchMarker._latlng:ell);
+    if(polyPts.length===1){if(firstPolyMarker)map.removeLayer(firstPolyMarker);firstPolyMarker=L.circleMarker(polyPts[0],{radius:7,fillColor:'#f43f5e',fillOpacity:.95,color:'#fff',weight:2}).addTo(map)}
+  } else if(drawMode==='trace'){
+    clearTimeout(_clickTimer);
+    _clickTimer=setTimeout(()=>{
+      if(tracePts.length>2&&snapDist(ll,tracePts[0])<18){finalizeTrace(tracePts);return}
+      tracePts.push(snap||ll);
+      $('gpx-ctr').textContent=`${tracePts.length} point${tracePts.length>1?'s':''} tracé${tracePts.length>1?'s':''}`;
+      if(tracePts.length===1){if(firstPolyMarker)map.removeLayer(firstPolyMarker);firstPolyMarker=L.circleMarker(tracePts[0],{radius:7,fillColor:'#ff0000',fillOpacity:.95,color:'#fff',weight:2}).addTo(map)}
+      updateTraceLayer();
+    },220);
+  }
+});
+
+map.on('dblclick',e=>{if(drawMode==='trace'&&tracePts.length>=2){finalizeTrace(tracePts);e.originalEvent.preventDefault()}});
+
+function updateTraceLayer() {
+  if(App.gpxLayer){map.removeLayer(App.gpxLayer);App.gpxLayer=null}
+  if(tracePts.length<2)return;
+  App.gpxLayer=L.polyline(tracePts,{color:'#ff0000',weight:4,opacity:.9}).addTo(map);
+}
+function finalizeTrace(pts) {
+  $('snap').style.display='none';
+  if(firstPolyMarker){map.removeLayer(firstPolyMarker);firstPolyMarker=null}
+  if(pts.length<2){resetDraw();return}
+  App.gpxPoints=pts.map(p=>({lat:p.lat,lon:p.lng}));
+  updateTraceLayer();
+  $('gpx-badge').innerHTML=`✏️ ${App.gpxPoints.length} pts · tracé manuel`;$('gpx-badge').style.display='block';
+  $('db-cgpx').style.display='flex';
+  resetDraw();
+  if(App.generated&&Cache.ready)debouncedBuild();
+}
+function finalizeZone(pts) {
+  if(App.zoneLayer){map.removeLayer(App.zoneLayer);App.zoneLayer=null}
+  App.zonePts=pts;
+  App.zoneLayer=L.polygon(pts,{color:'#f43f5e',weight:2.5,fillColor:'#f43f5e',fillOpacity:.08,dashArray:'6,4'}).addTo(map);
+  const lats=pts.map(p=>Array.isArray(p)?p[0]:p.lat);
+  const lons=pts.map(p=>Array.isArray(p)?p[1]:p.lng);
+  App.bounds={minLat:Math.min(...lats),maxLat:Math.max(...lats),minLon:Math.min(...lons),maxLon:Math.max(...lons)};
+  const latDiff=App.bounds.maxLat-App.bounds.minLat;
+  const lonDiff=App.bounds.maxLon-App.bounds.minLon;
+  const cLat=(App.bounds.maxLat+App.bounds.minLat)/2;
+  App.realH=latDiff*111320;
+  App.realW=lonDiff*Math.cos(cLat*Math.PI/180)*111320;
+  const maxDim=Math.max(50,Math.min(400,parseFloat($('t-maxdim')?.value)||150));
+  const sc=maxDim/Math.max(App.realH,App.realW);
+  App.wMm=Math.round(App.realW*sc);
+  App.dMm=Math.round(App.realH*sc);
+  const savedMode=drawMode;
+  App.zoneType=savedMode;
+  $('bot-wrap').style.display='flex';
+  $('btn-czone').style.display='inline-block';
+  resetDraw();
+}
+
+function mkRect(a,b){return[[a.lat,a.lng],[a.lat,b.lng],[b.lat,b.lng],[b.lat,a.lng]]}
+function mkSq(a,b){
+  const dLat=Math.abs(b.lat-a.lat),dLon=Math.abs(b.lng-a.lng),cLat=(a.lat+b.lat)/2;
+  const mLat=dLat*111320,mLon=dLon*111320*Math.cos(cLat*Math.PI/180);
+  const dm=Math.min(mLat,mLon),nLat=dm/111320,nLon=dm/(111320*Math.cos(cLat*Math.PI/180));
+  const minLat=Math.min(a.lat,b.lat),minLon=Math.min(a.lng,b.lng);
+  return[[minLat,minLon],[minLat,minLon+nLon],[minLat+nLat,minLon+nLon],[minLat+nLat,minLon]];
+}
+function mkCirc(c,e,n){
+  const R=c.distanceTo(e),pts=[];
+  for(let i=0;i<n;i++){const a=i/n*Math.PI*2;pts.push([c.lat+R*Math.cos(a)/111320,c.lng+R*Math.sin(a)/(111320*Math.cos(c.lat*Math.PI/180))])}
+  return pts;
+}
+function mkHex(c,e){
+  const R=c.distanceTo(e),pts=[];
+  for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6;pts.push([c.lat+R*Math.cos(a)/111320,c.lng+R*Math.sin(a)/(111320*Math.cos(c.lat*Math.PI/180))])}
+  return pts;
+}
+
+$('btn-czone').addEventListener('click',()=>{
+  if(!App.bounds)return;
+  const b=App.bounds;
+  map.fitBounds([[b.minLat,b.minLon],[b.maxLat,b.maxLon]],{padding:[80,200],maxZoom:14});
+});
+$('db-cgpx').addEventListener('click',()=>{
+  if(!App.gpxPoints.length)return;
+  const la=App.gpxPoints.map(p=>p.lat),lo=App.gpxPoints.map(p=>p.lon);
+  map.fitBounds([[Math.min(...la),Math.min(...lo)],[Math.max(...la),Math.max(...lo)]],{paddingTopLeft:[180,80],paddingBottomRight:[80,80],maxZoom:12});
+});
+
+/* GPX FILE IMPORT */
+$('gpx-file').addEventListener('change',function(e){
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=ev=>{
+    try{
+      const xml=new DOMParser().parseFromString(ev.target.result,'text/xml');
+      const nodes=[...xml.getElementsByTagName('trkpt'),...xml.getElementsByTagName('wpt'),...xml.getElementsByTagName('rtept')];
+      if(!nodes.length){modal('GPX','Aucun point trouvé.');return}
+      const pts=nodes.map(n=>({lat:parseFloat(n.getAttribute('lat')),lon:parseFloat(n.getAttribute('lon'))})).filter(p=>!isNaN(p.lat));
+      if(!pts.length)return;
+      App.gpxPoints=pts;
+      if(App.gpxLayer)map.removeLayer(App.gpxLayer);
+      App.gpxLayer=L.polyline(pts.map(p=>[p.lat,p.lon]),{color:'#f43f5e',weight:3.5,opacity:.92}).addTo(map);
+      if(!App.bounds)map.fitBounds(App.gpxLayer.getBounds(),{padding:[60,60],maxZoom:12});
+      const l=$('gpx-lbl');l.textContent='✓ '+f.name.replace('.gpx','').substring(0,16);l.classList.add('on');
+      $('db-cgpx').style.display='flex';
+      let d=0;
+      for(let i=1;i<pts.length;i++){
+        const R=6371,dLa=(pts[i].lat-pts[i-1].lat)*Math.PI/180,dLo=(pts[i].lon-pts[i-1].lon)*Math.PI/180;
+        const a=Math.sin(dLa/2)**2+Math.cos(pts[i-1].lat*Math.PI/180)*Math.cos(pts[i].lat*Math.PI/180)*Math.sin(dLo/2)**2;
+        d+=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+      }
+      $('gpx-badge').innerHTML=`📍 ${pts.length.toLocaleString()} pts · ${d.toFixed(1)} km`;
+      $('gpx-badge').style.display='block';
+      if(App.generated&&Cache.ready)debouncedBuild();
+    }catch(err){modal('ERREUR GPX','Lecture impossible.')}
+  };
+  rd.readAsText(f);
+});
+
+['rect','sq','circ','hex','poly','trace'].forEach(k=>{
+  const el=$('db-'+k);
+  if(el)el.addEventListener('click',()=>setMode(drawMode===k?null:k));
+});
+$('db-clear').addEventListener('click',()=>{
+  resetDraw();
+  if(App.zoneLayer){map.removeLayer(App.zoneLayer);App.zoneLayer=null}
+  if(App.gpxLayer){map.removeLayer(App.gpxLayer);App.gpxLayer=null}
+  if(App.searchMarker){map.removeLayer(App.searchMarker);App.searchMarker=null}
+  App.zonePts=[];App.bounds=null;App.gpxPoints=[];tracePts=[];
+  $('gpx-badge').style.display='none';$('db-cgpx').style.display='none';
+  $('bot-wrap').style.display='none';$('btn-czone').style.display='none';
+  $('snap').style.display='none';
+  $('gpx-lbl').textContent='📂 Importer .gpx';$('gpx-lbl').classList.remove('on');
+});
+
+/* ═══════════════════ THREE.JS INIT ═══════════════════ */
+let _3p=null;
+function ensureThree() {
+  if(App.threeReady)return Promise.resolve();
+  if(_3p)return _3p;
+  _3p=new Promise(res=>{
+    function tryIt(){
+      if(!THREE.OrbitControls){setTimeout(tryIt,100);return}
+      const vp=$('vp'),canvas=$('c3d');
+      const W=vp.clientWidth,H=vp.clientHeight;
+      if(!W||!H){setTimeout(tryIt,100);return}
+      const scene=new THREE.Scene();
+      scene.background=new THREE.Color(0xb8d4e8);
+      scene.fog=new THREE.Fog(0xb8d4e8,1200,4000);
+      App.scene=scene;
+      const camera=new THREE.PerspectiveCamera(40,W/H,0.5,8000);
+      camera.position.set(0,180,280);App.camera=camera;
+      const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+      renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+      renderer.setSize(W,H);
+      renderer.toneMapping=THREE.LinearToneMapping;renderer.toneMappingExposure=1.0;
+      App.renderer=renderer;
+      const ctrl=new THREE.OrbitControls(camera,canvas);
+      ctrl.enableDamping=true;ctrl.dampingFactor=0.07;ctrl.minDistance=10;ctrl.maxDistance=4000;ctrl.screenSpacePanning=true;
+      ctrl.maxPolarAngle=Math.PI/2; // bloque exactement à l'horizontale — impossible de passer sous le modèle
+      App.controls=ctrl;
+      scene.add(new THREE.AmbientLight(0xffffff,0.78));
+      const sun=new THREE.DirectionalLight(0xfffaf4,0.95);sun.position.set(-250,700,200);scene.add(sun);
+      const fill=new THREE.DirectionalLight(0xddeeff,0.40);fill.position.set(200,250,-200);scene.add(fill);
+      const tg=new THREE.Group();scene.add(tg);App.tg=tg;
+      window.addEventListener('resize',()=>{
+        const W2=vp.clientWidth,H2=vp.clientHeight;if(!W2||!H2)return;
+        camera.aspect=W2/H2;camera.updateProjectionMatrix();renderer.setSize(W2,H2);
+      });
+      function loop(){requestAnimationFrame(loop);ctrl.update();renderer.render(scene,camera)}
+      loop();App.threeReady=true;res();
+    }
+    setTimeout(tryIt,100);
+  });
+  return _3p;
+}
+window.addEventListener('load',()=>ensureThree());
+
+/* ═══════════════════ ELEVATION TILES ═══════════════════ */
+function ll2tile(lat,lon,z){
+  const n=2**z,x=Math.floor((lon+180)/360*n);
+  const r=lat*Math.PI/180,y=Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n);
+  return{x,y};
+}
+function pxIn(lat,lon,z,tx,ty){
+  const n=2**z,xF=(lon+180)/360*n-tx,r=lat*Math.PI/180;
+  const yF=(1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n-ty;
+  return{px:Math.max(0,Math.min(511,Math.floor(xF*512))),py:Math.max(0,Math.min(511,Math.floor(yF*512)))};
+}
+async function fetchTile(z,x,y){
+  /* fetch+createImageBitmap évite le canvas taint lié à crossOrigin */
+  const resp=await fetch(`https://tiles.mapterhorn.com/${z}/${x}/${y}.webp`);
+  if(!resp.ok)throw new Error(`Mapterhorn ${z}/${x}/${y}: HTTP ${resp.status}`);
+  const blob=await resp.blob();
+  const bmp=await createImageBitmap(blob,{colorSpaceConversion:'none'});
+  const cv=document.createElement('canvas');cv.width=cv.height=512;
+  const ctx=cv.getContext('2d');ctx.drawImage(bmp,0,0);
+  return ctx.getImageData(0,0,512,512);
+}
+async function sampleElevs(latLons,zoom){
+  const tm={};
+  for(const[la,lo]of latLons){const t=ll2tile(la,lo,zoom),k=`${t.x}_${t.y}`;if(!tm[k])tm[k]={...t,d:null}}
+  await Promise.all(Object.keys(tm).map(async k=>{try{tm[k].d=await fetchTile(zoom,tm[k].x,tm[k].y)}catch(e){}}));
+  return latLons.map(([la,lo])=>{
+    const t=ll2tile(la,lo,zoom),tile=tm[`${t.x}_${t.y}`];
+    if(!tile?.d)return 0;
+    const{px,py}=pxIn(la,lo,zoom,t.x,t.y);
+    const i=(py*512+px)*4;
+    return(tile.d.data[i]*256+tile.d.data[i+1]+tile.d.data[i+2]/256)-32768;
+  });
+}
+function smoothElevs(elevs,GRID,radius){
+  if(radius<=0)return elevs;
+  const sigma=Math.max(0.5,radius/2.5);
+  const k=[];let wSum=0;
+  for(let dr=-radius;dr<=radius;dr++)for(let dc=-radius;dc<=radius;dc++){const w=Math.exp(-(dr*dr+dc*dc)/(2*sigma*sigma));k.push({dr,dc,w});wSum+=w}
+  k.forEach(e=>e.w/=wSum);
+  const out=new Float64Array(elevs.length);
+  for(let r=0;r<GRID;r++)for(let c=0;c<GRID;c++){
+    let s=0,tw=0;
+    for(const{dr,dc,w}of k){const nr=r+dr,nc=c+dc;if(nr>=0&&nr<GRID&&nc>=0&&nc<GRID){s+=w*(elevs[nr*GRID+nc]||0);tw+=w}}
+    out[r*GRID+c]=tw>0?s/tw:0;
+  }
+  return out;
+}
+function makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,baseH,minE,eRange,scaleMm){
+  return function(lat,lon){
+    const tR=(lat-bounds.minLat)/latDiff*(GRID-1);
+    const tC=(lon-bounds.minLon)/lonDiff*(GRID-1);
+    const r0=Math.max(0,Math.min(GRID-2,Math.floor(tR)));
+    const c0=Math.max(0,Math.min(GRID-2,Math.floor(tC)));
+    const fr=tR-r0,fc=tC-c0;
+    const e00=elevs[r0*GRID+c0]||0,e01=elevs[r0*GRID+c0+1]||0;
+    const e10=elevs[(r0+1)*GRID+c0]||0,e11=elevs[(r0+1)*GRID+c0+1]||0;
+    const e=(1-fr)*((1-fc)*e00+fc*e01)+fr*((1-fc)*e10+fc*e11);
+    return baseH+MIN_SURF+(e-minE)/eRange*scaleMm;
+  };
+}
+
+/* ═══════════════════ GEOMETRY HELPERS ═══════════════════ */
+function mergeGeos(geos){
+  const v=geos.filter(g=>g&&g.attributes?.position?.count>=3);
+  if(!v.length)return null;
+  if(v.length===1)return v[0];
+  let tv=0,ti=0;
+  v.forEach(g=>{tv+=g.attributes.position.count;ti+=g.index?g.index.count:g.attributes.position.count});
+  const pa=new Float32Array(tv*3),ia=new Uint32Array(ti);
+  let vo=0,io=0;
+  v.forEach(g=>{
+    const p=g.attributes.position;
+    for(let i=0;i<p.count;i++){pa[(vo+i)*3]=p.getX(i);pa[(vo+i)*3+1]=p.getY(i);pa[(vo+i)*3+2]=p.getZ(i)}
+    if(g.index){for(let i=0;i<g.index.count;i++)ia[io+i]=g.index.getX(i)+vo;io+=g.index.count}
+    else{for(let i=0;i<p.count;i++)ia[io++]=vo+i}
+    vo+=p.count;
+  });
+  const mg=new THREE.BufferGeometry();
+  mg.setAttribute('position',new THREE.Float32BufferAttribute(pa,3));
+  mg.setIndex(new THREE.Uint32BufferAttribute(ia,1));
+  mg.computeVertexNormals();
+  return mg;
+}
+
+/* Terrain height at local model coords (x,z in mm) */
+function sampleTerrainY(x,z){
+  const{elevs,GRID,minE,elevRange,elevScaleMm,BASE_H}=Cache;
+  if(!elevs||!GRID)return BASE_H||0;
+  const W=App.wMm,D=App.dMm;
+  const fc=(x+W/2)/W*(GRID-1),fr=(z+D/2)/D*(GRID-1);
+  const c0=Math.max(0,Math.min(GRID-2,Math.floor(fc)));
+  const r0=Math.max(0,Math.min(GRID-2,Math.floor(fr)));
+  const tc=fc-c0,tr=fr-r0;
+  const e00=elevs[r0*GRID+c0]||minE,e10=elevs[r0*GRID+c0+1]||minE;
+  const e01=elevs[(r0+1)*GRID+c0]||minE,e11=elevs[(r0+1)*GRID+c0+1]||minE;
+  const e=e00*(1-tc)*(1-tr)+e10*tc*(1-tr)+e01*(1-tc)*tr+e11*tc*tr;
+  const n=Math.max(0,Math.min(1,(e-minE)/Math.max(0.001,elevRange)));
+  return (BASE_H||0)+n*(elevScaleMm||0);
+}
+
+/* Flat ribbon for roads / waterways — miter-jointed */
+function mkRibbon(pts3d,width,depth){
+  if(pts3d.length<2)return null;
+  /* Déduplification : supprime les points trop proches (miter instable sur micro-segments) */
+  const MIN_PT=Math.max(0.05,width*0.10);
+  const filt=[pts3d[0]];
+  for(let i=1;i<pts3d.length;i++){const p=pts3d[i],q=filt[filt.length-1];if(Math.hypot(p.x-q.x,p.z-q.z)>=MIN_PT)filt.push(p);}
+  if(filt.length<2)return null;
+  const hw=width/2,d=depth||0.4,n=filt.length;
+  function segN(p,q){const dx=q.x-p.x,dz=q.z-p.z,l=Math.sqrt(dx*dx+dz*dz);return l<1e-8?{x:1,z:0}:{x:-dz/l,z:dx/l}}
+  const pos=[],idx=[];
+  for(let i=0;i<n;i++){
+    let nx,nz;
+    if(n<3||i===0){const s=segN(filt[0],filt[1]);nx=s.x;nz=s.z}
+    else if(i===n-1){const s=segN(filt[n-2],filt[n-1]);nx=s.x;nz=s.z}
+    else{
+      const s1=segN(filt[i-1],filt[i]),s2=segN(filt[i],filt[i+1]);
+      const mx=s1.x+s2.x,mz=s1.z+s2.z,ml=Math.sqrt(mx*mx+mz*mz);
+      if(ml<0.01){nx=s2.x;nz=s2.z}
+      else{const dot=(mx/ml)*s2.x+(mz/ml)*s2.z,scale=Math.min(3.0,1/Math.max(0.35,dot));nx=mx/ml*scale;nz=mz/ml*scale}
+    }
+    const p=filt[i],y=p.y,b=p.y-d;
+    pos.push(p.x-nx*hw,y,p.z-nz*hw, p.x+nx*hw,y,p.z+nz*hw, p.x-nx*hw,b,p.z-nz*hw, p.x+nx*hw,b,p.z+nz*hw);
+  }
+  for(let i=0;i<n-1;i++){
+    const a=i*4,b=(i+1)*4;
+    idx.push(a,b,b+1,a,b+1,a+1);idx.push(a+2,b+3,b+2,a+2,a+3,b+3);
+    idx.push(a,a+2,b+2,a,b+2,b);idx.push(a+1,b+1,b+3,a+1,b+3,a+3);
+  }
+  idx.push(0,2,3,0,3,1);const e=(n-1)*4;idx.push(e,e+1,e+3,e,e+3,e+2);
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  g.setIndex(idx);g.computeVertexNormals();
+  return g;
+}
+
+/* ═══════════════════ ZONE + CLIPPING ═══════════════════ */
+function inZone(x,z){
+  const W=App.wMm/2,D=App.dMm/2;
+  if(App.zoneType==='circ')return(x/W)**2+(z/D)**2<=1.01;
+  if(App.zoneType==='hex'){const ax=Math.abs(x/W),az=Math.abs(z/D);return ax<=1&&az<=1&&(ax+az)<=1.42}
+  return x>=-W-0.1&&x<=W+0.1&&z>=-D-0.1&&z<=D+0.1;
+}
+
+function interpPt(a,b,t){return{x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,y:a.y+(b.y-a.y)*t,lat:a.lat+(b.lat-a.lat)*t,lon:a.lon+(b.lon-a.lon)*t}}
+
+function clipAgainstEdge(pts,isInside,findIntersect){
+  if(pts.length<3)return[];
+  const out=[],n=pts.length;
+  for(let i=0;i<n;i++){
+    const a=pts[(i-1+n)%n],b=pts[i],aIn=isInside(a),bIn=isInside(b);
+    if(bIn){if(!aIn)out.push(findIntersect(a,b));out.push(b)}else if(aIn)out.push(findIntersect(a,b));
+  }
+  return out;
+}
+function clipPolyToRect(pts){
+  const W=App.wMm/2,D=App.dMm/2;
+  let out=pts;
+  out=clipAgainstEdge(out,p=>p.x<=W,(a,b)=>interpPt(a,b,(W-a.x)/(b.x-a.x)));if(out.length<3)return out;
+  out=clipAgainstEdge(out,p=>p.x>=-W,(a,b)=>interpPt(a,b,(-W-a.x)/(b.x-a.x)));if(out.length<3)return out;
+  out=clipAgainstEdge(out,p=>p.z<=D,(a,b)=>interpPt(a,b,(D-a.z)/(b.z-a.z)));if(out.length<3)return out;
+  return clipAgainstEdge(out,p=>p.z>=-D,(a,b)=>interpPt(a,b,(-D-a.z)/(b.z-a.z)));
+}
+function intersectEllipse(a,b,W,D){
+  const X=a.x/W,Z=a.z/D,dX=(b.x-a.x)/W,dZ=(b.z-a.z)/D;
+  const A=dX*dX+dZ*dZ,B=2*(X*dX+Z*dZ),C=X*X+Z*Z-1,disc=B*B-4*A*C;
+  if(disc<0||A<1e-9)return interpPt(a,b,0.5);
+  const sq=Math.sqrt(disc),t1=(-B+sq)/(2*A),t2=(-B-sq)/(2*A);
+  let t=0.5;if(t1>=0&&t1<=1)t=t1;else if(t2>=0&&t2<=1)t=t2;else t=Math.max(0,Math.min(1,t1));
+  return interpPt(a,b,t);
+}
+function clipPolyToEllipse(pts){
+  if(pts.length<3)return[];
+  const W=App.wMm/2,D=App.dMm/2;
+  const isIn=p=>(p.x/W)**2+(p.z/D)**2<=1.0;
+  const out=[],n=pts.length;
+  for(let i=0;i<n;i++){
+    const a=pts[(i-1+n)%n],b=pts[i],aIn=isIn(a),bIn=isIn(b);
+    if(bIn){if(!aIn)out.push(intersectEllipse(a,b,W,D));out.push(b)}else if(aIn)out.push(intersectEllipse(a,b,W,D));
+  }
+  return out;
+}
+function pointInPolyXZ(x,z,pts){
+  let inside=false;
+  for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+    const xi=pts[i].x,zi=pts[i].z,xj=pts[j].x,zj=pts[j].z;
+    if(((zi>z)!==(zj>z))&&(x<(xj-xi)*(z-zi)/(zj-zi||1e-9)+xi))inside=!inside;
+  }
+  return inside;
+}
+function getZoneBoundary(refY){
+  const W=App.wMm/2,D=App.dMm/2,y=refY||(Cache.BASE_H+MIN_SURF);
+  if(App.zoneType==='circ'){const N=64,pts=[];for(let i=0;i<N;i++){const a=i/N*Math.PI*2;pts.push({x:W*Math.cos(a),z:D*Math.sin(a),y,lat:0,lon:0})}return pts}
+  if(App.zoneType==='hex'){const pts=[];for(let i=0;i<6;i++){const a=i/6*Math.PI*2-Math.PI/6;pts.push({x:W*Math.cos(a),z:D*Math.sin(a),y,lat:0,lon:0})}return pts}
+  return[{x:-W,z:-D,y,lat:0,lon:0},{x:W,z:-D,y,lat:0,lon:0},{x:W,z:D,y,lat:0,lon:0},{x:-W,z:D,y,lat:0,lon:0}];
+}
+function clipPolyToZone(pts){
+  if(!pts||pts.length<3)return[];
+  let result;
+  if(App.zoneType==='circ'||App.zoneType==='hex')result=clipPolyToEllipse(pts);
+  else result=clipPolyToRect(pts);
+  if(result.length<3&&pointInPolyXZ(0,0,pts)){
+    const avgY=pts.reduce((s,p)=>s+p.y,0)/pts.length;
+    return getZoneBoundary(avgY);
+  }
+  return result;
+}
+function clipLineToZone(pts){
+  if(!pts||pts.length<2)return(pts||[]).filter(p=>inZone(p.x,p.z));
+  const W=App.wMm/2,D=App.dMm/2;
+  function boundaryPt(a,b){
+    if(App.zoneType==='circ'||App.zoneType==='hex')return intersectEllipse(a,b,W,D);
+    const dx=b.x-a.x,dz=b.z-a.z,ts=[];
+    if(Math.abs(dx)>1e-10)for(const v of[-W,W]){const t=(v-a.x)/dx;if(t>1e-7&&t<1-1e-7){const zi=a.z+t*dz;if(zi>=-D-1e-6&&zi<=D+1e-6)ts.push(t)}}
+    if(Math.abs(dz)>1e-10)for(const v of[-D,D]){const t=(v-a.z)/dz;if(t>1e-7&&t<1-1e-7){const xi=a.x+t*dx;if(xi>=-W-1e-6&&xi<=W+1e-6)ts.push(t)}}
+    return interpPt(a,b,ts.length?ts.sort((x,y)=>x-y)[0]:0.5);
+  }
+  const out=[];
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i],inside=inZone(p.x,p.z);
+    if(i===0){if(inside)out.push(p);continue}
+    const prev=pts[i-1],prevIn=inZone(prev.x,prev.z);
+    if(prevIn&&inside)out.push(p);
+    else if(prevIn&&!inside)out.push(boundaryPt(prev,p));
+    else if(!prevIn&&inside){out.push(boundaryPt(prev,p));out.push(p)}
+  }
+  return out;
+}
+
+/* drapeRibbon : intercale des points terrain entre chaque paire de waypoints d'un ruban.
+   Résout le problème "la route traverse la colline" quand deux waypoints Overture sont loin.
+   STEP ≈ 1.2× la résolution de la grille terrain (env. 1.4 mm pour un modèle 150 mm / 128²). */
+function drapeRibbon(seg){
+  if(!Cache.ready||seg.length<2)return seg;
+  const STEP=Math.max(App.wMm,App.dMm)/(Cache.GRID-1)*1.2;
+  const out=[];
+  for(let i=0;i<seg.length;i++){
+    out.push(seg[i]);
+    if(i<seg.length-1){
+      const a=seg[i],b=seg[i+1];
+      const dx=b.x-a.x,dz=b.z-a.z,dist=Math.hypot(dx,dz);
+      const nSteps=Math.min(8,Math.floor(dist/STEP)); // cap à 8 pts intermédiaires
+      for(let k=1;k<nSteps;k++){
+        const f=k/nSteps,mx=a.x+dx*f,mz=a.z+dz*f;
+        out.push({x:mx,y:sampleTerrainY(mx,mz),z:mz,lat:0,lon:0});
+      }
+    }
+  }
+  return out;
+}
+
+/* clipLineToSegments : comme clipLineToZone mais retourne un tableau de segments.
+   Chaque fois que la ligne sort puis ré-entre dans la zone, un nouveau segment est créé.
+   Évite les liaisons parasites qui traversent le modèle en diagonale. */
+function clipLineToSegments(pts){
+  if(!pts||pts.length<2)return[];
+  const W=App.wMm/2,D=App.dMm/2;
+  function bPt(a,b){
+    if(App.zoneType==='circ'||App.zoneType==='hex')return intersectEllipse(a,b,W,D);
+    const dx=b.x-a.x,dz=b.z-a.z,ts=[];
+    if(Math.abs(dx)>1e-10)for(const v of[-W,W]){const t=(v-a.x)/dx;if(t>1e-7&&t<1-1e-7){const zi=a.z+t*dz;if(zi>=-D-1e-6&&zi<=D+1e-6)ts.push(t)}}
+    if(Math.abs(dz)>1e-10)for(const v of[-D,D]){const t=(v-a.z)/dz;if(t>1e-7&&t<1-1e-7){const xi=a.x+t*dx;if(xi>=-W-1e-6&&xi<=W+1e-6)ts.push(t)}}
+    return interpPt(a,b,ts.length?ts.sort((p,q)=>p-q)[0]:0.5);
+  }
+  const segs=[];let cur=[];
+  function flush(){if(cur.length>=2)segs.push(cur);cur=[];}
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i],inside=inZone(p.x,p.z);
+    if(i===0){if(inside)cur=[p];continue}
+    const prev=pts[i-1],prevIn=inZone(prev.x,prev.z);
+    if(prevIn&&inside){cur.push(p)}
+    else if(prevIn&&!inside){cur.push(bPt(prev,p));flush()}
+    else if(!prevIn&&inside){cur=[bPt(prev,p),p]}
+  }
+  flush();
+  return segs;
+}
+
+/* ═══════════════════ OVERTURE MAPS (PMTiles + MVT) ═══════════════════ */
+const OVERTURE_RELEASE='2026-05-20.0'; // update from overturemaps.org/release-calendar
+
+function tilesForBBox(minLon,minLat,maxLon,maxLat,z){
+  const n=2**z;
+  function lonX(lon){return Math.floor((lon+180)/360*n)}
+  function latY(lat){const r=lat*Math.PI/180;return Math.floor((1-Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*n)}
+  const x0=lonX(minLon),x1=lonX(maxLon),y0=latY(maxLat),y1=latY(minLat);
+  const tiles=[];
+  for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)tiles.push({z,x,y});
+  return tiles;
+}
+
+function tileCoordToLL(px,py,z,tx,ty,extent=4096){
+  const n=2**z;
+  const lon=(tx+px/extent)/n*360-180;
+  const latRad=Math.atan(Math.sinh(Math.PI*(1-2*(ty+py/extent)/n)));
+  return{lat:latRad*180/Math.PI,lon};
+}
+
+async function decompressGzip(buffer){
+  try{
+    const ds=new DecompressionStream('gzip');
+    const writer=ds.writable.getWriter(),reader=ds.readable.getReader();
+    writer.write(new Uint8Array(buffer));writer.close();
+    const chunks=[];
+    while(true){const{done,value}=await reader.read();if(done)break;chunks.push(value)}
+    const len=chunks.reduce((s,c)=>s+c.length,0);
+    const out=new Uint8Array(len);let off=0;
+    for(const c of chunks){out.set(c,off);off+=c.length}
+    return out.buffer;
+  }catch(e){return buffer}
+}
+
+function decodeMVTGeometry(cmds){
+  const rings=[];let ring=null,x=0,y=0,i=0;
+  while(i<cmds.length){
+    const cmdLen=cmds[i++],cmd=cmdLen&0x7,count=cmdLen>>3;
+    if(cmd===1){
+      if(ring&&ring.length>1)rings.push(ring);ring=[];
+      for(let j=0;j<count;j++){
+        x+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        y+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        ring.push({x,y});
+      }
+    }else if(cmd===2){
+      for(let j=0;j<count;j++){
+        x+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        y+=((cmds[i]>>1)^(-(cmds[i]&1)));i++;
+        ring.push({x,y});
+      }
+    }else if(cmd===7){
+      if(ring&&ring.length>1){ring.push({...ring[0]});rings.push(ring);ring=null}
+    }
+  }
+  if(ring&&ring.length>1)rings.push(ring);
+  return rings;
+}
+
+function decodeMVT(buffer){
+  const tile={layers:{}};
+  function readValue(tag,obj,pb){
+    if(tag===1)obj.val=pb.readString();
+    else if(tag===2)obj.val=pb.readFloat();
+    else if(tag===3)obj.val=pb.readDouble();
+    else if(tag===5)obj.val=pb.readVarint();
+    else if(tag===6)obj.val=pb.readSVarint();
+    else if(tag===7)obj.val=pb.readBoolean();
+  }
+  function readFeature(tag,feat,pb){
+    if(tag===1)feat.id=pb.readVarint();
+    else if(tag===2)feat.rawTags=pb.readPackedVarint();
+    else if(tag===3)feat.type=pb.readVarint();
+    else if(tag===4)feat.geometryCmds=pb.readPackedVarint();
+  }
+  function readLayer(tag,layer,pb){
+    // MVT Layer spec: 1=name, 2=features, 3=keys, 4=values, 5=extent, 15=version
+    if(tag===1)layer.name=pb.readString();
+    else if(tag===2){const feat=pb.readMessage(readFeature,{id:null,rawTags:[],type:0,geometryCmds:[]});layer.featuresRaw.push(feat)}
+    else if(tag===3)layer.keys.push(pb.readString());
+    else if(tag===4){const v=pb.readMessage(readValue,{val:null});layer.values.push(v.val)}
+    else if(tag===5)layer.extent=pb.readVarint();
+  }
+  function readTile(tag,tile,pb){
+    if(tag===3){
+      const layer=pb.readMessage(readLayer,{name:'',extent:4096,keys:[],values:[],featuresRaw:[]});
+      layer.features=layer.featuresRaw.map(f=>{
+        const props={};
+        for(let i=0;i<f.rawTags.length;i+=2){
+          const k=layer.keys[f.rawTags[i]],v=layer.values[f.rawTags[i+1]];
+          if(k!==undefined&&v!==undefined)props[k]=v;
+        }
+        return{type:f.type,properties:props,geometry:decodeMVTGeometry(f.geometryCmds)};
+      });
+      delete layer.featuresRaw;
+      if(layer.name)tile.layers[layer.name]=layer;
+    }
+  }
+  const pb=new Pbf(buffer instanceof ArrayBuffer?new Uint8Array(buffer):buffer);
+  pb.readFields(readTile,tile);
+  return tile;
+}
+
+async function fetchOvertureTheme(theme,bounds,zoom){
+  const url=`https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_RELEASE}/${theme}.pmtiles`;
+  console.log(`Fetching Overture [${theme}]:`,url);
+  const pm=new pmtiles.PMTiles(url);
+  const tiles=tilesForBBox(bounds.minLon,bounds.minLat,bounds.maxLon,bounds.maxLat,zoom);
+  console.log(`  → ${tiles.length} tile(s) at z${zoom}`);
+  const features=[];
+  for(const{z,x,y}of tiles){
+    try{
+      const resp=await pm.getZxy(z,x,y);
+      if(!resp||!resp.data){console.warn(`  tile ${z}/${x}/${y}: no data`);continue;}
+      const data=await decompressGzip(resp.data);
+      const vt=decodeMVT(data);
+      for(const[layerName,layer]of Object.entries(vt.layers)){
+        for(const feat of layer.features){
+          const rings=feat.geometry.map(ring=>
+            ring.map(pt=>tileCoordToLL(pt.x,pt.y,z,x,y,layer.extent))
+          );
+          features.push({layer:layerName,type:feat.type,properties:feat.properties,rings});
+        }
+      }
+    }catch(e){console.error(`Overture tile error [${theme}] ${z}/${x}/${y}:`,e.message)}
+  }
+  if(features.length)console.log(`  → [${theme}] ${features.length} features, layers:`,
+    [...new Set(features.map(f=>f.layer))].join(', '));
+  else console.warn(`  → [${theme}] 0 features`);
+  return features;
+}
+
+async function fetchOverture(bounds){
+  const[buildings,transport,base]=await Promise.all([
+    fetchOvertureTheme('buildings',bounds,14),
+    fetchOvertureTheme('transportation',bounds,14),
+    fetchOvertureTheme('base',bounds,13) // base max zoom = z13
+  ]);
+  return[...buildings,...transport,...base];
+}
+
+/* ═══════════════════ CLEAR 3D ═══════════════════ */
+function clearTG(){
+  if(!App.tg)return;
+  while(App.tg.children.length){
+    const o=App.tg.children[0];App.tg.remove(o);
+    o.geometry?.dispose();
+    (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m?.dispose());
+  }
+}
+
+/* ═══════════════════ BUILD BASE ═══════════════════ */
+function buildBase(st){
+  const W=App.wMm,D=App.dMm,BASE=st.baseH,s=App.zoneType;
+  let geo;
+  if(s==='circ'){geo=new THREE.CylinderGeometry(W/2,W/2,BASE,128);geo.translate(0,BASE/2,0)}
+  else if(s==='hex'){geo=new THREE.CylinderGeometry(W/2,W/2,BASE,6);geo.translate(0,BASE/2,0)}
+  else{geo=new THREE.BoxGeometry(W,BASE,D);geo.translate(0,BASE/2,0)}
+  const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55}));
+  m.name='BASE';App.tg.add(m);
+}
+
+/* ═══════════════════ BUILD TERRAIN ═══════════════════ */
+function buildTerrain(st){
+  const{elevs,GRID,minE,elevRange,elevScaleMm,BASE_H}=Cache;
+  const W=App.wMm,D=App.dMm;
+  const geo=new THREE.PlaneGeometry(W,D,GRID-1,GRID-1);
+  geo.rotateX(-Math.PI/2);
+  const pos=geo.attributes.position;
+  const isIn=[];
+  /* Vertex colors : beige → gris roche basé sur l'altitude normalisée */
+  const cLand=new THREE.Color(COL_LAND); // #f0ede8
+  const cRock=new THREE.Color(COL_ROCK); // #c0bbb5
+  const ROCK_LO=0.62,ROCK_HI=0.82;      // plage de transition
+  const colArr=new Float32Array(pos.count*3);
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i),z=pos.getZ(i),inside=inZone(x,z);
+    isIn.push(inside);
+    const e=elevs[i]??minE,n=Math.max(0,Math.min(1,(e-minE)/Math.max(0.001,elevRange)));
+    pos.setY(i,inside?BASE_H+MIN_SURF+n*elevScaleMm:BASE_H);
+    /* Couleur selon altitude */
+    let r,g,b;
+    if(!inside||n<ROCK_LO){r=cLand.r;g=cLand.g;b=cLand.b;}
+    else if(n>=ROCK_HI){r=cRock.r;g=cRock.g;b=cRock.b;}
+    else{const t=(n-ROCK_LO)/(ROCK_HI-ROCK_LO);r=cLand.r+(cRock.r-cLand.r)*t;g=cLand.g+(cRock.g-cLand.g)*t;b=cLand.b+(cRock.b-cLand.b)*t;}
+    colArr[i*3]=r;colArr[i*3+1]=g;colArr[i*3+2]=b;
+  }
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(colArr,3));
+  if(geo.index){
+    const orig=geo.index.array,kept=[];
+    for(let i=0;i<orig.length;i+=3){const a=orig[i],b=orig[i+1],c=orig[i+2];if(isIn[a]||isIn[b]||isIn[c])kept.push(a,b,c)}
+    geo.setIndex(kept);
+  }
+  if(App.zoneType==='circ'){
+    const R=W/2;
+    for(let i=0;i<pos.count;i++)if(!isIn[i]){const x=pos.getX(i),z=pos.getZ(i),r=Math.sqrt(x*x+z*z)||0.001;pos.setX(i,x/r*R);pos.setZ(i,z/r*R)}
+  }
+  geo.computeVertexNormals();
+  const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
+    vertexColors:true,roughness:.92,metalness:0,
+    flatShading:true,side:THREE.DoubleSide,
+    polygonOffset:true,polygonOffsetFactor:20,polygonOffsetUnits:20
+  }));
+  m.name='TERRAIN';App.tg.add(m);
+}
+
+/* ═══════════════════ BUILD SIDE WALLS ═══════════════════ */
+function buildSideWalls(st){
+  const W=App.wMm,D=App.dMm,BASE=Cache.BASE_H,s=App.zoneType;
+  const mat=new THREE.MeshStandardMaterial({color:new THREE.Color(st.cBase),roughness:.55,side:THREE.DoubleSide});
+  /* pts3d : [{x,z,topY}]  topY = hauteur du mur (terrain au bord ou légèrement en retrait) */
+  function makeWalls(pts3d){
+    const verts=[],idx=[];let vi=0;
+    const n=pts3d.length;
+    for(let i=0;i<n;i++){
+      const a=pts3d[i],b=pts3d[(i+1)%n];
+      const mx=(a.x+b.x)/2,mz=(a.z+b.z)/2,outward=mx*(b.z-a.z)-mz*(b.x-a.x);
+      const[p1,p2]=outward>=0?[a,b]:[b,a];
+      const t1=p1.topY??BASE,t2=p2.topY??BASE;
+      /* Quad : top-left, top-right, bottom-right, bottom-left */
+      verts.push(p1.x,t1,p1.z, p2.x,t2,p2.z, p2.x,0,p2.z, p1.x,0,p1.z);
+      idx.push(vi,vi+1,vi+2,vi,vi+2,vi+3);vi+=4;
+    }
+    if(!verts.length)return;
+    const geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+    geo.setIndex(idx);geo.computeVertexNormals();
+    App.tg.add(new THREE.Mesh(geo,mat));
+  }
+  /* Échantillonner le terrain légèrement en retrait du bord (×0.98) pour récupérer
+     la hauteur réelle du terrain à la frontière, pas la valeur forcée BASE_H. */
+  function edgePt(x,z){
+    const topY=Cache.ready?sampleTerrainY(x*0.98,z*0.98):BASE;
+    return{x,z,topY:Math.max(BASE,topY)};
+  }
+  if(s==='circ'){
+    const N=512,R=W/2;
+    makeWalls(Array.from({length:N},(_,i)=>{const a=i/N*Math.PI*2;return edgePt(R*Math.cos(a),R*Math.sin(a))}));
+  }
+  else if(s==='hex'){
+    const R=W/2;
+    makeWalls(Array.from({length:6},(_,i)=>{const a=i/6*Math.PI*2-Math.PI/6;return edgePt(R*Math.cos(a),R*Math.sin(a))}));
+  }
+  else if(App.zonePts&&App.zonePts.length>=3&&Cache.bounds){
+    const{bounds}=Cache;
+    const cLat=(bounds.minLat+bounds.maxLat)/2,cLon=(bounds.minLon+bounds.maxLon)/2;
+    const la2mm=App.dMm/(bounds.maxLat-bounds.minLat),lo2mm=App.wMm/(bounds.maxLon-bounds.minLon);
+    makeWalls(App.zonePts.map(p=>{
+      const lat=Array.isArray(p)?p[0]:p.lat,lon=Array.isArray(p)?p[1]:(p.lng||p.lon);
+      return edgePt((lon-cLon)*lo2mm,-(lat-cLat)*la2mm);
+    }));
+  }
+}
+
+/* ═══════════════════ BUILD GROUND FILL ═══════════════════ */
+/* Maillage terrain-following couvrant TOUTE la zone sélectionnée.
+   Résolution ~2mm → 75×75 quads pour un modèle 150mm.
+   Vertex colors : beige (#f0ede8) en bas → gris roche (#c0bbb5) au-dessus de 72% d'altitude.
+   flatShading=true → facettes angulaires réalistes comme map2model. */
+function buildGroundFill(st){
+  if(!st.grassOn||!Cache.ready)return;
+  const W=App.wMm/2,D=App.dMm/2;
+  const STEP=Math.max(1.0,Math.min(4.0,App.wMm/60));
+  const xN=Math.ceil(App.wMm/STEP)+1;
+  const zN=Math.ceil(App.dMm/STEP)+1;
+  const{BASE_H,elevScaleMm}=Cache;
+  /* Seuils d'altitude pour coloration */
+  const ROCK_THR=0.60; // au-dessus de 60% d'élévation → teinte roche
+  const HIGH_THR=0.80; // au-dessus de 80% → gris roche pur
+  const cLand=new THREE.Color(COL_LAND);  // beige #f0ede8
+  const cRock=new THREE.Color(COL_ROCK);  // gris  #c0bbb5
+  const verts=[],colors=[];
+  const grid=new Int32Array(xN*zN).fill(-1);
+  for(let zi=0;zi<zN;zi++){
+    for(let xi=0;xi<xN;xi++){
+      const x=-W+(xi/(xN-1))*App.wMm;
+      const z=-D+(zi/(zN-1))*App.dMm;
+      if(inZone(x,z)){
+        const vi=verts.length/3;
+        grid[zi*xN+xi]=vi;
+        const y=sampleTerrainY(x,z)+H_LAND;
+        verts.push(x,y,z);
+        /* Ratio d'élévation 0→1 */
+        const ratio=elevScaleMm>0?Math.max(0,Math.min(1,(y-BASE_H)/elevScaleMm)):0;
+        let r,g,b;
+        if(ratio>=HIGH_THR){
+          r=cRock.r;g=cRock.g;b=cRock.b;
+        }else if(ratio>=ROCK_THR){
+          const t=(ratio-ROCK_THR)/(HIGH_THR-ROCK_THR);
+          r=cLand.r+(cRock.r-cLand.r)*t;
+          g=cLand.g+(cRock.g-cLand.g)*t;
+          b=cLand.b+(cRock.b-cLand.b)*t;
+        }else{
+          r=cLand.r;g=cLand.g;b=cLand.b;
+        }
+        colors.push(r,g,b);
+      }
+    }
+  }
+  if(!verts.length)return;
+  const idx=[];
+  for(let zi=0;zi<zN-1;zi++){
+    for(let xi=0;xi<xN-1;xi++){
+      const a=grid[zi*xN+xi],b=grid[zi*xN+xi+1];
+      const c=grid[(zi+1)*xN+xi],d=grid[(zi+1)*xN+xi+1];
+      if(a>=0&&b>=0&&c>=0){idx.push(a,b,c)}
+      if(b>=0&&d>=0&&c>=0){idx.push(b,d,c)}
+    }
+  }
+  if(!idx.length)return;
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(new Float32Array(verts),3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(new Float32Array(colors),3));
+  geo.setIndex(idx);geo.computeVertexNormals();
+  const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
+    vertexColors:true,roughness:.95,metalness:0,
+    flatShading:true,
+    polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1
+  }));
+  m.name='GROUND';App.tg.add(m);
+}
+
+/* ═══════════════════ BUILD OVERTURE ═══════════════════ */
+/* Largeurs réelles (mètres) par classe Overture */
+const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
+  residential:5,living_street:4,unclassified:5,service:3,track:3,
+  pedestrian:5,footway:2,cycleway:2.5,path:1.5,steps:2};
+/* Largeur minimale imprimable (mm) */
+const ROAD_W_MIN={motorway:0.8,trunk:0.7,primary:0.6,secondary:0.5,tertiary:0.4,
+  residential:0.3,living_street:0.3,unclassified:0.3,service:0.25,track:0.25,
+  pedestrian:0.3,footway:0.2,cycleway:0.25,path:0.15,steps:0.2};
+/* Classes véhicules (à suréléver de 1mm / espaces verts) */
+const VEHICLE_CLASSES=new Set(['motorway','motorway_link','trunk','trunk_link',
+  'primary','primary_link','secondary','secondary_link','tertiary','tertiary_link',
+  'residential','living_street','unclassified','service','track']);
+/* Classes piétons/cycles (au niveau des espaces verts) */
+const PED_CLASSES=new Set(['pedestrian','footway','cycleway','path','steps']);
+/* Palettes couleur */
+const COL_PARK   ='#0fe300'; // parcs, jardins, sport
+const COL_FOREST ='#0fe300'; // forêt, bois
+const COL_GRASS  ='#0fe300'; // pelouse, prairie
+const COL_FARM   ='#0fe300'; // agriculture
+const COL_PED    ='#262626'; // trottoirs, pistes cyclables
+const COL_LAND   ='#f0ede8'; // sol — fond universel (terrain nu)
+const COL_ROCK   ='#c0bbb5'; // roche, éboulis, glacier — gris clair
+
+/* Hauteurs relatives au terrain (mm) — hiérarchie visuelle claire :
+   Chaque couche a une hauteur UNIQUE → marche physique nette à chaque frontière. */
+const H_LAND  =0;    // sol     — exactement sur le terrain
+const H_ROCK  =0.15; // roche / éboulis / glacier — légèrement au-dessus du sol
+const H_WATER =0.60; // eau     — 0.60mm (standard map2model)
+const H_GRASS =0.30; // prairie — marche visible vs roche
+const H_PARK  =0.35; // parc    — marche visible vs prairie
+const H_FOREST=0.40; // forêt   — 0.40mm (standard map2model)
+const H_PED   =0.40; // trottoir— 0.40mm au-dessus terrain
+const H_ROAD  =0.80; // route   — 0.80mm au-dessus terrain (standard map2model)
+
+function buildOverture(st){
+  if(!Cache.overture?.length)return;
+  const{mmPerMeter,toLocal}=Cache;
+  const landGs=[],waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],roadGs=[],pedGs=[],buildGs=[];
+
+  /* Terrain-following polygon extrusion — no outset, simple SINK */
+  function extrudeTerrain(bucket,clipped,h){
+    if(clipped.length<3)return;
+    try{
+      /* Subdiviser les grandes arêtes du polygone pour mieux suivre le relief entre sommets.
+         STEP ≈ 2.5× la maille terrain (~3 mm pour 150 mm/128²) — balance précision/perf. */
+      const PSUB=Math.max(App.wMm,App.dMm)/(Cache.GRID-1)*2.5;
+      const dense=[];
+      const n0=clipped.length;
+      for(let i=0;i<n0;i++){
+        dense.push(clipped[i]);
+        const nx=clipped[(i+1)%n0];
+        const dx=nx.x-clipped[i].x,dz=nx.z-clipped[i].z,dist=Math.hypot(dx,dz);
+        const ns=Math.min(5,Math.floor(dist/PSUB));
+        for(let k=1;k<ns;k++){const f=k/ns;dense.push({x:clipped[i].x+dx*f,z:clipped[i].z+dz*f})}
+      }
+      const deduped=[];
+      for(const p of dense){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p)}
+      if(deduped.length<3)return;
+      const n=deduped.length;
+      const contour=deduped.map(p=>new THREE.Vector2(p.x,-p.z));
+      const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
+      if(!tris||!tris.length)return;
+      const SINK=1.5;
+      const verts=new Float32Array(n*6);
+      for(let i=0;i<n;i++){
+        const y=sampleTerrainY(deduped[i].x,deduped[i].z);
+        verts[i*3]=deduped[i].x;verts[i*3+1]=y+h;verts[i*3+2]=deduped[i].z;
+        verts[(n+i)*3]=deduped[i].x;verts[(n+i)*3+1]=y-SINK;verts[(n+i)*3+2]=deduped[i].z;
+      }
+      const idx=[];
+      for(const t of tris)idx.push(t[0],t[1],t[2]);
+      for(const t of tris)idx.push(n+t[2],n+t[1],n+t[0]);
+      for(let i=0;i<n;i++){const j=(i+1)%n;idx.push(i,n+i,n+j,i,n+j,j)}
+      const geo=new THREE.BufferGeometry();
+      geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+      geo.setIndex(idx);geo.computeVertexNormals();
+      if(geo.attributes.uv)geo.deleteAttribute('uv');
+      bucket.push(geo);
+    }catch(e){}
+  }
+
+  const rockGs=[];
+
+  for(const feat of Cache.overture){
+    const{layer,type,properties:p,rings}=feat;
+    if(!rings||!rings[0]||rings[0].length<2)continue;
+    const outerRing=rings[0].map(({lat,lon})=>{
+      const lc=toLocal(lat,lon);
+      return{x:lc.x,z:lc.z,y:sampleTerrainY(lc.x,lc.z),lat,lon};
+    });
+    const cx=outerRing.reduce((s,pt)=>s+pt.x,0)/outerRing.length;
+    const cz=outerRing.reduce((s,pt)=>s+pt.z,0)/outerRing.length;
+    if(!inZone(cx,cz)&&!outerRing.some(pt=>inZone(pt.x,pt.z)))continue;
+
+    const isPoly=type===3,isLine=type===2;
+    let clipped;
+    if(isPoly){
+      /* Drop closing duplicate vertex if present */
+      const pts=outerRing.length>1&&
+        Math.abs(outerRing[0].lat-outerRing[outerRing.length-1].lat)<1e-6&&
+        Math.abs(outerRing[0].lon-outerRing[outerRing.length-1].lon)<1e-6
+        ?outerRing.slice(0,-1):outerRing;
+      clipped=clipPolyToZone(pts);
+    }else{
+      clipped=clipLineToZone(outerRing);
+    }
+    if(clipped.length<2)continue;
+    if(isPoly&&clipped.length<3)continue;
+
+    /* ── BUILDINGS ── */
+    if(layer==='building'&&st.buildOn&&isPoly){
+      let hM=5;
+      if(p.height)hM=parseFloat(p.height)||5;
+      else if(p.num_floors)hM=parseFloat(p.num_floors)*3.2;
+      const hMm=Math.min(App.wMm*0.10,Math.max(2.0,hM*mmPerMeter*st.buildHS));
+      try{
+        /* Base = min du terrain sur tous les vertices → le bâtiment ne flotte jamais en pente */
+        const baseY=clipped.reduce((mn,pt)=>Math.min(mn,sampleTerrainY(pt.x,pt.z)),Infinity);
+        const sh=new THREE.Shape(clipped.map(pt=>new THREE.Vector2(pt.x,-pt.z)));
+        const geo=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:false});
+        geo.rotateX(-Math.PI/2);geo.translate(0,baseY,0);
+        if(geo.attributes.uv)geo.deleteAttribute('uv');
+        buildGs.push(geo);
+      }catch(e){}
+    }
+
+    /* ── ROADS / TROTTOIRS ── */
+    else if(layer==='segment'&&st.roadsOn&&isLine){
+      /* Exclure les itinéraires non-routiers (ferry, waterway…) */
+      if(p.subtype&&p.subtype!=='road')continue;
+      const cls=p.class||'residential';
+      const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
+      const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
+      /* Un ruban drapé par segment contigu — suit le relief entre waypoints */
+      for(const seg of clipLineToSegments(outerRing)){
+        /* Filtrer les segments trop courts (artefacts, diagonales parasites) */
+        const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
+        if(segLen<1.0)continue;
+        const draped=drapeRibbon(seg);
+        if(PED_CLASSES.has(cls)){
+          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
+          const g=mkRibbon(v3,wMm,H_PED+0.3);if(g)pedGs.push(g);
+        }else if(VEHICLE_CLASSES.has(cls)){
+          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
+          const g=mkRibbon(v3,wMm,H_ROAD+0.3);if(g)roadGs.push(g);
+        }
+      }
+    }
+
+    /* ── WATER ── */
+    else if(layer==='water'&&st.waterOn){
+      /* Eau : 0.60mm au-dessus du terrain, s'ancre dans le sol — rivières dans les vallées */
+      if(isPoly)extrudeTerrain(waterGs,clipped,H_WATER);
+      else if(isLine){
+        const wMm=Math.max(0.5,1.5*mmPerMeter);
+        /* Un ruban drapé par segment — les rivières suivent les vallées */
+        for(const seg of clipLineToSegments(outerRing)){
+          const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
+          if(segLen<1.0)continue;
+          const draped=drapeRibbon(seg);
+          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
+          const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
+        }
+      }
+    }
+
+    /* ── LAND (fond universel — couvre TOUT le sol non-eau) ── */
+    else if(layer==='land'&&st.grassOn&&isPoly){
+      extrudeTerrain(landGs,clipped,H_LAND);
+    }
+
+    /* ── LAND USE ── */
+    else if(layer==='land_use'&&st.grassOn&&isPoly){
+      const sub=(p.subtype||p.class||'').toLowerCase();
+      if(/rock|scree|cliff|bare|quarry|talus|glacier|ice/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK);
+      else if(/wood|forest/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
+      else if(/park|urban_park|garden|nature|recreation|sport|golf|playground|pitch/.test(sub))extrudeTerrain(parkGs,clipped,H_PARK);
+      else if(/grass|lawn|meadow|wetland|cemetery/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
+      else if(/agriculture|farm|horticulture/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
+      else extrudeTerrain(landGs,clipped,H_LAND);
+    }
+
+    /* ── LAND COVER (végétation naturelle + roche) ── */
+    else if(layer==='land_cover'&&st.grassOn&&isPoly){
+      const sub=(p.subtype||p.class||'').toLowerCase();
+      if(/rock|scree|cliff|bare|talus|glacier|ice|snow/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK);
+      else if(/tree|wood/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
+      else if(/grass|scrub|moss/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
+      else if(/crop/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
+      else if(/sand|gravel|mud/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK); // terrain minéral → gris
+    }
+  }
+
+  function addLayer(geos,col,name,pof=-8){
+    const mg=mergeGeos(geos);if(!mg)return;
+    const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
+      color:new THREE.Color(col),roughness:.95,metalness:0,
+      side:THREE.DoubleSide,
+      polygonOffset:true,polygonOffsetFactor:pof,polygonOffsetUnits:pof
+    }));
+    m.name=name;App.tg.add(m);
+  }
+  /* Ordre visuel (hauteur croissante) :
+     sol=0 → roche=0.15 → prairie=0.30 → parc=0.35 → forêt=0.40 → eau=0.60 → route=0.80
+     Chaque couche a une hauteur UNIQUE → marche physique à chaque frontière de zone. */
+  if(st.grassOn){
+    addLayer(landGs,  COL_LAND,   'LAND',    -2);  // sol nu
+    addLayer(rockGs,  COL_ROCK,   'ROCK',    -3);  // roche/glacier gris +0.15mm
+  }
+  if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);  // eau +0.60mm
+  if(st.grassOn){
+    addLayer(farmGs,  COL_FARM,   'FARM',    -5);
+    addLayer(grassGs, COL_GRASS,  'GRASS',   -6);  // prairie +0.30mm
+    addLayer(parkGs,  COL_PARK,   'PARKS',   -7);  // parc +0.35mm
+    addLayer(forestGs,COL_FOREST, 'FOREST',  -8);  // forêt +0.40mm
+  }
+  if(st.roadsOn){
+    addLayer(pedGs,  COL_PED,    'PEDEST',  -9);
+    addLayer(roadGs, st.roadCol, 'ROADS',  -10);
+  }
+  if(st.buildOn)addLayer(buildGs,st.buildCol,'BUILDINGS',-14);
+}
+
+/* ═══════════════════ GPX MESH ═══════════════════ */
+function buildGPXMesh(st){
+  const pts=App.gpxPoints;if(!pts.length||!Cache.ready)return;
+  const old=App.tg.getObjectByName('GPX');
+  if(old){App.tg.remove(old);old.geometry?.dispose();old.material?.dispose()}
+  const{toLocal}=Cache;
+
+  /* 1. Convertir en coordonnées modèle */
+  const raw=pts.map(p=>{const lc=toLocal(p.lat,p.lon);return{x:lc.x,z:lc.z}})
+               .filter(p=>isFinite(p.x)&&isFinite(p.z));
+  if(raw.length<2)return;
+
+  /* 2. Lissage par moyenne glissante (fenêtre=9) sur X,Z */
+  const W=9,half=Math.floor(W/2);
+  const smoothed=raw.map((_,i)=>{
+    const s=Math.max(0,i-half),e=Math.min(raw.length-1,i+half),cnt=e-s+1;
+    let sx=0,sz=0;
+    for(let j=s;j<=e;j++){sx+=raw[j].x;sz+=raw[j].z;}
+    const nx=sx/cnt,nz=sz/cnt;
+    /* Rééchantillonner le terrain sur la position lissée */
+    return new THREE.Vector3(nx,sampleTerrainY(nx,nz)+st.gpxH,nz);
+  });
+
+  /* 3. Simplifier (Douglas-Peucker léger) → supprimer points trop proches */
+  const MIN_D=0.05; // 0.05mm minimum entre 2 points consécutifs
+  const simp=[smoothed[0]];
+  for(let i=1;i<smoothed.length;i++){
+    const p=simp[simp.length-1],q=smoothed[i];
+    if(Math.hypot(q.x-p.x,q.z-p.z)>=MIN_D)simp.push(q);
+  }
+  simp.push(smoothed[smoothed.length-1]);
+  if(simp.length<2)return;
+
+  /* 4. Ruban GPX — légèrement plus large que les chemins pour les couvrir visuellement.
+     Height gpxH (défaut 1.2mm) > H_PED (0.40mm) → GPX toujours AU-DESSUS des sentiers.
+     polygonOffset = -30 : rendu en tout dernier, devant toutes les autres couches. */
+  const tubeW=Math.max(st.gpxMW,st.gpxTW*Cache.mmPerMeter);
+  const gpxWidth=tubeW+0.3; // +0.3mm pour couvrir le chemin en dessous
+  const g=mkRibbon(simp,gpxWidth,st.gpxH+0.3);
+  if(g){
+    const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+      color:new THREE.Color(st.gpxCol),roughness:.3,metalness:.1,
+      depthTest:true,
+      polygonOffset:true,polygonOffsetFactor:-30,polygonOffsetUnits:-30
+    }));
+    m.name='GPX';App.tg.add(m);
+  }
+}
+
+/* ═══════════════════ BUILD ALL MESHES ═══════════════════ */
+function buildMeshes(){
+  if(!Cache.ready||!App.tg)return;
+  const st=S();
+  clearTG();
+  buildBase(st);
+  buildTerrain(st);
+  buildSideWalls(st);
+  buildGroundFill(st); // fond terrain-following complet avant les couches Overture
+  buildOverture(st);
+  buildGPXMesh(st);
+}
+
+/* Debounced auto-refresh on settings change */
+let _dbt=null;
+function debouncedBuild(){clearTimeout(_dbt);_dbt=setTimeout(()=>{if(App.generated&&Cache.ready&&App.tg)buildMeshes()},500)}
+document.querySelectorAll('#sp input,#sp select').forEach(el=>{
+  el.addEventListener('input',debouncedBuild);el.addEventListener('change',debouncedBuild);
+});
+
+/* ═══════════════════ GENERATE ═══════════════════ */
+$('btn-gen').addEventListener('click',async()=>{
+  if(!App.bounds){modal('ZONE MANQUANTE','Dessinez d\'abord une zone sur la carte\n(Rectangle, Carré, Rond, Hexagone ou Polygone).');return}
+  const btn=$('btn-gen');btn.disabled=true;
+  $('empty3d').classList.add('h');
+  try{
+    await ensureThree();
+    if(!App.tg)throw new Error('Visualiseur 3D non prêt');
+    const st=S();
+    if(App.realW&&App.realH){const sc=st.maxDim/Math.max(App.realH,App.realW);App.wMm=Math.round(App.realW*sc);App.dMm=Math.round(App.realH*sc)}
+
+    setP(5,'COORDONNÉES','Calcul des dimensions...');await tick();
+    const bounds=App.bounds;
+    const cLat=(bounds.maxLat+bounds.minLat)/2,cLon=(bounds.maxLon+bounds.minLon)/2;
+    const latDiff=bounds.maxLat-bounds.minLat,lonDiff=bounds.maxLon-bounds.minLon;
+    const la2mm=App.dMm/latDiff,lo2mm=App.wMm/lonDiff;
+    const realW=lonDiff*Math.cos(cLat*Math.PI/180)*111320;
+    Cache.mmPerMeter=App.wMm/realW;
+    Cache.bounds=bounds;
+    Cache.toLocal=(lat,lon)=>({x:(lon-cLon)*lo2mm,z:-(lat-cLat)*la2mm});
+
+    setP(15,'ALTITUDES','Téléchargement des données d\'élévation...');await tick();
+    const GRID=st.tRes;Cache.GRID=GRID;
+    const latLons=[];
+    for(let r=0;r<GRID;r++)for(let c=0;c<GRID;c++)
+      latLons.push([bounds.minLat+(r/(GRID-1))*latDiff,bounds.minLon+(c/(GRID-1))*lonDiff]);
+    let elevs;
+    try{elevs=await sampleElevs(latLons,15)}catch(e){elevs=latLons.map(()=>0)}
+    elevs=smoothElevs(elevs,GRID,st.tSmooth);
+    Cache.elevs=elevs;
+    const minE=Math.min(...elevs),maxE=Math.max(...elevs),eRange=maxE-minE||1;
+    const rawScale=eRange*Cache.mmPerMeter*st.tExag;
+    // Garantir au moins 4% de la largeur comme relief (zones plates lisibles), cap à 30%
+    const scaleMm=Math.max(App.wMm*0.04,Math.min(rawScale,App.wMm*0.30));
+    Cache.minE=minE;Cache.maxE=maxE;Cache.elevRange=eRange;Cache.elevScaleMm=scaleMm;
+    Cache.BASE_H=st.baseH;
+    Cache.terrYAt=makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,st.baseH,minE,eRange,scaleMm);
+
+    setP(40,'OVERTURE MAPS','Récupération des données cartographiques...');await tick();
+    let overtureFeatures=[];
+    try{
+      overtureFeatures=await fetchOverture(bounds);
+      console.log(`Overture OK: ${overtureFeatures.length} features`);
+      console.table(overtureFeatures.slice(0,5).map(f=>({layer:f.layer,type:f.type,props:JSON.stringify(f.properties).slice(0,80)})));
+    }catch(e){
+      console.error('Overture fetch failed:',e);
+    }
+    Cache.overture=overtureFeatures;
+    console.log('Elevation range:',minE,'→',maxE,'m  (exag:',st.tExag,')');
+
+    setP(72,'MODÈLE 3D','Construction du modèle...');await tick();
+    Cache.ready=true;buildMeshes();
+
+    setP(96,'FINALISATION','Mise en place de la caméra...');await tick();
+    const maxH=st.baseH+scaleMm;
+    App.controls.target.set(0,maxH*.25,0);
+    App.camera.position.set(0,maxH+App.wMm*.55,App.dMm*.9+maxH*.5);
+    App.controls.update();
+
+    const eb=$('elev');
+    eb.innerHTML=`Alt. min <span class="ev">${Math.round(minE)}m</span><br>Alt. max <span class="ev">${Math.round(maxE)}m</span><br>Δ <span class="ev">+${Math.round(eRange)}m</span>`;
+    eb.style.display='block';
+    const h=$('hint3d');h.style.display='block';setTimeout(()=>h.style.display='none',5000);
+    setP(null);App.generated=true;btn.disabled=false;
+  }catch(err){
+    setP(null);$('empty3d').classList.remove('h');btn.disabled=false;
+    modal('ERREUR','Génération impossible :\n'+(err.message||'Erreur inconnue')+'\n\nRéduisez la zone ou réessayez.');
+    console.error(err);
+  }
+});
+
+/* ═══════════════════ EXPORT 3MF ═══════════════════ */
+$('btn-export').addEventListener('click',async()=>{
+  if(!App.tg||!App.tg.children.length){modal('EXPORT','Générez d\'abord le terrain 3D.');return}
+  const btn=$('btn-export');btn.disabled=true;btn.textContent='⏳ Génération...';
+  try{
+    const objects=[];let oid=1;
+    App.tg.traverse(obj=>{
+      if(!(obj instanceof THREE.Mesh))return;
+      const geo=obj.geometry.clone();
+      obj.updateWorldMatrix(true,false);geo.applyMatrix4(obj.matrixWorld);
+      let col='E4DFD8';
+      if(obj.material?.color)col=obj.material.color.getHexString().toUpperCase();
+      const pos=geo.attributes.position,idx=geo.index;
+      if(!pos||pos.count<3){geo.dispose();return}
+      let vx='',tr='';
+      if(idx){
+        for(let i=0;i<pos.count;i++)vx+=`<vertex x="${pos.getX(i).toFixed(4)}" y="${pos.getZ(i).toFixed(4)}" z="${pos.getY(i).toFixed(4)}"/>`;
+        for(let i=0;i<idx.count;i+=3)tr+=`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i+1)}" v3="${idx.getX(i+2)}"/>`;
+      }else{
+        for(let i=0;i<pos.count;i++)vx+=`<vertex x="${pos.getX(i).toFixed(4)}" y="${pos.getZ(i).toFixed(4)}" z="${pos.getY(i).toFixed(4)}"/>`;
+        for(let i=0;i<pos.count;i+=3)tr+=`<triangle v1="${i}" v2="${i+1}" v3="${i+2}"/>`;
+      }
+      geo.dispose();if(!tr)return;
+      objects.push({id:oid++,name:obj.name||'mesh',col,vx,tr});
+    });
+    if(!objects.length){modal('EXPORT','Aucun maillage à exporter.');btn.textContent='💾 Exporter .3MF (AMS)';btn.disabled=false;return}
+
+    const matGroups=objects.map(o=>`<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`).join('\n');
+    const resObjs=objects.map(o=>`<object id="${o.id}" type="model" p:pid="${o.id+1000}" p:pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
+    const buildItems=objects.map(o=>`<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`).join('\n');
+    const model=`<?xml version="1.0" encoding="UTF-8"?><model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"><metadata name="Title">Terrain3D</metadata><resources>\n${matGroups}\n${resObjs}\n</resources><build>\n${buildItems}\n</build></model>`;
+    const rels=`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>`;
+    const ct=`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-3mfdocument"/></Types>`;
+
+    const zip=new JSZip();
+    zip.file('[Content_Types].xml',ct);zip.folder('_rels').file('.rels',rels);zip.folder('3D').file('3dmodel.model',model);
+    const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download=`Terrain3D_${Date.now()}.3mf`;
+    document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(a.href);
+    btn.textContent='✅ Téléchargé !';
+    setTimeout(()=>{btn.textContent='💾 Exporter .3MF (AMS)';btn.disabled=false},3000);
+  }catch(err){
+    modal('ERREUR EXPORT','Échec : '+(err.message||''));
+    btn.textContent='💾 Exporter .3MF (AMS)';btn.disabled=false;
+  }
+});
+</script>
 </body>
 </html>
