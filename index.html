@@ -941,9 +941,49 @@ function clipLineToSegments(pts){
   return segs;
 }
 
-/* ═══════════════════ OVERTURE MAPS (PMTiles + MVT) ═══════════════════ */
-const OVERTURE_RELEASE='2026-05-20.0'; // update from overturemaps.org/release-calendar
+/* ═══════════════════ TRIANGULATION SÉCURISÉE ═══════════════════ */
+/* earcut si disponible (CDN), sinon THREE.ShapeUtils en fallback */
+function safeEarcut(flat){
+  try{
+    if(typeof earcut==='function'){const r=earcut(flat);if(r&&r.length)return r}
+  }catch(e){}
+  try{
+    const pts=[];for(let i=0;i<flat.length;i+=2)pts.push(new THREE.Vector2(flat[i],flat[i+1]));
+    const tris=THREE.ShapeUtils.triangulateShape(pts,[])||[];
+    const out=[];for(const t of tris)out.push(t[0],t[1],t[2]);return out;
+  }catch(e){return[]}
+}
 
+/* ═══════════════════ DONNÉES OSM (Overpass API) ═══════════════════ */
+async function fetchOSM(bounds){
+  const{minLat,maxLat,minLon,maxLon}=bounds;
+  const bb=`${minLat.toFixed(5)},${minLon.toFixed(5)},${maxLat.toFixed(5)},${maxLon.toFixed(5)}`;
+  const q=`[out:json][timeout:30][maxsize:33554432];(`+
+    `way["building"](${bb});`+
+    `way["natural"~"^(water|wood|forest|scrub|grassland|heath)$"](${bb});`+
+    `way["waterway"~"^(river|stream|canal|ditch|riverbank)$"](${bb});`+
+    `way["leisure"~"^(park|garden|playground|pitch|recreation_ground)$"](${bb});`+
+    `way["landuse"~"^(forest|grass|meadow|park|farmland|wood|scrub|cemetery|greenfield)$"](${bb});`+
+    `way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|service|living_street|footway|path|cycleway|pedestrian|track|steps)$"](${bb});`+
+    `);out body;>;out skel qt;`;
+  const resp=await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`);
+  if(!resp.ok)throw new Error(`Overpass HTTP ${resp.status}`);
+  const data=await resp.json();
+  const nodes={};
+  for(const el of data.elements)if(el.type==='node')nodes[el.id]={lat:el.lat,lon:el.lon};
+  const features=[];
+  for(const el of data.elements){
+    if(el.type!=='way'||!el.nodes||!el.tags)continue;
+    const pts=el.nodes.map(id=>nodes[id]).filter(Boolean);
+    if(pts.length<2)continue;
+    const closed=el.nodes[0]===el.nodes[el.nodes.length-1]&&pts.length>3;
+    features.push({tags:el.tags,pts,closed});
+  }
+  console.log(`OSM: ${features.length} features`);
+  return features;
+}
+
+/* ═══════════════════ STUB supprimé (ancien Overture) ═══════════════════ */
 function tilesForBBox(minLon,minLat,maxLon,maxLat,z){
   const n=2**z;
   function lonX(lon){return Math.floor((lon+180)/360*n)}
@@ -1263,8 +1303,8 @@ function buildGroundFill(st){
   m.name='GROUND';App.tg.add(m);
 }
 
-/* ═══════════════════ BUILD OVERTURE ═══════════════════ */
-/* Largeurs réelles (mètres) par classe Overture */
+/* ═══════════════════ BUILD OSM ═══════════════════ */
+/* Largeurs réelles (mètres) par classe OSM highway */
 const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
   residential:5,living_street:4,unclassified:5,service:3,track:3,
   pedestrian:5,footway:2,cycleway:2.5,path:1.5,steps:2};
@@ -1272,42 +1312,41 @@ const ROAD_W_M={motorway:14,trunk:12,primary:10,secondary:8,tertiary:7,
 const ROAD_W_MIN={motorway:0.8,trunk:0.7,primary:0.6,secondary:0.5,tertiary:0.4,
   residential:0.3,living_street:0.3,unclassified:0.3,service:0.25,track:0.25,
   pedestrian:0.3,footway:0.2,cycleway:0.25,path:0.15,steps:0.2};
-/* Classes véhicules (à suréléver de 1mm / espaces verts) */
+/* Classes véhicules */
 const VEHICLE_CLASSES=new Set(['motorway','motorway_link','trunk','trunk_link',
   'primary','primary_link','secondary','secondary_link','tertiary','tertiary_link',
   'residential','living_street','unclassified','service','track']);
-/* Classes piétons/cycles (au niveau des espaces verts) */
+/* Classes piétons/cycles */
 const PED_CLASSES=new Set(['pedestrian','footway','cycleway','path','steps']);
 /* Palettes couleur */
-const COL_PARK   ='#0fe300'; // parcs, jardins, sport
-const COL_FOREST ='#0fe300'; // forêt, bois
-const COL_GRASS  ='#0fe300'; // pelouse, prairie
-const COL_FARM   ='#0fe300'; // agriculture
-const COL_PED    ='#262626'; // trottoirs, pistes cyclables
-const COL_LAND   ='#f0ede8'; // sol — fond universel (terrain nu)
-const COL_ROCK   ='#c0bbb5'; // roche, éboulis, glacier — gris clair
+const COL_PARK   ='#0fe300';
+const COL_FOREST ='#0fe300';
+const COL_GRASS  ='#0fe300';
+const COL_FARM   ='#0fe300';
+const COL_PED    ='#262626';
+const COL_LAND   ='#f0ede8';
+const COL_ROCK   ='#c0bbb5';
 
-/* Hauteurs relatives au terrain (mm) — hiérarchie visuelle claire :
-   Chaque couche a une hauteur UNIQUE → marche physique nette à chaque frontière. */
-const H_LAND  =0;    // sol     — exactement sur le terrain
-const H_ROCK  =0.20; // roche / éboulis / glacier
-const H_WATER =0.90; // eau     — marche bien visible
-const H_GRASS =0.45; // prairie
-const H_PARK  =0.55; // parc
-const H_FOREST=0.65; // forêt
-const H_PED   =0.55; // trottoir
-const H_ROAD  =1.10; // route   — très bien visible
+/* Hauteurs relatives au terrain (mm) */
+const H_LAND  =0;
+const H_ROCK  =0.20;
+const H_WATER =0.90;
+const H_GRASS =0.45;
+const H_PARK  =0.55;
+const H_FOREST=0.65;
+const H_PED   =0.55;
+const H_ROAD  =1.10;
 
-function buildOverture(st){
-  if(!Cache.overture?.length)return;
+function buildOSM(st){
+  if(!Cache.osm?.length)return;
   const{mmPerMeter,toLocal}=Cache;
-  const landGs=[],waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],roadGs=[],pedGs=[],buildGs=[];
+  const landGs=[],waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],
+        roadGs=[],pedGs=[],buildGs=[],rockGs=[];
 
   /* Terrain-following polygon extrusion — earcut triangulation, deep SINK for clean edges */
   function extrudeTerrain(bucket,clipped,h){
     if(clipped.length<3)return;
     try{
-      /* Subdiviser les grandes arêtes pour mieux suivre le relief */
       const PSUB=Math.max(App.wMm,App.dMm)/(Cache.GRID-1)*2.5;
       const dense=[];
       const n0=clipped.length;
@@ -1322,11 +1361,9 @@ function buildOverture(st){
       for(const p of dense){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p)}
       if(deduped.length<3)return;
       const n=deduped.length;
-      /* Triangulation earcut — robuste sur les polygones concaves */
       const flat=[];for(const p of deduped)flat.push(p.x,-p.z);
-      const triFlat=earcut(flat);
+      const triFlat=safeEarcut(flat);
       if(!triFlat||!triFlat.length)return;
-      /* SINK profond → murs latéraux francs entre zones adjacentes */
       const SINK=3.5;
       const verts=new Float32Array(n*6);
       for(let i=0;i<n;i++){
@@ -1335,11 +1372,8 @@ function buildOverture(st){
         verts[(n+i)*3]=deduped[i].x;verts[(n+i)*3+1]=y-SINK;verts[(n+i)*3+2]=deduped[i].z;
       }
       const idx=[];
-      /* Face haute (CCW) */
       for(let i=0;i<triFlat.length;i+=3)idx.push(triFlat[i],triFlat[i+1],triFlat[i+2]);
-      /* Face basse (inversée) */
       for(let i=0;i<triFlat.length;i+=3)idx.push(n+triFlat[i+2],n+triFlat[i+1],n+triFlat[i]);
-      /* Murs latéraux */
       for(let i=0;i<n;i++){const j=(i+1)%n;idx.push(i,n+i,n+j,i,n+j,j)}
       const geo=new THREE.BufferGeometry();
       geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
@@ -1349,12 +1383,12 @@ function buildOverture(st){
     }catch(e){console.warn('extrudeTerrain:',e)}
   }
 
-  const rockGs=[];
+  for(const feat of Cache.osm){
+    const{tags:p,pts,closed}=feat;
+    if(!pts||pts.length<2)continue;
 
-  for(const feat of Cache.overture){
-    const{layer,type,properties:p,rings}=feat;
-    if(!rings||!rings[0]||rings[0].length<2)continue;
-    const outerRing=rings[0].map(({lat,lon})=>{
+    /* Conversion lat/lon → coordonnées locales */
+    const outerRing=pts.map(({lat,lon})=>{
       const lc=toLocal(lat,lon);
       return{x:lc.x,z:lc.z,y:sampleTerrainY(lc.x,lc.z),lat,lon};
     });
@@ -1362,37 +1396,35 @@ function buildOverture(st){
     const cz=outerRing.reduce((s,pt)=>s+pt.z,0)/outerRing.length;
     if(!inZone(cx,cz)&&!outerRing.some(pt=>inZone(pt.x,pt.z)))continue;
 
-    const isPoly=type===3,isLine=type===2;
+    const isPoly=closed&&pts.length>3;
     let clipped;
     if(isPoly){
-      /* Drop closing duplicate vertex if present */
-      const pts=outerRing.length>1&&
+      const ppts=outerRing.length>1&&
         Math.abs(outerRing[0].lat-outerRing[outerRing.length-1].lat)<1e-6&&
         Math.abs(outerRing[0].lon-outerRing[outerRing.length-1].lon)<1e-6
         ?outerRing.slice(0,-1):outerRing;
-      clipped=clipPolyToZone(pts);
+      clipped=clipPolyToZone(ppts);
     }else{
       clipped=clipLineToZone(outerRing);
     }
     if(clipped.length<2)continue;
     if(isPoly&&clipped.length<3)continue;
 
-    /* ── BUILDINGS — earcut extrusion ── */
-    if(layer==='building'&&st.buildOn&&isPoly){
+    /* ── BUILDINGS ── */
+    if(p.building&&p.building!=='no'&&st.buildOn&&isPoly){
       let hM=5;
       if(p.height)hM=parseFloat(p.height)||5;
-      else if(p.num_floors)hM=parseFloat(p.num_floors)*3.2;
+      else if(p['building:levels'])hM=parseFloat(p['building:levels'])*3.2;
+      else if(p.levels)hM=parseFloat(p.levels)*3.2;
       const hMm=Math.min(App.wMm*0.10,Math.max(2.0,hM*mmPerMeter*st.buildHS));
       try{
-        /* Déduplification + earcut */
         const ded=[];
         for(const pt of clipped){const pv=ded[ded.length-1];if(!pv||Math.hypot(pt.x-pv.x,pt.z-pv.z)>0.01)ded.push(pt)}
         if(ded.length<3)continue;
         const nb=ded.length;
         const flat=[];for(const pt of ded)flat.push(pt.x,-pt.z);
-        const triFlat=earcut(flat);
+        const triFlat=safeEarcut(flat);
         if(!triFlat||!triFlat.length)continue;
-        /* Base = min terrain → bâtiment jamais en lévitation */
         const baseY=ded.reduce((mn,pt)=>Math.min(mn,sampleTerrainY(pt.x,pt.z)),Infinity);
         const verts=new Float32Array(nb*6);
         for(let i=0;i<nb;i++){
@@ -1410,70 +1442,63 @@ function buildOverture(st){
       }catch(e){}
     }
 
-    /* ── ROADS / TROTTOIRS ── */
-    else if(layer==='segment'&&st.roadsOn&&isLine){
-      /* Exclure les itinéraires non-routiers (ferry, waterway…) */
-      if(p.subtype&&p.subtype!=='road')continue;
-      const cls=p.class||'residential';
+    /* ── ROUTES ── */
+    else if(p.highway&&p.highway!=='no'&&st.roadsOn&&!isPoly){
+      const cls=p.highway;
       const realW=(ROAD_W_M[cls]||4)*mmPerMeter;
       const wMm=Math.max(ROAD_W_MIN[cls]||0.3,realW);
-      /* Un ruban drapé par segment contigu — suit le relief entre waypoints */
       for(const seg of clipLineToSegments(outerRing)){
-        /* Filtrer les segments trop courts (artefacts, diagonales parasites) */
-        const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
+        const segLen=seg.reduce((s,pt,i)=>i===0?0:s+Math.hypot(pt.x-seg[i-1].x,pt.z-seg[i-1].z),0);
         if(segLen<1.0)continue;
         const draped=drapeRibbon(seg);
         if(PED_CLASSES.has(cls)){
           const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_PED,pt.z));
           const g=mkRibbon(v3,wMm,H_PED+0.3);if(g)pedGs.push(g);
-        }else if(VEHICLE_CLASSES.has(cls)){
+        }else{
           const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_ROAD,pt.z));
           const g=mkRibbon(v3,wMm,H_ROAD+0.3);if(g)roadGs.push(g);
         }
       }
     }
 
-    /* ── WATER ── */
-    else if(layer==='water'&&st.waterOn){
-      /* Eau : 0.60mm au-dessus du terrain, s'ancre dans le sol — rivières dans les vallées */
+    /* ── EAU ── */
+    else if(st.waterOn&&(p.natural==='water'||p.natural==='bay'||p.landuse==='reservoir'||
+            p.waterway==='riverbank'||p.waterway==='dock')){
       if(isPoly)extrudeTerrain(waterGs,clipped,H_WATER);
-      else if(isLine){
-        const wMm=Math.max(0.5,1.5*mmPerMeter);
-        /* Un ruban drapé par segment — les rivières suivent les vallées */
-        for(const seg of clipLineToSegments(outerRing)){
-          const segLen=seg.reduce((s,p,i)=>i===0?0:s+Math.hypot(p.x-seg[i-1].x,p.z-seg[i-1].z),0);
-          if(segLen<1.0)continue;
-          const draped=drapeRibbon(seg);
-          const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
-          const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
-        }
+    }
+    else if(st.waterOn&&p.waterway&&!isPoly){
+      const wMm=Math.max(0.5,1.5*mmPerMeter);
+      for(const seg of clipLineToSegments(outerRing)){
+        const segLen=seg.reduce((s,pt,i)=>i===0?0:s+Math.hypot(pt.x-seg[i-1].x,pt.z-seg[i-1].z),0);
+        if(segLen<1.0)continue;
+        const draped=drapeRibbon(seg);
+        const v3=draped.map(pt=>new THREE.Vector3(pt.x,pt.y+H_WATER,pt.z));
+        const g=mkRibbon(v3,wMm,H_WATER+0.3);if(g)waterGs.push(g);
       }
     }
 
-    /* ── LAND (fond universel — couvre TOUT le sol non-eau) ── */
-    else if(layer==='land'&&st.grassOn&&isPoly){
-      extrudeTerrain(landGs,clipped,H_LAND);
+    /* ── FORÊT / BOIS ── */
+    else if(st.grassOn&&isPoly&&(p.natural==='wood'||p.natural==='forest'||
+            p.landuse==='forest'||p.landuse==='wood')){
+      extrudeTerrain(forestGs,clipped,H_FOREST);
     }
 
-    /* ── LAND USE ── */
-    else if(layer==='land_use'&&st.grassOn&&isPoly){
-      const sub=(p.subtype||p.class||'').toLowerCase();
-      if(/rock|scree|cliff|bare|quarry|talus|glacier|ice/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK);
-      else if(/wood|forest/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
-      else if(/park|urban_park|garden|nature|recreation|sport|golf|playground|pitch/.test(sub))extrudeTerrain(parkGs,clipped,H_PARK);
-      else if(/grass|lawn|meadow|wetland|cemetery/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
-      else if(/agriculture|farm|horticulture/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
-      else extrudeTerrain(landGs,clipped,H_LAND);
+    /* ── PARCS / JARDINS ── */
+    else if(st.grassOn&&isPoly&&(p.leisure==='park'||p.leisure==='garden'||
+            p.leisure==='playground'||p.leisure==='pitch'||p.leisure==='recreation_ground'||
+            p.landuse==='park'||p.landuse==='cemetery'||p.landuse==='greenfield')){
+      extrudeTerrain(parkGs,clipped,H_PARK);
     }
 
-    /* ── LAND COVER (végétation naturelle + roche) ── */
-    else if(layer==='land_cover'&&st.grassOn&&isPoly){
-      const sub=(p.subtype||p.class||'').toLowerCase();
-      if(/rock|scree|cliff|bare|talus|glacier|ice|snow/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK);
-      else if(/tree|wood/.test(sub))extrudeTerrain(forestGs,clipped,H_FOREST);
-      else if(/grass|scrub|moss/.test(sub))extrudeTerrain(grassGs,clipped,H_GRASS);
-      else if(/crop/.test(sub))extrudeTerrain(farmGs,clipped,H_GRASS);
-      else if(/sand|gravel|mud/.test(sub))extrudeTerrain(rockGs,clipped,H_ROCK); // terrain minéral → gris
+    /* ── PRAIRIE / PELOUSE ── */
+    else if(st.grassOn&&isPoly&&(p.natural==='grassland'||p.natural==='heath'||
+            p.natural==='scrub'||p.landuse==='grass'||p.landuse==='meadow')){
+      extrudeTerrain(grassGs,clipped,H_GRASS);
+    }
+
+    /* ── AGRICULTURE ── */
+    else if(st.grassOn&&isPoly&&p.landuse==='farmland'){
+      extrudeTerrain(farmGs,clipped,H_GRASS);
     }
   }
 
@@ -1486,19 +1511,16 @@ function buildOverture(st){
     }));
     m.name=name;App.tg.add(m);
   }
-  /* Ordre visuel (hauteur croissante) :
-     sol=0 → roche=0.15 → prairie=0.30 → parc=0.35 → forêt=0.40 → eau=0.60 → route=0.80
-     Chaque couche a une hauteur UNIQUE → marche physique à chaque frontière de zone. */
+
   if(st.grassOn){
-    addLayer(landGs,  COL_LAND,   'LAND',    -2);  // sol nu
-    addLayer(rockGs,  COL_ROCK,   'ROCK',    -3);  // roche/glacier gris +0.15mm
+    addLayer(rockGs,  COL_ROCK,   'ROCK',    -3);
   }
-  if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);  // eau +0.60mm
+  if(st.waterOn) addLayer(waterGs, st.waterCol,'WATER',   -4);
   if(st.grassOn){
     addLayer(farmGs,  COL_FARM,   'FARM',    -5);
-    addLayer(grassGs, COL_GRASS,  'GRASS',   -6);  // prairie +0.30mm
-    addLayer(parkGs,  COL_PARK,   'PARKS',   -7);  // parc +0.35mm
-    addLayer(forestGs,COL_FOREST, 'FOREST',  -8);  // forêt +0.40mm
+    addLayer(grassGs, COL_GRASS,  'GRASS',   -6);
+    addLayer(parkGs,  COL_PARK,   'PARKS',   -7);
+    addLayer(forestGs,COL_FOREST, 'FOREST',  -8);
   }
   if(st.roadsOn){
     addLayer(pedGs,  COL_PED,    'PEDEST',  -9);
@@ -1641,18 +1663,36 @@ function mkLandmarkGeo(sh,w,h,d){
   try{
     switch(sh){
       case 'eiffel':{
-        /* Profil Eiffel — 4 faces (piliers) + effilement */
+        /* Profil Tour Eiffel — 4 pylônes, arches courbes, 2 plateformes, antenne */
+        /* Proportions réelles : base 125m, 1er étage 57m (17%), 2e 115m (35%), sommet 330m */
         const pts=[
-          new THREE.Vector2(hw,      0),
-          new THREE.Vector2(hw*0.60, h*0.24),
-          new THREE.Vector2(hw*0.15, h*0.52),
-          new THREE.Vector2(hw*0.06, h*0.83),
-          new THREE.Vector2(hw*0.02, h*0.97),
-          new THREE.Vector2(0,       h),
+          new THREE.Vector2(hw,       0),        // base (coins)
+          new THREE.Vector2(hw*0.82,  h*0.035),  // départ arche
+          new THREE.Vector2(hw*0.58,  h*0.08),   // courbure arche
+          new THREE.Vector2(hw*0.32,  h*0.135),  // fin arche
+          new THREE.Vector2(hw*0.265, h*0.165),  // 1er étage (légèrement évasé)
+          new THREE.Vector2(hw*0.285, h*0.175),  // bord 1ère plateforme
+          new THREE.Vector2(hw*0.245, h*0.188),  // dessus 1ère plateforme
+          new THREE.Vector2(hw*0.18,  h*0.23),   // 1ère section verticale
+          new THREE.Vector2(hw*0.13,  h*0.33),   // milieu
+          new THREE.Vector2(hw*0.115, h*0.348),  // 2e étage
+          new THREE.Vector2(hw*0.130, h*0.358),  // bord 2ème plateforme
+          new THREE.Vector2(hw*0.110, h*0.370),  // dessus 2ème plateforme
+          new THREE.Vector2(hw*0.080, h*0.43),   // section haute
+          new THREE.Vector2(hw*0.048, h*0.60),   // mât
+          new THREE.Vector2(hw*0.026, h*0.83),   // mât effilé
+          new THREE.Vector2(hw*0.010, h*0.94),   // antenne
+          new THREE.Vector2(0,        h),         // pointe
         ];
-        const g=new THREE.LatheGeometry(pts,4);
-        g.rotateY(Math.PI/4);
-        return g;
+        const tower=new THREE.LatheGeometry(pts,4);
+        tower.rotateY(Math.PI/4);
+        /* Anneaux horizontaux aux plateformes — visibles de loin */
+        const rp1=hw*0.32,rp2=hw*0.145;
+        const ring1=new THREE.CylinderGeometry(rp1,rp1,h*0.012,16,1,false);
+        ring1.translate(0,h*0.175,0);
+        const ring2=new THREE.CylinderGeometry(rp2,rp2,h*0.010,16,1,false);
+        ring2.translate(0,h*0.358,0);
+        return mergeGeos([tower,ring1,ring2]);
       }
       case 'burj':{
         /* Profil Burj / gratte-ciel effilé */
@@ -1787,7 +1827,7 @@ function buildMeshes(){
   buildBase(st);
   buildTerrain(st);
   buildSideWalls(st);
-  buildOverture(st);
+  buildOSM(st);
   buildLandmarks();
   buildGPXMesh(st);
 }
@@ -1837,16 +1877,16 @@ $('btn-gen').addEventListener('click',async()=>{
     Cache.BASE_H=st.baseH;
     Cache.terrYAt=makeBilinear(elevs,GRID,bounds,latDiff,lonDiff,st.baseH,minE,eRange,scaleMm);
 
-    setP(40,'OVERTURE MAPS','Récupération des données cartographiques...');await tick();
-    let overtureFeatures=[];
+    setP(40,'OSM / OVERPASS','Récupération des données cartographiques...');await tick();
+    let osmFeatures=[];
     try{
-      overtureFeatures=await fetchOverture(bounds);
-      console.log(`Overture OK: ${overtureFeatures.length} features`);
-      console.table(overtureFeatures.slice(0,5).map(f=>({layer:f.layer,type:f.type,props:JSON.stringify(f.properties).slice(0,80)})));
+      osmFeatures=await fetchOSM(bounds);
+      console.log(`OSM OK: ${osmFeatures.length} features`);
+      console.table(osmFeatures.slice(0,5).map(f=>({tags:JSON.stringify(f.tags).slice(0,80),closed:f.closed,pts:f.pts.length})));
     }catch(e){
-      console.error('Overture fetch failed:',e);
+      console.error('OSM fetch failed:',e);
     }
-    Cache.overture=overtureFeatures;
+    Cache.osm=osmFeatures;
     console.log('Elevation range:',minE,'→',maxE,'m  (exag:',st.tExag,')');
 
     setP(72,'MODÈLE 3D','Construction du modèle...');await tick();
