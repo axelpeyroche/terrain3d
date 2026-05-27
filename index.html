@@ -1045,7 +1045,7 @@ function decodeMVT(buffer){
 }
 
 async function fetchOvertureTheme(theme,bounds,zoom){
-  const url=`https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/${OVERTURE_RELEASE}/${theme}.pmtiles`;
+  const url=`https://overturemaps-tiles-us-west-2-beta.s3.amazonaws.com/${OVERTURE_RELEASE}/${theme}.pmtiles`;
   console.log(`Fetching Overture [${theme}]:`,url);
   const pm=new pmtiles.PMTiles(url);
   const tiles=tilesForBBox(bounds.minLon,bounds.minLat,bounds.maxLon,bounds.maxLat,zoom);
@@ -1480,8 +1480,8 @@ function buildOverture(st){
   function addLayer(geos,col,name,pof=-8){
     const mg=mergeGeos(geos);if(!mg)return;
     const m=new THREE.Mesh(mg,new THREE.MeshStandardMaterial({
-      color:new THREE.Color(col),roughness:.95,metalness:0,
-      side:THREE.DoubleSide,
+      color:new THREE.Color(col),roughness:.88,metalness:0,
+      flatShading:true,side:THREE.DoubleSide,
       polygonOffset:true,polygonOffsetFactor:pof,polygonOffsetUnits:pof
     }));
     m.name=name;App.tg.add(m);
@@ -1556,6 +1556,229 @@ function buildGPXMesh(st){
   }
 }
 
+/* ═══════════════════ MONUMENTS / LANDMARKS ═══════════════════ */
+/* Base de données — ~40 monuments identifiables dans le monde */
+const LM=[
+  // FRANCE
+  {n:'Tour Eiffel',        lat:48.8584,  lon:2.2945,  rH:330,rW:125,rD:125,sh:'eiffel',    c:'#7a8c9a'},
+  {n:'Arc de Triomphe',    lat:48.8738,  lon:2.2950,  rH:50, rW:45, rD:22, sh:'arch',      c:'#c8b89a'},
+  {n:'Notre-Dame',         lat:48.8530,  lon:2.3499,  rH:69, rW:48, rD:128,sh:'cathedral', c:'#b4a890'},
+  {n:'Sacré-Cœur',         lat:48.8867,  lon:2.3431,  rH:83, rW:42, rD:55, sh:'dome',      c:'#f8f4ee'},
+  {n:'Panthéon',           lat:48.8462,  lon:2.3460,  rH:83, rW:110,rD:75, sh:'dome',      c:'#d8d0c0'},
+  {n:'Invalides',          lat:48.8559,  lon:2.3124,  rH:107,rW:60, rD:60, sh:'dome',      c:'#d4b820'},
+  {n:'Tour Montparnasse',  lat:48.8422,  lon:2.3220,  rH:210,rW:50, rD:30, sh:'tower',     c:'#282828'},
+  {n:'Pyramide Louvre',    lat:48.8606,  lon:2.3376,  rH:21, rW:35, rD:35, sh:'pyramid',   c:'#d4d8e0'},
+  {n:'Château Versailles', lat:48.8048,  lon:2.1203,  rH:30, rW:400,rD:130,sh:'rect',      c:'#f0e8c8'},
+  {n:'Château Chantilly',  lat:49.1935,  lon:2.4849,  rH:40, rW:200,rD:80, sh:'rect',      c:'#e8e0d0'},
+  // UK
+  {n:'Big Ben',            lat:51.5007,  lon:-0.1246, rH:96, rW:15, rD:15, sh:'tower',     c:'#d4c878'},
+  {n:'London Eye',         lat:51.5033,  lon:-0.1195, rH:135,rW:120,rD:12, sh:'wheel',     c:'#4080c0'},
+  {n:'St Pauls',           lat:51.5138,  lon:-0.0984, rH:111,rW:80, rD:175,sh:'dome',      c:'#e0d8c8'},
+  // USA
+  {n:'Empire State',       lat:40.7484,  lon:-73.9857,rH:443,rW:57, rD:57, sh:'tower',     c:'#b0b0c0'},
+  {n:'One WTC',            lat:40.7127,  lon:-74.0134,rH:541,rW:60, rD:60, sh:'tower',     c:'#c0d4e0'},
+  {n:'Statue of Liberty',  lat:40.6892,  lon:-74.0445,rH:93, rW:14, rD:14, sh:'tower',     c:'#78a890'},
+  {n:'Capitol',            lat:38.8897,  lon:-77.0089,rH:88, rW:229,rD:107,sh:'dome',      c:'#f0f0f0'},
+  {n:'Space Needle',       lat:47.6205,  lon:-122.3493,rH:184,rW:15,rD:15, sh:'tower',     c:'#808888'},
+  {n:'CN Tower',           lat:43.6426,  lon:-79.3871,rH:553,rW:20, rD:20, sh:'tower',     c:'#808890'},
+  // DUBAI
+  {n:'Burj Khalifa',       lat:25.1972,  lon:55.2744, rH:828,rW:57, rD:57, sh:'burj',      c:'#c8d8e8'},
+  {n:'Burj Al Arab',       lat:25.1411,  lon:55.1853, rH:321,rW:60, rD:25, sh:'sail',      c:'#f8f8f8'},
+  // CHINA
+  {n:'Shanghai Tower',     lat:31.2354,  lon:121.5006,rH:632,rW:57, rD:57, sh:'burj',      c:'#d0e8f0'},
+  // ITALY
+  {n:'Colosseum',          lat:41.8902,  lon:12.4922, rH:48, rW:188,rD:156,sh:'colosseum', c:'#c8b89a'},
+  {n:'Tower of Pisa',      lat:43.7229,  lon:10.3966, rH:56, rW:15, rD:15, sh:'tower',     c:'#f0ede8'},
+  {n:'St Peters',          lat:41.9022,  lon:12.4539, rH:136,rW:211,rD:115,sh:'dome',      c:'#f0ede8'},
+  // SPAIN
+  {n:'Sagrada Família',    lat:41.4036,  lon:2.1744,  rH:172,rW:90, rD:60, sh:'cathedral', c:'#d4c8a0'},
+  // GERMANY
+  {n:'Brandenburg Gate',   lat:52.5163,  lon:13.3777, rH:26, rW:65, rD:11, sh:'arch',      c:'#d4c8a0'},
+  {n:'Cologne Cathedral',  lat:50.9413,  lon:6.9583,  rH:157,rW:86, rD:145,sh:'cathedral', c:'#909090'},
+  // GREECE
+  {n:'Parthenon',          lat:37.9715,  lon:23.7267, rH:13, rW:69, rD:30, sh:'rect',      c:'#e8d8b8'},
+  // EGYPT
+  {n:'Great Pyramid',      lat:29.9792,  lon:31.1342, rH:139,rW:230,rD:230,sh:'pyramid',   c:'#d4c060'},
+  // RUSSIA
+  {n:'St Basil',           lat:55.7525,  lon:37.6231, rH:65, rW:40, rD:40, sh:'onion',     c:'#c83030'},
+  // AUSTRALIA
+  {n:'Sydney Opera House', lat:-33.8568, lon:151.2153,rH:65, rW:183,rD:100,sh:'dome',      c:'#f8f8f8'},
+  // INDIA
+  {n:'Taj Mahal',          lat:27.1751,  lon:78.0421, rH:73, rW:56, rD:56, sh:'dome',      c:'#f8f4ee'},
+  {n:'India Gate',         lat:28.6129,  lon:77.2295, rH:42, rW:10, rD:10, sh:'arch',      c:'#d4b870'},
+  // JAPAN
+  {n:'Tokyo Tower',        lat:35.6585,  lon:139.7454,rH:333,rW:20, rD:20, sh:'eiffel',    c:'#d04030'},
+  {n:'Tokyo Skytree',      lat:35.7101,  lon:139.8107,rH:634,rW:50, rD:50, sh:'burj',      c:'#7090c0'},
+  // BRAZIL
+  {n:'Christ Redeemer',    lat:-22.9519, lon:-43.2105,rH:39, rW:10, rD:10, sh:'tower',     c:'#f0ede8'},
+  // TURKEY
+  {n:'Hagia Sophia',       lat:41.0086,  lon:28.9802, rH:55, rW:100,rD:75, sh:'dome',      c:'#c8b898'},
+  // MEXICO
+  {n:'Pyramid of Sun',     lat:19.6921,  lon:-98.8445,rH:71, rW:225,rD:222,sh:'pyramid',   c:'#c8b070'},
+  // CZECHIA
+  {n:'Prague Castle',      lat:50.0905,  lon:14.4003, rH:48, rW:570,rD:130,sh:'rect',      c:'#d8d0b8'},
+];
+
+/* Fusionne plusieurs THREE.BoxGeometry en un seul BufferGeometry */
+function mergeBoxGeos(geos){
+  const positions=[],indices=[];let offset=0;
+  for(const g of geos){
+    const p=g.attributes.position,idx=g.index;
+    for(let i=0;i<p.count;i++)positions.push(p.getX(i),p.getY(i),p.getZ(i));
+    if(idx)for(let i=0;i<idx.count;i++)indices.push(idx.getX(i)+offset);
+    else for(let i=0;i<p.count;i++)indices.push(i+offset);
+    offset+=p.count;g.dispose();
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  g.setIndex(indices);g.computeVertexNormals();
+  return g;
+}
+
+/* Crée la géométrie 3D d'un monument selon son type */
+function mkLandmarkGeo(sh,w,h,d){
+  const hw=w/2,hd=d/2;
+  try{
+    switch(sh){
+      case 'eiffel':{
+        /* Profil Eiffel — 4 faces (piliers) + effilement */
+        const pts=[
+          new THREE.Vector2(hw,      0),
+          new THREE.Vector2(hw*0.60, h*0.24),
+          new THREE.Vector2(hw*0.15, h*0.52),
+          new THREE.Vector2(hw*0.06, h*0.83),
+          new THREE.Vector2(hw*0.02, h*0.97),
+          new THREE.Vector2(0,       h),
+        ];
+        const g=new THREE.LatheGeometry(pts,4);
+        g.rotateY(Math.PI/4);
+        return g;
+      }
+      case 'burj':{
+        /* Profil Burj / gratte-ciel effilé */
+        const pts=[
+          new THREE.Vector2(hw,      0),
+          new THREE.Vector2(hw*0.80, h*0.15),
+          new THREE.Vector2(hw*0.55, h*0.40),
+          new THREE.Vector2(hw*0.25, h*0.72),
+          new THREE.Vector2(hw*0.08, h*0.90),
+          new THREE.Vector2(hw*0.02, h),
+        ];
+        return new THREE.LatheGeometry(pts,12);
+      }
+      case 'dome':{
+        /* Dôme hémisphérique + cylindre base */
+        const npts=12,pts=[];
+        for(let i=0;i<=npts;i++){const a=i/npts*Math.PI/2;pts.push(new THREE.Vector2(hw*Math.cos(a),h*0.75*Math.sin(a)))}
+        pts.push(new THREE.Vector2(hw*0.9,0),new THREE.Vector2(0,0));
+        return new THREE.LatheGeometry(pts,16);
+      }
+      case 'onion':{
+        /* Clocher en bulbe (St-Basile) */
+        const pts=[
+          new THREE.Vector2(hw*0.3,  0),
+          new THREE.Vector2(hw*0.55, h*0.12),
+          new THREE.Vector2(hw,      h*0.40),
+          new THREE.Vector2(hw*0.55, h*0.65),
+          new THREE.Vector2(hw*0.10, h*0.85),
+          new THREE.Vector2(hw*0.04, h),
+        ];
+        return new THREE.LatheGeometry(pts,12);
+      }
+      case 'tower':{
+        /* Tour effilée générique */
+        const pts=[
+          new THREE.Vector2(hw,      0),
+          new THREE.Vector2(hw*0.65, h*0.20),
+          new THREE.Vector2(hw*0.30, h*0.55),
+          new THREE.Vector2(hw*0.10, h*0.80),
+          new THREE.Vector2(hw*0.03, h),
+        ];
+        return new THREE.LatheGeometry(pts,8);
+      }
+      case 'pyramid':{
+        /* Pyramide à 4 faces */
+        const g=new THREE.ConeGeometry(hw*Math.SQRT2,h,4);
+        g.rotateY(Math.PI/4);g.translate(0,h/2,0);
+        return g;
+      }
+      case 'arch':{
+        /* Arc : 2 piliers + linteau + attique */
+        const pw=w*0.22,ph=h*0.78,pd=d;
+        const g1=new THREE.BoxGeometry(pw,ph,pd);g1.translate(-hw+pw/2,ph/2,0);
+        const g2=new THREE.BoxGeometry(pw,ph,pd);g2.translate( hw-pw/2,ph/2,0);
+        const g3=new THREE.BoxGeometry(w, h*0.22,pd);g3.translate(0,h*0.89,0);
+        return mergeBoxGeos([g1,g2,g3]);
+      }
+      case 'cathedral':{
+        /* Cathédrale : nef centrale + 2 tours de façade */
+        const bw=w*0.55,bh=h*0.65,bd=d,tw=w*0.14,th=h;
+        const body=new THREE.BoxGeometry(bw,bh,bd);body.translate(0,bh/2,0);
+        const t1=new THREE.BoxGeometry(tw,th,tw);t1.translate(-bw/2+tw/2,th/2,-bd/2+tw/2);
+        const t2=new THREE.BoxGeometry(tw,th,tw);t2.translate( bw/2-tw/2,th/2,-bd/2+tw/2);
+        return mergeBoxGeos([body,t1,t2]);
+      }
+      case 'colosseum':{
+        /* Amphithéâtre elliptique — tore aplati */
+        const rM=Math.max(hw,hd)*0.85,rT=(Math.max(hw,hd)-Math.min(hw,hd)*0.4)/2;
+        const g=new THREE.TorusGeometry(rM,Math.max(rT,3),8,32);
+        g.scale(1,h/(rM*0.8),hd/hw);g.translate(0,h/2,0);
+        return g;
+      }
+      case 'sail':{
+        /* Voile triangulaire — Burj Al Arab */
+        const pos=[
+          -hw,0,-hd, hw,0,-hd, hw,0,hd, -hw,0,hd,
+           0, h, 0,
+        ];
+        const idx=[0,1,4, 1,2,4, 2,3,4, 3,0,4, 0,2,1, 0,3,2];
+        const g=new THREE.BufferGeometry();
+        g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+        g.setIndex(idx);g.computeVertexNormals();
+        return g;
+      }
+      case 'wheel':{
+        /* Grande roue — London Eye */
+        const r=Math.min(hw,h/2);
+        const g=new THREE.TorusGeometry(r,r*0.045,6,36);
+        g.rotateY(Math.PI/2);g.translate(0,r,0);
+        return g;
+      }
+      default:{ /* 'rect' */
+        const g=new THREE.BoxGeometry(w,h,d);g.translate(0,h/2,0);return g;
+      }
+    }
+  }catch(e){return null}
+}
+
+/* Vérifie si un monument est dans la zone et le place dans la scène */
+function buildLandmarks(){
+  if(!Cache.ready||!Cache.toLocal||!App.bounds)return;
+  const{toLocal,mmPerMeter}=Cache;
+  const b=App.bounds,margin=0.02;
+  let count=0;
+  for(const lm of LM){
+    if(lm.lat<b.minLat-margin||lm.lat>b.maxLat+margin)continue;
+    if(lm.lon<b.minLon-margin||lm.lon>b.maxLon+margin)continue;
+    const pos=toLocal(lm.lat,lm.lon);
+    if(!inZone(pos.x,pos.z))continue;
+    const baseY=sampleTerrainY(pos.x,pos.z);
+    /* Échelle : réel → modèle, ×2 exagération, min 5mm hauteur, max 25% de la largeur */
+    const hMm=Math.min(App.wMm*0.25,Math.max(5,lm.rH*mmPerMeter*2));
+    const wMm=Math.min(App.wMm*0.08,Math.max(1.5,lm.rW*mmPerMeter));
+    const dMm=Math.min(App.wMm*0.08,Math.max(1.5,lm.rD*mmPerMeter));
+    const geo=mkLandmarkGeo(lm.sh,wMm,hMm,dMm);
+    if(!geo)continue;
+    geo.translate(pos.x,baseY,pos.z);
+    const m=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({
+      color:new THREE.Color(lm.c),roughness:.7,metalness:.05,flatShading:true,
+      polygonOffset:true,polygonOffsetFactor:-20,polygonOffsetUnits:-20
+    }));
+    m.name='LM_'+lm.n;App.tg.add(m);count++;
+  }
+  if(count)console.log(`Monuments: ${count} landmark(s) placé(s)`);
+}
+
 /* ═══════════════════ BUILD ALL MESHES ═══════════════════ */
 function buildMeshes(){
   if(!Cache.ready||!App.tg)return;
@@ -1565,6 +1788,7 @@ function buildMeshes(){
   buildTerrain(st);
   buildSideWalls(st);
   buildOverture(st);
+  buildLandmarks();
   buildGPXMesh(st);
 }
 
