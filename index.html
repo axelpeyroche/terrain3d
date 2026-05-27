@@ -311,6 +311,7 @@ hr.ds{border:none;border-top:1px solid var(--b1);margin:4px 0}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://unpkg.com/pmtiles@3/dist/pmtiles.js"></script>
 <script src="https://unpkg.com/pbf@3/dist/pbf.js"></script>
+<script src="https://unpkg.com/earcut@2.2.4/dist/earcut.min.js"></script>
 
 <script>
 'use strict';
@@ -1289,25 +1290,24 @@ const COL_ROCK   ='#c0bbb5'; // roche, éboulis, glacier — gris clair
 /* Hauteurs relatives au terrain (mm) — hiérarchie visuelle claire :
    Chaque couche a une hauteur UNIQUE → marche physique nette à chaque frontière. */
 const H_LAND  =0;    // sol     — exactement sur le terrain
-const H_ROCK  =0.15; // roche / éboulis / glacier — légèrement au-dessus du sol
-const H_WATER =0.60; // eau     — 0.60mm (standard map2model)
-const H_GRASS =0.30; // prairie — marche visible vs roche
-const H_PARK  =0.35; // parc    — marche visible vs prairie
-const H_FOREST=0.40; // forêt   — 0.40mm (standard map2model)
-const H_PED   =0.40; // trottoir— 0.40mm au-dessus terrain
-const H_ROAD  =0.80; // route   — 0.80mm au-dessus terrain (standard map2model)
+const H_ROCK  =0.20; // roche / éboulis / glacier
+const H_WATER =0.90; // eau     — marche bien visible
+const H_GRASS =0.45; // prairie
+const H_PARK  =0.55; // parc
+const H_FOREST=0.65; // forêt
+const H_PED   =0.55; // trottoir
+const H_ROAD  =1.10; // route   — très bien visible
 
 function buildOverture(st){
   if(!Cache.overture?.length)return;
   const{mmPerMeter,toLocal}=Cache;
   const landGs=[],waterGs=[],parkGs=[],forestGs=[],grassGs=[],farmGs=[],roadGs=[],pedGs=[],buildGs=[];
 
-  /* Terrain-following polygon extrusion — no outset, simple SINK */
+  /* Terrain-following polygon extrusion — earcut triangulation, deep SINK for clean edges */
   function extrudeTerrain(bucket,clipped,h){
     if(clipped.length<3)return;
     try{
-      /* Subdiviser les grandes arêtes du polygone pour mieux suivre le relief entre sommets.
-         STEP ≈ 2.5× la maille terrain (~3 mm pour 150 mm/128²) — balance précision/perf. */
+      /* Subdiviser les grandes arêtes pour mieux suivre le relief */
       const PSUB=Math.max(App.wMm,App.dMm)/(Cache.GRID-1)*2.5;
       const dense=[];
       const n0=clipped.length;
@@ -1322,10 +1322,12 @@ function buildOverture(st){
       for(const p of dense){const pv=deduped[deduped.length-1];if(!pv||Math.hypot(p.x-pv.x,p.z-pv.z)>0.01)deduped.push(p)}
       if(deduped.length<3)return;
       const n=deduped.length;
-      const contour=deduped.map(p=>new THREE.Vector2(p.x,-p.z));
-      const tris=THREE.ShapeUtils.triangulateShape(contour,[]);
-      if(!tris||!tris.length)return;
-      const SINK=1.5;
+      /* Triangulation earcut — robuste sur les polygones concaves */
+      const flat=[];for(const p of deduped)flat.push(p.x,-p.z);
+      const triFlat=earcut(flat);
+      if(!triFlat||!triFlat.length)return;
+      /* SINK profond → murs latéraux francs entre zones adjacentes */
+      const SINK=3.5;
       const verts=new Float32Array(n*6);
       for(let i=0;i<n;i++){
         const y=sampleTerrainY(deduped[i].x,deduped[i].z);
@@ -1333,15 +1335,18 @@ function buildOverture(st){
         verts[(n+i)*3]=deduped[i].x;verts[(n+i)*3+1]=y-SINK;verts[(n+i)*3+2]=deduped[i].z;
       }
       const idx=[];
-      for(const t of tris)idx.push(t[0],t[1],t[2]);
-      for(const t of tris)idx.push(n+t[2],n+t[1],n+t[0]);
+      /* Face haute (CCW) */
+      for(let i=0;i<triFlat.length;i+=3)idx.push(triFlat[i],triFlat[i+1],triFlat[i+2]);
+      /* Face basse (inversée) */
+      for(let i=0;i<triFlat.length;i+=3)idx.push(n+triFlat[i+2],n+triFlat[i+1],n+triFlat[i]);
+      /* Murs latéraux */
       for(let i=0;i<n;i++){const j=(i+1)%n;idx.push(i,n+i,n+j,i,n+j,j)}
       const geo=new THREE.BufferGeometry();
       geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
       geo.setIndex(idx);geo.computeVertexNormals();
       if(geo.attributes.uv)geo.deleteAttribute('uv');
       bucket.push(geo);
-    }catch(e){}
+    }catch(e){console.warn('extrudeTerrain:',e)}
   }
 
   const rockGs=[];
@@ -1372,19 +1377,35 @@ function buildOverture(st){
     if(clipped.length<2)continue;
     if(isPoly&&clipped.length<3)continue;
 
-    /* ── BUILDINGS ── */
+    /* ── BUILDINGS — earcut extrusion ── */
     if(layer==='building'&&st.buildOn&&isPoly){
       let hM=5;
       if(p.height)hM=parseFloat(p.height)||5;
       else if(p.num_floors)hM=parseFloat(p.num_floors)*3.2;
       const hMm=Math.min(App.wMm*0.10,Math.max(2.0,hM*mmPerMeter*st.buildHS));
       try{
-        /* Base = min du terrain sur tous les vertices → le bâtiment ne flotte jamais en pente */
-        const baseY=clipped.reduce((mn,pt)=>Math.min(mn,sampleTerrainY(pt.x,pt.z)),Infinity);
-        const sh=new THREE.Shape(clipped.map(pt=>new THREE.Vector2(pt.x,-pt.z)));
-        const geo=new THREE.ExtrudeGeometry(sh,{depth:hMm,bevelEnabled:false});
-        geo.rotateX(-Math.PI/2);geo.translate(0,baseY,0);
-        if(geo.attributes.uv)geo.deleteAttribute('uv');
+        /* Déduplification + earcut */
+        const ded=[];
+        for(const pt of clipped){const pv=ded[ded.length-1];if(!pv||Math.hypot(pt.x-pv.x,pt.z-pv.z)>0.01)ded.push(pt)}
+        if(ded.length<3)continue;
+        const nb=ded.length;
+        const flat=[];for(const pt of ded)flat.push(pt.x,-pt.z);
+        const triFlat=earcut(flat);
+        if(!triFlat||!triFlat.length)continue;
+        /* Base = min terrain → bâtiment jamais en lévitation */
+        const baseY=ded.reduce((mn,pt)=>Math.min(mn,sampleTerrainY(pt.x,pt.z)),Infinity);
+        const verts=new Float32Array(nb*6);
+        for(let i=0;i<nb;i++){
+          verts[i*3]=ded[i].x;verts[i*3+1]=baseY+hMm;verts[i*3+2]=ded[i].z;
+          verts[(nb+i)*3]=ded[i].x;verts[(nb+i)*3+1]=baseY;verts[(nb+i)*3+2]=ded[i].z;
+        }
+        const idx=[];
+        for(let i=0;i<triFlat.length;i+=3)idx.push(triFlat[i],triFlat[i+1],triFlat[i+2]);
+        for(let i=0;i<triFlat.length;i+=3)idx.push(nb+triFlat[i+2],nb+triFlat[i+1],nb+triFlat[i]);
+        for(let i=0;i<nb;i++){const j=(i+1)%nb;idx.push(i,nb+i,nb+j,i,nb+j,j)}
+        const geo=new THREE.BufferGeometry();
+        geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+        geo.setIndex(idx);geo.computeVertexNormals();
         buildGs.push(geo);
       }catch(e){}
     }
@@ -1543,7 +1564,6 @@ function buildMeshes(){
   buildBase(st);
   buildTerrain(st);
   buildSideWalls(st);
-  buildGroundFill(st); // fond terrain-following complet avant les couches Overture
   buildOverture(st);
   buildGPXMesh(st);
 }
