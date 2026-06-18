@@ -10,6 +10,7 @@ import { ensureThree } from './scene/setup';
 import { applyGeometry } from './scene/build';
 import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
+import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
@@ -44,8 +45,10 @@ async function generate() {
 
   const btn = document.getElementById('btn-gen') as HTMLButtonElement;
   const stlBtn = document.getElementById('btn-stl') as HTMLButtonElement;
+  const expBtn = document.getElementById('btn-export') as HTMLButtonElement;
   btn.disabled = true;
   stlBtn.disabled = true;
+  expBtn.disabled = true;
   document.getElementById('empty3d')!.classList.add('h');
   showProgress(true);
 
@@ -160,6 +163,7 @@ async function generate() {
       document.getElementById('hint3d')!.style.display = 'block';
       document.getElementById('elev')!.style.display = 'block';
       stlBtn.disabled = false;
+      expBtn.disabled = false;
     }, 600);
 
     updateElevInfo(terrainResult.minE, terrainResult.maxE, state.elevScaleMm, wMm, dMm);
@@ -226,6 +230,10 @@ document.getElementById('btn-gen')!.addEventListener('click', generate);
 
 document.getElementById('btn-stl')!.addEventListener('click', () => {
   exportSTL('terrain3d.stl');
+});
+
+document.getElementById('btn-export')!.addEventListener('click', () => {
+  export3MF();
 });
 
 // Rebuild auto sur changement de paramètre

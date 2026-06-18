@@ -1,15 +1,16 @@
 /* ════════════════════════════════════════════
-   UI PANEL — HTML injection + progress helpers
+   UI PANEL — injection HTML + helpers progress/modal
    ════════════════════════════════════════════ */
 
-/** Injecte tout le HTML de l'application dans #app */
-export function injectUI() {
+export function injectUI(): void {
   document.getElementById('app')!.innerHTML = `
+
 <!-- TOPBAR -->
 <div id="tb">
   <div class="logo">TERRAIN<span>3D</span></div>
-  <div class="mleft">
-    <button class="btn-exp" id="btn-stl" disabled>💾 Exporter .STL</button>
+  <div class="mleft" style="display:flex;gap:8px;align-items:center">
+    <button class="btn-stl" id="btn-stl" disabled title="Exporter STL (mono-couleur)">⬇ STL</button>
+    <button class="btn-exp" id="btn-export" disabled>💾 Exporter .3MF (AMS)</button>
   </div>
 </div>
 
@@ -21,14 +22,17 @@ export function injectUI() {
   <div id="map"></div>
   <div id="snap"></div>
   <div id="dch"></div>
+  <div id="gpx-badge"></div>
 
+  <!-- Barre de recherche -->
   <div id="srch-wrap">
     <input type="text" id="srch-input" placeholder="🔍 Rechercher un lieu...">
     <div id="srch-drop"></div>
   </div>
 
+  <!-- Panneau outils dessin -->
   <div id="dt">
-    <h4>🗺 Zone & Tracé</h4>
+    <h4>🗺 Zone &amp; Tracé</h4>
     <div class="dg">Zone d'impression</div>
     <button class="dbtn" id="db-rect"><span class="ico">▭</span>Rectangle</button>
     <button class="dbtn" id="db-sq"><span class="ico">■</span>Carré</button>
@@ -44,6 +48,11 @@ export function injectUI() {
     <button class="dbtn" id="db-cgpx" style="display:none"><span class="ico">⊕</span>Centrer GPX</button>
     <hr class="ds">
     <button class="dbtn red" id="db-clear"><span class="ico">🗑</span>Tout effacer</button>
+  </div>
+
+  <!-- Bouton centrer zone -->
+  <div id="bot-wrap" style="display:none">
+    <button class="bbtn bbtn-cyan" id="btn-czone">📍 Centrer zone</button>
   </div>
 </div>
 
@@ -86,7 +95,7 @@ export function injectUI() {
             <option value="56">Rapide (56²)</option>
             <option value="96">Normale (96²)</option>
             <option value="128" selected>Haute (128²)</option>
-            <option value="192">Max (192²)</option>
+            <option value="256">Max (256²)</option>
           </select>
         </div>
         <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
@@ -94,7 +103,6 @@ export function injectUI() {
         <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
         <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
         <input type="hidden" id="t-zoom" value="15">
-        <input type="hidden" id="t-src" value="terrarium">
       </div>
     </div>
 
@@ -160,44 +168,37 @@ export function injectUI() {
   <div id="mbox">
     <div id="mtit"></div>
     <div id="mmsg"></div>
-    <button onclick="document.getElementById('modal').style.display='none'">OK</button>
+    <button class="btn-gen-f" id="btn-mc" onclick="document.getElementById('modal').style.display='none'">OK</button>
   </div>
 </div>
 `;
 }
 
-/** Helpers progress bar */
-export function setProgress(pct: number, step: string, label: string) {
-  const ps = document.getElementById('ps');
-  const pl = document.getElementById('pl');
-  const pb = document.getElementById('pb');
-  const pp = document.getElementById('pp');
-  if (ps) ps.textContent = step;
-  if (pl) pl.textContent = label;
-  if (pb) (pb as HTMLElement).style.width = `${pct}%`;
-  if (pp) pp.textContent = `${pct}%`;
+/* ── Progress bar ── */
+export function setProgress(pct: number, step: string, label: string): void {
+  const el = (id: string) => document.getElementById(id);
+  const ps = el('ps'); if (ps) ps.textContent = step;
+  const pl = el('pl'); if (pl) pl.textContent = label;
+  const pb = el('pb'); if (pb) (pb as HTMLElement).style.width = `${pct}%`;
+  const pp = el('pp'); if (pp) pp.textContent = `${Math.round(pct)}%`;
 }
 
-export function showProgress(show: boolean) {
+export function showProgress(show: boolean): void {
   const el = document.getElementById('prog');
   if (el) el.style.display = show ? 'flex' : 'none';
 }
 
-export function showModal(title: string, msg: string) {
+export function showModal(title: string, msg: string): void {
   const modal = document.getElementById('modal')!;
   document.getElementById('mtit')!.textContent = title;
   document.getElementById('mmsg')!.textContent = msg;
   modal.style.display = 'flex';
 }
 
-/** Section toggle */
+/* ── Section toggle (appelé depuis les onclick HTML) ── */
 (window as any).ts = (id: string) => {
-  const sb = document.getElementById(`sb-${id}`);
-  const ca = document.getElementById(`ca-${id}`);
-  if (!sb) return;
-  sb.classList.toggle('h');
-  ca?.classList.toggle('o');
+  document.getElementById(`sb-${id}`)?.classList.toggle('h');
+  document.getElementById(`ca-${id}`)?.classList.toggle('o');
 };
 
-/** Stop propagation pour les checkboxes dans les headers de section */
 (window as any).ev = (e: Event) => { e.stopPropagation(); };

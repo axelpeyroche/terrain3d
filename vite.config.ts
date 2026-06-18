@@ -1,18 +1,13 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: '/',
+  build: {
+    target: 'es2022',
+    outDir: 'dist',
+    assetsInlineLimit: 0,
+  },
   worker: {
     format: 'es',
-  },
-  build: {
-    target: 'esnext',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          three: ['three'],
-          pmtiles: ['pmtiles'],
-        },
-      },
-    },
   },
 });

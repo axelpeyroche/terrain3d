@@ -2,7 +2,8 @@ services:
   - type: web
     name: terrain3d
     env: static
-    staticPublishPath: .
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
     headers:
       - path: /*
         name: Cache-Control
