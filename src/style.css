@@ -78,82 +78,66 @@ input[type=file] { display: none; }
 /* ════════════════════════════════════════════
    ONGLET 1 — SÉLECTION DE LA ZONE
    ════════════════════════════════════════════ */
-#panel-zone { flex-direction: row; }
+#panel-zone { }
 
-/* ── Sidebar gauche ── */
-#zone-sidebar {
-  flex: 0 0 220px; width: 220px;
-  background: var(--p1); border-right: 1px solid var(--b1);
-  display: flex; flex-direction: column; overflow-y: auto;
-  overflow-x: hidden;
-}
-#zone-sidebar::-webkit-scrollbar { width: 3px; }
-#zone-sidebar::-webkit-scrollbar-thumb { background: var(--b2); border-radius: 2px; }
+/* ── Zone map (plein écran) ── */
+#zone-map { position: absolute; inset: 0; }
 
-.zs-block {
-  padding: 16px 14px;
-  border-bottom: 1px solid var(--b1);
-}
-.zs-block.zs-bottom { border-bottom: none; margin-top: auto; }
-
-.zs-label {
-  font-family: var(--mono); font-size: 9px; letter-spacing: 2px;
-  color: var(--dim); text-transform: uppercase; margin-bottom: 10px;
+/* ── Boîte à outils flottante (gauche) ── */
+#zone-tools {
+  position: absolute; left: 14px; top: 14px; z-index: 900;
+  display: flex; flex-direction: column; gap: 2px;
+  background: rgba(7,9,15,.92); border: 1px solid var(--b2);
+  border-radius: 12px; padding: 10px 8px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 4px 24px rgba(0,0,0,.45);
+  min-width: 80px;
 }
 
-/* ── Shape buttons ── */
-.shape-list { display: flex; flex-direction: column; gap: 4px; }
-
-.shape-btn {
-  width: 100%; display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border-radius: 7px;
-  background: transparent; border: 1px solid var(--b1);
-  color: var(--dim); font-size: 11px; font-weight: 500;
-  text-align: left; transition: all .13s;
+.zt-section-label {
+  font-family: var(--mono); font-size: 8px; letter-spacing: 2px;
+  color: var(--dim); text-transform: uppercase;
+  text-align: center; padding: 2px 0 6px;
 }
-.shape-btn svg { width: 28px; height: 28px; flex-shrink: 0; opacity: .6; transition: opacity .13s; }
-.shape-btn:hover { background: rgba(0,216,255,.06); border-color: var(--b2); color: var(--txt); }
-.shape-btn:hover svg { opacity: 1; }
-.shape-btn.active {
-  background: rgba(0,216,255,.1); border-color: var(--cyan);
+
+.zt-sep {
+  height: 1px; background: var(--b1); margin: 6px 0;
+}
+
+.zt-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 8px 6px; border-radius: 8px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--dim); font-size: 9px; font-weight: 500; cursor: pointer;
+  transition: all .13s; width: 100%; text-align: center;
+}
+.zt-btn svg { width: 20px; height: 20px; flex-shrink: 0; opacity: .65; transition: opacity .13s; }
+.zt-btn:hover { background: rgba(0,216,255,.08); border-color: var(--b2); color: var(--txt); }
+.zt-btn:hover svg { opacity: 1; }
+.zt-btn.active {
+  background: rgba(0,216,255,.12); border-color: var(--cyan);
   color: var(--cyan);
 }
-.shape-btn.active svg { opacity: 1; stroke: var(--cyan); }
-.shape-btn.secondary { color: var(--amb); border-color: rgba(245,158,11,.25); }
-.shape-btn.secondary:hover { background: rgba(245,158,11,.08); border-color: var(--amb); }
-.shape-btn.secondary svg { stroke: var(--amb); }
-.shape-btn.danger { color: var(--rose); border-color: rgba(244,63,94,.25); }
-.shape-btn.danger:hover { background: rgba(244,63,94,.08); border-color: var(--rose); }
-.shape-btn.danger svg { stroke: var(--rose); }
-
-/* ── GPX import button ── */
-.gpx-import {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 8px 10px; border-radius: 7px; margin-bottom: 4px;
-  background: rgba(244,63,94,.06); border: 1px dashed rgba(244,63,94,.4);
-  color: var(--rose); font-size: 11px; font-weight: 500; cursor: pointer;
-  transition: all .13s;
-}
-.gpx-import:hover { background: rgba(244,63,94,.12); border-color: var(--rose); }
-.gpx-import svg { width: 16px; height: 16px; fill: var(--rose); flex-shrink: 0; }
-.gpx-import.loaded { border-color: var(--em); color: var(--em); background: rgba(16,185,129,.06); }
-.gpx-import.loaded svg { fill: var(--em); }
+.zt-btn.active svg { opacity: 1; stroke: var(--cyan); }
+.zt-gpx { cursor: pointer; }
+.zt-secondary { color: var(--amb); }
+.zt-secondary svg { stroke: var(--amb); }
+.zt-secondary:hover { background: rgba(245,158,11,.08); border-color: var(--amb); color: var(--amb); }
+.zt-danger { color: var(--rose); }
+.zt-danger svg { stroke: var(--rose); }
+.zt-danger:hover { background: rgba(244,63,94,.08); border-color: var(--rose); color: var(--rose); }
 
 /* ── GPX badge ── */
 #gpx-badge {
-  display: none; margin-top: 6px; padding: 6px 10px;
+  display: none; padding: 4px 6px;
   background: rgba(12,20,34,.95); border: 1px solid rgba(244,63,94,.35);
-  border-radius: 6px; font-family: var(--mono); font-size: 9px;
-  color: var(--txt); line-height: 1.7;
+  border-radius: 5px; font-family: var(--mono); font-size: 8px;
+  color: var(--txt); line-height: 1.5; text-align: center;
 }
 #gpx-ctr {
-  font-family: var(--mono); font-size: 9px; color: var(--amb);
-  text-align: center; padding: 4px; border: 1px solid rgba(245,158,11,.2);
-  border-radius: 4px; margin-top: 4px;
+  font-family: var(--mono); font-size: 8px; color: var(--amb);
+  text-align: center; padding: 3px;
 }
-
-/* ── Zone map area ── */
-#zone-map { flex: 1; position: relative; overflow: hidden; }
 #map { position: absolute; inset: 0; }
 #map.dm, #map.dm .leaflet-interactive { cursor: crosshair !important; }
 

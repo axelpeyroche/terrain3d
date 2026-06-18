@@ -16,7 +16,7 @@ export function injectUI(): void {
     </button>
     <button class="tab-btn" data-tab="params" id="tab-params-btn">
       <span class="tab-num">2</span>
-      <span class="tab-lbl">Paramètres 3D</span>
+      <span class="tab-lbl">Dimensions</span>
     </button>
     <button class="tab-btn" data-tab="render" id="tab-render-btn">
       <span class="tab-num">3</span>
@@ -36,100 +36,10 @@ export function injectUI(): void {
   <!-- ── ONGLET 1 : SÉLECTION DE LA ZONE ───────────────── -->
   <section id="panel-zone" class="panel active">
 
-    <!-- Sidebar gauche -->
-    <aside id="zone-sidebar">
-
-      <div class="zs-block">
-        <div class="zs-label">Forme d'impression</div>
-        <div class="shape-list">
-
-          <button class="shape-btn active" id="db-rect">
-            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-              <rect x="4" y="10" width="32" height="20" rx="2"/>
-            </svg>
-            <span>Rectangle</span>
-          </button>
-
-          <button class="shape-btn" id="db-sq">
-            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-              <rect x="8" y="8" width="24" height="24" rx="2"/>
-            </svg>
-            <span>Carré</span>
-          </button>
-
-          <button class="shape-btn" id="db-circ">
-            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-              <circle cx="20" cy="20" r="14"/>
-            </svg>
-            <span>Rond</span>
-          </button>
-
-          <button class="shape-btn" id="db-hex">
-            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-              <polygon points="20,4 34,12 34,28 20,36 6,28 6,12"/>
-            </svg>
-            <span>Hexagone</span>
-          </button>
-
-          <button class="shape-btn" id="db-poly">
-            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-              <polygon points="20,4 36,14 30,34 10,34 4,14"/>
-            </svg>
-            <span>Polygone libre</span>
-          </button>
-
-        </div>
-      </div>
-
-      <div class="zs-block">
-        <div class="zs-label">Trace GPX</div>
-        <label class="gpx-import" for="gpx-file">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 00-1 1v6H5a1 1 0 000 2h4v6a1 1 0 002 0v-6h4a1 1 0 000-2h-4V3a1 1 0 00-1-1z"/></svg>
-          Importer un fichier .gpx
-        </label>
-        <input type="file" id="gpx-file" accept=".gpx">
-
-        <button class="shape-btn" id="db-trace">
-          <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-            <path d="M6 34 L14 18 L22 26 L30 10 L36 16" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="6" cy="34" r="2.5" fill="currentColor" stroke="none"/>
-            <circle cx="36" cy="16" r="2.5" fill="currentColor" stroke="none"/>
-          </svg>
-          <span>Tracer manuellement</span>
-        </button>
-
-        <div id="gpx-badge"></div>
-        <div id="gpx-ctr" style="display:none">0 points tracés</div>
-        <button class="shape-btn secondary" id="db-cgpx" style="display:none">
-          <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-            <circle cx="20" cy="20" r="12"/>
-            <line x1="20" y1="8" x2="20" y2="32"/>
-            <line x1="8" y1="20" x2="32" y2="20"/>
-          </svg>
-          <span>Centrer la trace</span>
-        </button>
-      </div>
-
-      <div class="zs-block zs-bottom">
-        <button class="shape-btn danger" id="db-clear">
-          <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="2.2">
-            <polyline points="8,12 32,12"/>
-            <path d="M16,12V8h8v4"/>
-            <rect x="10" y="12" width="20" height="20" rx="2"/>
-            <line x1="15" y1="18" x2="15" y2="28"/>
-            <line x1="20" y1="18" x2="20" y2="28"/>
-            <line x1="25" y1="18" x2="25" y2="28"/>
-          </svg>
-          <span>Tout effacer</span>
-        </button>
-      </div>
-
-    </aside>
-
-    <!-- Zone carte -->
+    <!-- Carte plein écran -->
     <div id="zone-map">
 
-      <!-- Barre de recherche -->
+      <!-- Barre de recherche (haut centre) -->
       <div id="srch-wrap">
         <div id="srch-inner">
           <svg id="srch-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
@@ -139,6 +49,84 @@ export function injectUI(): void {
           <button id="srch-clear" style="display:none">✕</button>
         </div>
         <div id="srch-drop"></div>
+      </div>
+
+      <!-- Boîte à outils flottante (gauche) -->
+      <div id="zone-tools">
+        <div class="zt-section-label">Forme</div>
+
+        <button class="zt-btn active" id="db-rect" title="Rectangle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="2" y="6" width="20" height="12" rx="1.5"/>
+          </svg>
+          <span>Rectangle</span>
+        </button>
+
+        <button class="zt-btn" id="db-sq" title="Carré">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="4" y="4" width="16" height="16" rx="1.5"/>
+          </svg>
+          <span>Carré</span>
+        </button>
+
+        <button class="zt-btn" id="db-circ" title="Rond">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="9"/>
+          </svg>
+          <span>Rond</span>
+        </button>
+
+        <button class="zt-btn" id="db-hex" title="Hexagone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <polygon points="12,2 21,7 21,17 12,22 3,17 3,7"/>
+          </svg>
+          <span>Hexagone</span>
+        </button>
+
+        <button class="zt-btn" id="db-poly" title="Polygone libre">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <polygon points="12,2 22,9 18,21 6,21 2,9"/>
+          </svg>
+          <span>Polygone</span>
+        </button>
+
+        <div class="zt-sep"></div>
+        <div class="zt-section-label">GPX</div>
+
+        <label class="zt-btn zt-gpx" for="gpx-file" title="Importer un fichier GPX">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <span>Importer</span>
+        </label>
+        <input type="file" id="gpx-file" accept=".gpx">
+
+        <button class="zt-btn" id="db-trace" title="Tracer manuellement">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <polyline points="3,20 8,12 13,16 18,6 21,9" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Tracer</span>
+        </button>
+
+        <button class="zt-btn zt-secondary" id="db-cgpx" style="display:none" title="Centrer la trace">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="8"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/>
+          </svg>
+          <span>Centrer</span>
+        </button>
+
+        <div id="gpx-badge"></div>
+        <div id="gpx-ctr" style="display:none">0 pts</div>
+
+        <div class="zt-sep"></div>
+
+        <button class="zt-btn zt-danger" id="db-clear" title="Tout effacer">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <polyline points="3,6 21,6"/><path d="M8,6V4h8v2"/><rect x="5" y="6" width="14" height="14" rx="2"/>
+            <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+          </svg>
+          <span>Effacer</span>
+        </button>
       </div>
 
       <!-- Carte Leaflet -->
@@ -155,7 +143,7 @@ export function injectUI(): void {
           Zone sélectionnée : <strong id="zone-dims">—</strong>
         </div>
         <button id="btn-next-tab" class="btn-next">
-          Paramètres 3D
+          Dimensions
           <svg viewBox="0 0 20 20" fill="currentColor"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
         </button>
       </div>

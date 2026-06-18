@@ -118,7 +118,7 @@ function setMode(m: string | null): void {
   }
   drawMode = m;
   ['rect', 'sq', 'circ', 'hex', 'poly', 'trace'].forEach(k => {
-    document.getElementById('db-' + k)?.classList.toggle('act', k === m);
+    document.getElementById('db-' + k)?.classList.toggle('active', k === m);
   });
   map.getContainer().classList.toggle('dm', !!m);
   const dch = document.getElementById('dch')!;

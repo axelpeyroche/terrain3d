@@ -6,6 +6,9 @@ export default defineConfig({
     target: 'es2022',
     outDir: 'dist',
     assetsInlineLimit: 0,
+    rollupOptions: {
+      input: 'index.src.html',
+    },
   },
   worker: {
     format: 'es',
