@@ -6,6 +6,8 @@
 import L from 'leaflet';
 import { state } from '../state';
 
+let onZoneReady: (() => void) | null = null;
+
 /* ── Objets carte ── */
 let map: L.Map;
 let zoneLayer: L.Polygon | null = null;
@@ -33,7 +35,8 @@ const HINTS: Record<string, string> = {
 /* ════════════════════════════════════════════
    INIT
    ════════════════════════════════════════════ */
-export function initMap(): void {
+export function initMap(onZone?: () => void): void {
+  if (onZone) onZoneReady = onZone;
   const osmL = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '© OSM',
   });
@@ -189,8 +192,7 @@ function finalizeZone(pts: [number, number][], zType: typeof state.zoneType): vo
   state.wMm = Math.round(realW * sc);
   state.dMm = Math.round(realH * sc);
 
-  const bw = document.getElementById('bot-wrap');
-  if (bw) bw.style.display = 'flex';
+  onZoneReady?.();
   resetDraw();
 }
 
