@@ -338,7 +338,7 @@ document.querySelectorAll('.dp-sh').forEach(sh => {
 
 /* ── Dimensions inputs: update hints and rebuild preview ── */
 let _dbDims: ReturnType<typeof setTimeout>;
-const dimsInputIds = ['dp-w', 'dp-d', 'dp-exag', 'dp-base'];
+const dimsInputIds = ['dp-w', 'dp-d', 'dp-exag', 'dp-base', 'dp-walls'];
 dimsInputIds.forEach(id => {
   document.getElementById(id)?.addEventListener('input', () => {
     updateDimsHints();
