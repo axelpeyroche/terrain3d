@@ -196,12 +196,16 @@ function getDimSettings(): DimSettings {
   const n = (id: string, def: number) => Number((document.getElementById(id) as HTMLInputElement)?.value ?? def) || def;
   const b = (id: string) => (document.getElementById(id) as HTMLInputElement)?.checked ?? false;
   return {
-    wMm:       n('dp-w',    state.wMm   || 200),
-    dMm:       n('dp-d',    state.dMm   || 200),
-    baseH:     n('dp-base', 5),
-    exag:      n('dp-exag', 1),
-    flatFacade: b('dp-flat'),
-    gpxPoints: state.gpxPoints,
+    wMm:          n('dp-w',    state.wMm || 200),
+    dMm:          n('dp-d',    state.dMm || 200),
+    baseH:        n('dp-base', 5),
+    exag:         n('dp-exag', 1),
+    flatFacade:   b('dp-flat'),
+    facadeWidthMm: n('dp-walls', 2),  // used as mm in preview
+    gpxPoints:    state.gpxPoints,
+    zoneType:     state.zoneType,
+    zonePts:      state.zonePts,
+    bounds:       state.bounds,
   };
 }
 
@@ -210,8 +214,23 @@ function syncDimsInputsFromState(): void {
     const el = document.getElementById(id) as HTMLInputElement;
     if (el) el.value = String(Math.round(v));
   };
-  if (state.wMm > 0) setVal('dp-w', state.wMm);
-  if (state.dMm > 0) setVal('dp-d', state.dMm);
+
+  if (!state.bounds) return;
+
+  // Compute print size from geographic aspect ratio, max 200 mm
+  const { minLat, maxLat, minLon, maxLon } = state.bounds;
+  const cLat = (minLat + maxLat) / 2;
+  const realW = (maxLon - minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
+  const realH = (maxLat - minLat) * 111320;
+  const MAX = 200;
+  const ratio = realW / realH;
+  const wMm = ratio >= 1 ? MAX : Math.max(10, Math.round(MAX * ratio));
+  const dMm = ratio < 1 ? MAX : Math.max(10, Math.round(MAX / ratio));
+
+  state.wMm = wMm;
+  state.dMm = dMm;
+  setVal('dp-w', wMm);
+  setVal('dp-d', dMm);
 }
 
 function updateDimsHints(): void {
