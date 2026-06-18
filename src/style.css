@@ -580,6 +580,113 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
 .cp-eye.hidden-layer { opacity: .35; }
 .cp-slider { width: 100%; accent-color: var(--cyan); margin-top: 6px; }
 
+/* cp-main / cp-detail flex structure */
+#cp-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+#cp-detail { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+.cp-nav-fixed { flex: 0 0 auto; }
+
+/* custom model dropdown */
+.cp-dd-wrap { position: relative; flex: 1; }
+.cp-dd-trigger {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  background: var(--mut); border: 1px solid var(--b2); color: var(--txt);
+  border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: var(--ui); cursor: pointer;
+}
+.cp-dd-trigger:hover { border-color: var(--b3); }
+.cp-dd-trigger svg { width: 10px; height: 10px; flex: 0 0 10px; color: var(--dim); }
+.cp-dd-menu {
+  display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--p2); border: 1px solid var(--b2); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); z-index: 100; overflow: hidden; min-width: 180px;
+}
+.cp-dd-menu.open { display: block; }
+.cp-dd-group { font-size: 10px; font-weight: 600; color: var(--dim); padding: 8px 10px 3px; letter-spacing: .5px; }
+.cp-dd-item {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; color: var(--txt);
+  cursor: pointer; transition: background .1s;
+}
+.cp-dd-item svg { width: 10px; height: 10px; flex: 0 0 10px; color: var(--em); }
+.cp-dd-item:hover { background: var(--b1); }
+.cp-dd-active { color: var(--em); }
+.cp-dd-sep { height: 1px; background: var(--b1); margin: 3px 0; }
+.cp-dd-empty { font-size: 11px; color: var(--dim); padding: 6px 10px 10px; font-style: italic; }
+.cp-model-sec { flex: 0 0 auto; }
+
+/* layer detail panel */
+.ldp-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--b1); flex: 0 0 auto;
+}
+.ldp-back-btn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: var(--mut); border-radius: 6px; color: var(--txt); flex: 0 0 28px;
+}
+.ldp-back-btn:hover { background: var(--b2); }
+.ldp-back-btn svg { width: 12px; height: 12px; }
+.ldp-icon { flex: 0 0 16px; width: 16px; height: 16px; color: var(--dim); }
+#ldp-title { font-size: 13px; font-weight: 600; color: var(--txt); }
+.ldp-content { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 0; }
+
+/* layer detail sections */
+.ldp-sec {
+  border-bottom: 1px solid var(--mut); padding: 6px 0;
+}
+.ldp-sec-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px; cursor: pointer; user-select: none;
+}
+.ldp-sec-title { font-size: 11px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
+.ldp-sec-header svg { width: 10px; height: 10px; color: var(--dim); }
+.ldp-field { padding: 4px 12px; }
+.ldp-field-label { font-size: 12px; color: var(--txt); margin-bottom: 5px; }
+.ldp-field-row { display: flex; align-items: center; justify-content: space-between; }
+.ldp-range-row { display: flex; align-items: center; gap: 6px; }
+.ldp-range-row .cp-slider { flex: 1; margin: 0; }
+.ldp-num {
+  width: 48px; background: var(--mut); border: 1px solid var(--b2); color: var(--txt);
+  border-radius: 4px; padding: 3px 5px; font-size: 12px; font-family: var(--mono);
+  text-align: right;
+}
+.ldp-unit { font-size: 10px; color: var(--dim); white-space: nowrap; }
+.ldp-check-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--txt); cursor: pointer; }
+.ldp-check-row input[type=checkbox] { accent-color: var(--cyan); }
+.ldp-edit-btn { background: transparent; color: var(--dim); padding: 0; }
+.ldp-edit-btn:hover { color: var(--cyan); }
+.ldp-edit-btn svg { width: 12px; height: 12px; }
+.ldp-form-btn {
+  display: flex; align-items: center; gap: 4px; background: var(--mut); border: 1px solid var(--b2);
+  color: var(--txt); border-radius: 5px; padding: 4px 8px; font-size: 12px;
+}
+.ldp-form-btn:hover { border-color: var(--b3); }
+.ldp-form-btn svg { width: 9px; height: 9px; color: var(--dim); }
+.ldp-checkboxes { padding: 2px 12px 6px; display: flex; flex-direction: column; gap: 1px; }
+.ldp-check-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+.ldp-check-item label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--txt); cursor: pointer; }
+.ldp-check-item input[type=checkbox] { accent-color: var(--cyan); }
+.ldp-check-item .ldp-chevron { color: var(--dim); }
+.ldp-check-item .ldp-chevron svg { width: 9px; height: 9px; }
+.ldp-select {
+  width: 100%; background: var(--mut); border: 1px solid var(--b2); color: var(--txt);
+  border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: var(--ui);
+}
+.ldp-select:focus { outline: none; border-color: var(--cyan); }
+.ldp-input {
+  width: 100%; background: var(--mut); border: 1px solid var(--b2); color: var(--txt);
+  border-radius: 6px; padding: 5px 8px; font-size: 12px; font-family: var(--ui);
+}
+.ldp-input:focus { outline: none; border-color: var(--cyan); }
+.ldp-color-slot {
+  width: 28px; height: 28px; border-radius: 5px; border: 2px solid var(--b2);
+  background: var(--mut); display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: rgba(255,255,255,.8); cursor: pointer;
+}
+.ldp-add-btn { width: calc(100% - 24px); margin: 10px 12px 4px; display: block; }
+
+/* clickable layer rows */
+.cp-layer-nav { cursor: pointer; }
+.cp-layer-nav:hover { background: var(--b1); }
+.cp-layer-nav .cp-layer-name { color: var(--txt); }
+
 /* ════ PRINT SETTINGS DIALOG ══════════════════ */
 .ps-overlay {
   position: fixed; inset: 0; z-index: 9000;

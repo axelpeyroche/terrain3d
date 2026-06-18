@@ -273,19 +273,17 @@ function onDimsTabOpen(): void {
   syncDimsInputsFromState();
   updateDimsHints();
 
-  const viewEl = document.getElementById('dims-view')!;
-
-  if (!dimsRendererReady) {
-    dimsRendererReady = true;
-    // Wait one frame for the panel to be visible and sized
-    requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    const viewEl = document.getElementById('dims-view')!;
+    if (!dimsRendererReady) {
+      dimsRendererReady = true;
       initDimsRenderer(viewEl);
       triggerDimsBuild();
-    });
-  } else {
-    initDimsRenderer(viewEl); // resize if needed
-    triggerDimsBuild();
-  }
+    } else {
+      initDimsRenderer(viewEl); // moves canvas back + resizes
+      triggerDimsBuild();
+    }
+  });
 }
 
 // Accordion toggles for Dimensions panel
@@ -403,10 +401,18 @@ document.querySelectorAll('#params-col input, #params-col select').forEach(el =>
    ═══════════════════════════════════════════ */
 function onColorsTabOpen(): void {
   if (!state.bounds) return;
-  const area = document.getElementById('colors-3d-area')!;
-  reattachDimsCanvas(area);
-  // Sync swatch backgrounds from current color slots
-  syncSwatchUI();
+  // rAF ensures panel is visible and sized before moving canvas
+  requestAnimationFrame(() => {
+    const area = document.getElementById('colors-3d-area')!;
+    if (!dimsRendererReady) {
+      dimsRendererReady = true;
+      initDimsRenderer(area);
+      triggerDimsBuild();
+    } else {
+      initDimsRenderer(area);  // moves canvas here and resizes
+    }
+    syncSwatchUI();
+  });
 }
 
 function syncSwatchUI(): void {
@@ -477,6 +483,299 @@ document.getElementById('cp-apply')?.addEventListener('click', () => {
     if (preset[slot]) el.style.background = preset[slot];
   });
 });
+
+/* ── Custom model dropdown ── */
+const ddTrigger = document.getElementById('cp-dd-trigger');
+const ddMenu    = document.getElementById('cp-dd-menu');
+ddTrigger?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  ddMenu?.classList.toggle('open');
+});
+document.addEventListener('click', () => ddMenu?.classList.remove('open'));
+document.querySelectorAll<HTMLElement>('.cp-dd-item').forEach(item => {
+  item.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const preset = item.dataset.preset ?? '';
+    const label = item.textContent?.trim().replace(/^✓\s*/, '') ?? '';
+    document.querySelectorAll('.cp-dd-item').forEach(i => i.classList.remove('cp-dd-active'));
+    item.classList.add('cp-dd-active');
+    const ddLabel = document.getElementById('cp-dd-label');
+    if (ddLabel) ddLabel.textContent = label;
+    ddMenu?.classList.remove('open');
+    // Apply preset if known
+    const p = PRESETS[preset];
+    if (p) { updateColorSlots(p); applyPresetToUI(p); }
+  });
+});
+
+function applyPresetToUI(preset: Record<number, string>): void {
+  Object.entries(preset).forEach(([slot, col]) => {
+    const input = document.querySelector<HTMLInputElement>(`.cp-color-input[data-slot="${slot}"]`);
+    if (input) {
+      input.value = col;
+      const inner = input.nextElementSibling as HTMLElement;
+      if (inner) inner.style.background = col;
+    }
+  });
+  document.querySelectorAll<HTMLElement>('.cp-sw-mini[data-slot]').forEach(el => {
+    const s = Number(el.dataset.slot);
+    if (preset[s]) el.style.background = preset[s];
+  });
+}
+
+/* ── Layer detail navigation ── */
+const cpMain   = document.getElementById('cp-main')!;
+const cpDetail = document.getElementById('cp-detail')!;
+const ldpTitle = document.getElementById('ldp-title')!;
+const ldpIcon  = document.getElementById('ldp-icon')!;
+const ldpContent = document.getElementById('ldp-content')!;
+
+function showLayerDetail(layerId: string, layerType: string, layerName: string, iconSvgInner: string): void {
+  ldpTitle.textContent = layerName;
+  ldpIcon.innerHTML = iconSvgInner;
+  ldpContent.innerHTML = buildLayerDetailHTML(layerType);
+  cpMain.style.display = 'none';
+  cpDetail.style.display = 'flex';
+  wireDetailInputs(layerType);
+}
+
+function showLayerMain(): void {
+  cpDetail.style.display = 'none';
+  cpMain.style.display = 'flex';
+}
+
+document.getElementById('ldp-back')?.addEventListener('click', showLayerMain);
+
+// Layer row clicks
+document.querySelectorAll<HTMLElement>('.cp-layer-nav').forEach(row => {
+  row.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('.cp-eye, .cp-del')) return; // don't navigate on eye/del
+    const layerType = row.dataset.type ?? 'land_cover';
+    const layerName = row.querySelector('.cp-layer-name')?.textContent ?? 'Couche';
+    const iconSvg = row.querySelector('.cp-layer-ico')?.innerHTML ?? '';
+    showLayerDetail(row.dataset.layer ?? '', layerType, layerName, iconSvg);
+  });
+});
+
+// "+" add layer button
+document.getElementById('cp-add-layer-btn')?.addEventListener('click', () => {
+  ldpTitle.textContent = 'Nouvelle couche';
+  ldpIcon.innerHTML = '<path d="M8 2v12M2 8h12" stroke-linecap="round"/>';
+  ldpContent.innerHTML = buildNewLayerHTML();
+  cpMain.style.display = 'none';
+  cpDetail.style.display = 'flex';
+  wireNewLayerInputs();
+});
+
+/* ── Layer detail HTML builders ── */
+function buildLayerDetailHTML(type: string): string {
+  if (type === 'markers') return buildMarkersHTML();
+  if (type === 'lines')   return buildLinesHTML();
+  return buildLandCoverHTML();
+}
+
+function buildMarkersHTML(): string {
+  return `
+  <div class="ldp-sec">
+    <div class="ldp-sec-header">
+      <span class="ldp-sec-title">Paramètres</span>
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-label">Forme</div>
+      <button class="ldp-form-btn">
+        ✕ <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
+      </button>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Taille (nombre de murs)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Taille du marqueur en nombre de lignes de mur">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="range" id="ldp-marker-size" class="cp-slider" min="1" max="20" value="10">
+        <input type="number" class="ldp-num" id="ldp-marker-size-n" value="10.0" step="0.5">
+        <span class="ldp-unit">( 4.20 mm )</span>
+      </div>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-label">Rotation (°)</div>
+      <div class="ldp-range-row">
+        <input type="range" id="ldp-marker-rot" class="cp-slider" min="0" max="360" value="0">
+        <input type="number" class="ldp-num" id="ldp-marker-rot-n" value="0" step="1">
+      </div>
+    </div>
+    <div class="ldp-field">
+      <label class="ldp-check-row">
+        <input type="checkbox" id="ldp-marker-flat" checked>
+        Plateau plat
+        <button class="ldp-edit-btn" title="Modifier"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 2l3 3-9 9H2v-3L11 2z"/></svg></button>
+        <button class="cp-icon-btn cp-info-btn" title="Aplatir le sommet du marqueur">i</button>
+      </label>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Décalage de hauteur<br>(nombre de calques)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Décalage vertical en nombre de couches d'impression">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="number" class="ldp-num" id="ldp-marker-offset" value="2" step="1" min="0">
+        <span class="ldp-unit">( 0,40 mm )</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildLinesHTML(): string {
+  const lineTypes = [
+    { key: 'hiking',    label: 'Itinéraires de randonnée', chevron: true },
+    { key: 'cycling',   label: 'Itinéraires cyclables',    chevron: true },
+    { key: 'mtb',       label: 'Parcours de VTT',          chevron: true },
+    { key: 'horse',     label: 'Itinéraires équestres',    chevron: true },
+    { key: 'winter',    label: 'Sports d\'hiver',          chevron: true },
+    { key: 'motor',     label: 'Sports mécaniques',        chevron: false },
+    { key: 'roads',     label: 'Routes',                   chevron: true },
+    { key: 'streets',   label: 'Rues',                     chevron: true },
+    { key: 'rails',     label: 'Rails',                    chevron: true },
+    { key: 'paths',     label: 'Sentiers',                 chevron: false },
+    { key: 'cycleways', label: 'Pistes cyclables',         chevron: false },
+    { key: 'bridleway', label: 'Chemins de bride',         chevron: false },
+    { key: 'trackways', label: 'Chemins ruraux',           chevron: false },
+    { key: 'water',     label: 'Transport fluvial',        chevron: false },
+  ];
+  const checks = lineTypes.map(t => `
+    <div class="ldp-check-item">
+      <label><input type="checkbox" data-linetype="${t.key}"> ${t.label}</label>
+      ${t.chevron ? `<span class="ldp-chevron"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 2l3 3-3 3"/></svg></span>` : ''}
+    </div>`).join('');
+  return `
+  <div class="ldp-sec">
+    <div class="ldp-sec-header">
+      <span class="ldp-sec-title">Paramètres</span>
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Largeur (nombre de murs)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Épaisseur de la ligne en nombre de murs">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="range" id="ldp-line-w" class="cp-slider" min="1" max="10" value="1">
+        <input type="number" class="ldp-num" id="ldp-line-w-n" value="1.0" step="0.5">
+        <span class="ldp-unit">( 0,42 mm )</span>
+      </div>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Décalage de hauteur<br>(nombre de calques)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Décalage vertical en nombre de couches">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="number" class="ldp-num" id="ldp-line-offset" value="1" step="1" min="0">
+        <span class="ldp-unit">( 0,20 mm )</span>
+      </div>
+    </div>
+  </div>
+  <div class="ldp-sec">
+    <div class="ldp-sec-header">
+      <span class="ldp-sec-title">Caractéristiques</span>
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
+    </div>
+    <div class="ldp-checkboxes">${checks}</div>
+  </div>`;
+}
+
+function buildLandCoverHTML(): string {
+  return `
+  <div class="ldp-sec">
+    <div class="ldp-sec-header">
+      <span class="ldp-sec-title">Paramètres</span>
+      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Décalage de hauteur<br>(nombre de calques)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Décalage vertical en nombre de couches">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="number" class="ldp-num" id="ldp-lc-offset" value="0" step="1" min="0">
+        <span class="ldp-unit">( 0,00 mm )</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function buildNewLayerHTML(): string {
+  return `
+  <div class="ldp-sec">
+    <div class="ldp-field" style="padding-top:10px">
+      <div class="ldp-field-label">Type</div>
+      <select class="ldp-select" id="ldp-new-type">
+        <option value="land_cover">Couverture terrestre</option>
+        <option value="lines">Lignes</option>
+        <option value="markers">Marqueurs</option>
+        <option value="water">Plans d'eau</option>
+        <option value="waterways">Voies navigables</option>
+      </select>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-label">Nom</div>
+      <input type="text" class="ldp-input" id="ldp-new-name" placeholder="Couverture terrestre">
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-label">Couleur</div>
+      <div class="ldp-color-slot" id="ldp-new-color" data-slot="1" style="background:#c0af88">1</div>
+    </div>
+    <button class="btn-gen-f ldp-add-btn" id="ldp-confirm-add">Ajouter un calque</button>
+  </div>`;
+}
+
+function wireDetailInputs(type: string): void {
+  const wallW = Number((document.getElementById('ps-wall-w') as HTMLInputElement)?.value ?? 0.42) || 0.42;
+  const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+
+  if (type === 'markers') {
+    const sz  = document.getElementById('ldp-marker-size')  as HTMLInputElement;
+    const szN = document.getElementById('ldp-marker-size-n') as HTMLInputElement;
+    const rt  = document.getElementById('ldp-marker-rot')   as HTMLInputElement;
+    const rtN = document.getElementById('ldp-marker-rot-n') as HTMLInputElement;
+    const off = document.getElementById('ldp-marker-offset') as HTMLInputElement;
+    const syncSz = () => { const v=Number(sz.value); szN.value=v.toFixed(1); off.nextElementSibling && (off.nextElementSibling.textContent=`( ${(off.value==='') ? '0.00' : (Number(off.value)*layH).toFixed(2)} mm )`); };
+    sz?.addEventListener('input', () => { szN.value = sz.value; syncSz(); });
+    szN?.addEventListener('input', () => { if(sz) sz.value = szN.value; });
+    rt?.addEventListener('input', () => { if(rtN) rtN.value = rt.value; });
+    rtN?.addEventListener('input', () => { if(rt) rt.value = rtN.value; });
+  }
+
+  if (type === 'lines') {
+    const lw  = document.getElementById('ldp-line-w')   as HTMLInputElement;
+    const lwN = document.getElementById('ldp-line-w-n') as HTMLInputElement;
+    lw?.addEventListener('input', () => { if(lwN) lwN.value = lw.value; });
+    lwN?.addEventListener('input', () => { if(lw) lw.value = lwN.value; });
+  }
+}
+
+function wireNewLayerInputs(): void {
+  document.getElementById('ldp-new-type')?.addEventListener('change', (e) => {
+    const t = (e.target as HTMLSelectElement).value;
+    const nameInput = document.getElementById('ldp-new-name') as HTMLInputElement;
+    const labels: Record<string, string> = {
+      land_cover: 'Couverture terrestre', lines: 'Lignes', markers: 'Marqueurs',
+      water: 'Plans d\'eau', waterways: 'Voies navigables',
+    };
+    if (nameInput) nameInput.placeholder = labels[t] ?? t;
+  });
+  document.getElementById('ldp-confirm-add')?.addEventListener('click', showLayerMain);
+  document.getElementById('ldp-new-color')?.addEventListener('click', () => {
+    const slots = [1,2,3,4,5,6];
+    const current = Number((document.getElementById('ldp-new-color') as HTMLElement).dataset.slot ?? 1);
+    const next = slots[(slots.indexOf(current) + 1) % slots.length];
+    const el = document.getElementById('ldp-new-color')!;
+    el.dataset.slot = String(next);
+    el.textContent = String(next);
+    el.style.background = colorSlots[next] ?? '#888';
+  });
+}
 
 /* ── Print Settings dialog ── */
 const psOverlay = document.getElementById('print-settings-overlay')!;

@@ -310,7 +310,8 @@ export function injectUI(): void {
       <!-- ── Panneau gauche ─────────────────────────── -->
       <div id="colors-panel">
 
-        <!-- Toolbar -->
+        <div id="cp-main">
+      <!-- Toolbar -->
         <div class="cp-toolbar">
           <span class="cp-main-title">Couleurs</span>
           <button class="cp-nozzle-btn" id="btn-print-settings" title="Paramètres d'impression">
@@ -323,15 +324,29 @@ export function injectUI(): void {
         </div>
 
         <!-- Modèle préréglé -->
-        <div class="cp-sec">
-          <div class="cp-sec-title">Modèle</div>
+        <div class="cp-sec cp-model-sec">
+          <div class="cp-sec-header">
+            <span class="cp-sec-title">Modèle</span>
+            <button class="cp-icon-btn" id="cp-model-add" title="Enregistrer comme modèle">+</button>
+          </div>
           <div class="cp-model-row">
-            <select id="cp-preset" class="cp-select">
-              <option value="">Sélectionner un modèle…</option>
-              <option value="alpes">Alpes classique</option>
-              <option value="mono">Monochrome</option>
-              <option value="desert">Désert</option>
-            </select>
+            <div class="cp-dd-wrap" id="cp-model-dd-wrap">
+              <button class="cp-dd-trigger" id="cp-dd-trigger">
+                <span id="cp-dd-label">Couleurs</span>
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
+              </button>
+              <div class="cp-dd-menu" id="cp-dd-menu">
+                <div class="cp-dd-group">Défaut</div>
+                <div class="cp-dd-item" data-preset="vide">Vide</div>
+                <div class="cp-dd-item cp-dd-active" data-preset="couleurs">
+                  <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 6l3 3 5-5"/></svg>
+                  Couleurs
+                </div>
+                <div class="cp-dd-sep"></div>
+                <div class="cp-dd-group">Mes modèles</div>
+                <div class="cp-dd-empty">Aucun modèle personnalisé pour le moment</div>
+              </div>
+            </div>
             <button id="cp-apply" class="cp-apply-btn">Appliquer</button>
           </div>
         </div>
@@ -377,11 +392,11 @@ export function injectUI(): void {
         <div class="cp-sec cp-sec-grow">
           <div class="cp-sec-header">
             <span class="cp-sec-title">Couches</span>
-            <button class="cp-icon-btn" title="Ajouter une couche">+</button>
+            <button class="cp-icon-btn" id="cp-add-layer-btn" title="Ajouter une couche">+</button>
           </div>
           <div class="cp-layers">
 
-            <div class="cp-layer" data-layer="gpx">
+            <div class="cp-layer cp-layer-nav" data-layer="gpx" data-type="markers">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="6" style="background:#ff4500">6</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="4" cy="12" r="2"/><circle cx="12" cy="4" r="2"/><line x1="4" y1="12" x2="12" y2="4"/></svg>
@@ -394,7 +409,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="gpx_line">
+            <div class="cp-layer cp-layer-nav" data-layer="gpx_line" data-type="lines">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="6" style="background:#ff4500">6</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,12 6,6 10,9 14,4"/></svg>
@@ -407,7 +422,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="water">
+            <div class="cp-layer cp-layer-nav" data-layer="water" data-type="land_cover">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="5" style="background:#4a88c0">5</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 10 Q4 7 6 10 Q8 13 10 10 Q12 7 14 10"/></svg>
@@ -420,7 +435,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="waterways">
+            <div class="cp-layer cp-layer-nav" data-layer="waterways" data-type="land_cover">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="5" style="background:#4a88c0">5</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 8 Q5 5 8 8 Q11 11 14 8" stroke-dasharray="2 1"/></svg>
@@ -433,7 +448,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="veg_dense">
+            <div class="cp-layer cp-layer-nav" data-layer="veg_dense" data-type="land_cover">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="4" style="background:#3a6828">4</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="8,2 14,10 2,10"/><line x1="8" y1="10" x2="8" y2="14"/></svg>
@@ -446,7 +461,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="veg_low">
+            <div class="cp-layer cp-layer-nav" data-layer="veg_low" data-type="land_cover">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="3" style="background:#8ab858">3</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="8,3 13,11 3,11"/><line x1="8" y1="11" x2="8" y2="14"/></svg>
@@ -459,7 +474,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="snow">
+            <div class="cp-layer cp-layer-nav" data-layer="snow" data-type="land_cover">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="2" style="background:#e4eee8; border:1px solid #aaa; color:#555">2</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="8,2 10,7 15,7 11,10 13,15 8,12 3,15 5,10 1,7 6,7"/></svg>
@@ -472,7 +487,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer" data-layer="terrain">
+            <div class="cp-layer cp-layer-nav" data-layer="terrain" data-type="land_cover">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="1" style="background:#c0af88">1</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="1,13 6,5 10,9 13,4 15,13"/></svg>
@@ -512,17 +527,31 @@ export function injectUI(): void {
           <input type="range" id="cp-filter" class="cp-slider" min="0" max="100" value="50">
         </div>
 
-        <!-- Navigation -->
-        <div class="dp-nav">
-          <button class="btn-back" id="btn-back-dims">
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>
-            Dimensions
+      </div><!-- /#cp-main -->
+
+      <!-- ── Panneau détail couche (navigation interne) ── -->
+      <div id="cp-detail" style="display:none">
+        <div class="ldp-header">
+          <button class="ldp-back-btn" id="ldp-back" title="Retour">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3l-6 5 6 5"/></svg>
           </button>
-          <button class="btn-next" id="btn-next-render">
-            Générer
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
-          </button>
+          <svg id="ldp-icon" class="ldp-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"></svg>
+          <span id="ldp-title">Couche</span>
         </div>
+        <div id="ldp-content" class="ldp-content"></div>
+      </div>
+
+      <!-- Navigation (toujours visible) -->
+      <div class="dp-nav cp-nav-fixed">
+        <button class="btn-back" id="btn-back-dims">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>
+          Dimensions
+        </button>
+        <button class="btn-next" id="btn-next-render">
+          Générer
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
+        </button>
+      </div>
 
       </div><!-- /#colors-panel -->
 
