@@ -2,7 +2,7 @@ services:
   - type: web
     name: terrain3d
     env: static
-    staticPublishPath: ./dist
+    staticPublishPath: .
     headers:
       - path: /*
         name: Cache-Control
