@@ -12,6 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -185,6 +186,87 @@ export function updateZoneFooter(): void {
 }
 
 /* ═══════════════════════════════════════════
+   DIMENSIONS TAB
+   ═══════════════════════════════════════════ */
+let dimsRendererReady = false;
+let dimsBuilding = false;
+
+function getDimSettings(): DimSettings {
+  const n = (id: string, def: number) => Number((document.getElementById(id) as HTMLInputElement)?.value ?? def) || def;
+  return {
+    wMm:   n('dp-w',    state.wMm   || 200),
+    dMm:   n('dp-d',    state.dMm   || 200),
+    baseH: n('dp-base', 5),
+    exag:  n('dp-exag', 1),
+  };
+}
+
+function syncDimsInputsFromState(): void {
+  const setVal = (id: string, v: number) => {
+    const el = document.getElementById(id) as HTMLInputElement;
+    if (el) el.value = String(Math.round(v));
+  };
+  if (state.wMm > 0) setVal('dp-w', state.wMm);
+  if (state.dMm > 0) setVal('dp-d', state.dMm);
+}
+
+function updateDimsHints(): void {
+  const baseH = Number((document.getElementById('dp-base') as HTMLInputElement)?.value ?? 5) || 5;
+  const walls = Number((document.getElementById('dp-walls') as HTMLInputElement)?.value ?? 2) || 2;
+  const layersEl = document.getElementById('dp-layers-hint');
+  const wallMmEl = document.getElementById('dp-wall-mm');
+  if (layersEl) layersEl.textContent = `${Math.round(baseH / 0.2)} couches`;
+  if (wallMmEl) wallMmEl.textContent = `${(walls * 0.42).toFixed(2)} mm`;
+}
+
+async function triggerDimsBuild(): Promise<void> {
+  if (!state.bounds || dimsBuilding) return;
+  dimsBuilding = true;
+
+  const loading = document.getElementById('dims-loading')!;
+  const msg     = document.getElementById('dims-load-msg')!;
+  loading.classList.remove('hidden');
+
+  try {
+    await buildDimsPreview(state.bounds, getDimSettings(), (pct, txt) => {
+      msg.textContent = txt || `${pct}%`;
+    });
+  } catch (err) {
+    console.error('Dims preview error:', err);
+    msg.textContent = 'Erreur de chargement';
+  } finally {
+    loading.classList.add('hidden');
+    dimsBuilding = false;
+  }
+}
+
+function onDimsTabOpen(): void {
+  if (!state.bounds) return;
+
+  syncDimsInputsFromState();
+  updateDimsHints();
+
+  const viewEl = document.getElementById('dims-view')!;
+
+  if (!dimsRendererReady) {
+    dimsRendererReady = true;
+    // Wait one frame for the panel to be visible and sized
+    requestAnimationFrame(() => {
+      initDimsRenderer(viewEl);
+      triggerDimsBuild();
+    });
+  } else {
+    initDimsRenderer(viewEl); // resize if needed
+    triggerDimsBuild();
+  }
+}
+
+// Accordion toggles for Dimensions panel
+(window as any).dpToggle = (id: string) => {
+  document.getElementById(id)?.classList.toggle('open');
+};
+
+/* ═══════════════════════════════════════════
    INIT
    ═══════════════════════════════════════════ */
 injectUI();
@@ -196,17 +278,12 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const tab = (btn as HTMLElement).dataset.tab;
     if (!tab || (btn as HTMLButtonElement).disabled) return;
     switchTab(tab);
-    // Initialiser le viewer 3D au premier accès à l'onglet 3
+    if (tab === 'params') onDimsTabOpen();
     if (tab === 'render') {
       const canvas = document.getElementById('c3d') as HTMLCanvasElement;
       if (canvas) ensureThree(canvas);
     }
   });
-});
-
-/* ── Bouton "Paramètres 3D →" (onglet 1 → 2) ── */
-document.getElementById('btn-next-tab')?.addEventListener('click', () => {
-  if (state.bounds) switchTab('params');
 });
 
 /* ── Bouton "Générer le terrain" (onglet 2 → 3) ── */
@@ -229,7 +306,44 @@ document.getElementById('btn-gen')?.addEventListener('click', generate);
 document.getElementById('btn-stl')?.addEventListener('click', () => exportSTL('terrain3d.stl'));
 document.getElementById('btn-export')?.addEventListener('click', () => export3MF());
 
-/* ── Rebuild auto sur changement de paramètre ── */
+/* ── Accordion clicks for Dimensions panel ── */
+document.querySelectorAll('.dp-sh').forEach(sh => {
+  sh.addEventListener('click', () => {
+    sh.closest('.dp-sec')?.classList.toggle('open');
+  });
+});
+
+/* ── Dimensions inputs: update hints and rebuild preview ── */
+let _dbDims: ReturnType<typeof setTimeout>;
+const dimsInputIds = ['dp-w', 'dp-d', 'dp-exag', 'dp-base'];
+dimsInputIds.forEach(id => {
+  document.getElementById(id)?.addEventListener('input', () => {
+    updateDimsHints();
+    // Update state for wMm/dMm immediately
+    const w = Number((document.getElementById('dp-w') as HTMLInputElement)?.value);
+    const d = Number((document.getElementById('dp-d') as HTMLInputElement)?.value);
+    if (w > 0) state.wMm = w;
+    if (d > 0) state.dMm = d;
+    // Debounced rebuild (no refetch needed — same bounds)
+    clearTimeout(_dbDims);
+    _dbDims = setTimeout(() => rebuildScene(getDimSettings()), 500);
+  });
+});
+
+document.getElementById('dp-walls')?.addEventListener('input', updateDimsHints);
+
+/* ── Quick export button in Dimensions panel ── */
+document.getElementById('dp-dl-btn')?.addEventListener('click', () => {
+  if (!state.generated) { showModal('INFO', 'Générez d\'abord le modèle 3D dans l\'onglet "Générer & Exporter".'); return; }
+  exportSTL('terrain3d.stl');
+});
+
+/* ── Bouton "Paramètres 3D →" (onglet 1 → 2) ── */
+document.getElementById('btn-next-tab')?.addEventListener('click', () => {
+  if (state.bounds) { switchTab('params'); onDimsTabOpen(); }
+});
+
+/* ── Rebuild auto sur changement de paramètre (ancien panneau) ── */
 let _dbt: ReturnType<typeof setTimeout>;
 document.querySelectorAll('#params-col input, #params-col select').forEach(el => {
   el.addEventListener('change', () => {

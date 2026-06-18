@@ -178,96 +178,122 @@ export function injectUI(): void {
     </div>
   </section>
 
-  <!-- ── ONGLET 2 : PARAMÈTRES 3D ──────────────────────── -->
+  <!-- ── ONGLET 2 : DIMENSIONS ─────────────────────────── -->
   <section id="panel-params" class="panel">
-    <div id="params-wrap">
 
-      <div id="params-col">
+    <!-- 3D canvas area -->
+    <div id="dims-view">
+      <canvas id="dims-canvas"></canvas>
 
-        <div class="sec">
-          <div class="sh" onclick="ts('topo')"><span class="si">🏔️</span><span class="sn">Terrain</span><span class="sc o" id="ca-topo">▼</span></div>
-          <div class="sb" id="sb-topo">
-            <div class="r"><label>Couleur socle</label><input type="color" id="c-base" value="#eeebe6"></div>
-            <div class="r"><label>Résolution</label>
-              <select id="t-res">
-                <option value="56">Rapide (56²)</option>
-                <option value="96">Normale (96²)</option>
-                <option value="128" selected>Haute (128²)</option>
-                <option value="256">Max (256²)</option>
-              </select>
+      <!-- HTML labels projected from 3D -->
+      <div id="dims-labels">
+        <div class="dl" id="dl-width"></div>
+        <div class="dl" id="dl-depth"></div>
+        <div class="dl" id="dl-height"></div>
+      </div>
+
+      <!-- Loading overlay -->
+      <div id="dims-loading">
+        <div class="dims-spin"></div>
+        <div id="dims-load-msg">Initialisation…</div>
+      </div>
+    </div>
+
+    <!-- Settings panel (right) -->
+    <div id="dims-panel">
+
+      <div class="dp-header">
+        <button class="dp-dl-btn" id="dp-dl-btn" title="Exporter STL rapide">⬇</button>
+      </div>
+
+      <!-- Taille -->
+      <div class="dp-sec open" id="dps-taille">
+        <div class="dp-sh">
+          <span class="dp-sn">Taille</span>
+          <svg class="dp-arr" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="dp-sb">
+          <div class="dp-row2">
+            <div class="dp-field">
+              <label>Largeur (mm)</label>
+              <input type="number" id="dp-w" value="200" min="50" max="600" step="10">
             </div>
-            <div class="r"><label>Relief ×</label><input type="number" id="t-exag" value="2" step="0.5" min="0.5" max="10"></div>
-            <div class="r"><label>Lissage</label><input type="range" id="t-smooth" min="0" max="10" step="1" value="1"><span class="rv" id="t-smooth-v">1</span></div>
-            <div class="r"><label>Socle</label><input type="number" id="t-base-h" value="3" step="1" min="1"><span>mm</span></div>
-            <div class="r"><label>Taille modèle</label><input type="number" id="t-maxdim" value="150" step="10" min="50" max="400"><span>mm</span></div>
-            <input type="hidden" id="t-zoom" value="15">
+            <div class="dp-field">
+              <label>Longueur (mm)</label>
+              <input type="number" id="dp-d" value="200" min="50" max="600" step="10">
+            </div>
           </div>
         </div>
+      </div>
 
-        <div class="sec">
-          <div class="sh" onclick="ts('water')">
-            <span class="si">💧</span><span class="sn">Eau</span>
-            <input type="checkbox" id="water-on" checked onclick="ev(event)">
-            <span class="sc o" id="ca-water">▼</span>
-          </div>
-          <div class="sb h" id="sb-water">
-            <div class="r"><label>Couleur</label><input type="color" id="water-col" value="#3399ff"></div>
+      <!-- Hauteur -->
+      <div class="dp-sec open" id="dps-hauteur">
+        <div class="dp-sh">
+          <span class="dp-sn">Hauteur</span>
+          <svg class="dp-arr" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="dp-sb">
+          <div class="dp-total">Total : <strong id="dp-total-val">~26</strong> mm <span class="dp-info-icon" title="Hauteur totale du modèle imprimé">ℹ</span></div>
+          <div class="dp-breakdown">Carte : <span id="dp-map-h">~21</span> mm · Fond : <span id="dp-base-h-disp">5</span> mm</div>
+          <label class="dp-lbl">Exagération verticale <span class="dp-info-icon" title="Multiplie le relief pour le rendre plus visible">ℹ</span></label>
+          <input type="number" id="dp-exag" value="1" step="0.5" min="0.1" max="10" class="dp-input">
+          <label class="dp-lbl">Épaisseur du fond (mm) <span class="dp-info-icon" title="Socle plein sous le terrain">ℹ</span></label>
+          <div class="dp-row-hint">
+            <input type="number" id="dp-base" value="5" step="1" min="1" max="30" class="dp-input">
+            <span class="dp-hint" id="dp-layers-hint">25 couches</span>
           </div>
         </div>
+      </div>
 
-        <div class="sec">
-          <div class="sh" onclick="ts('grass')">
-            <span class="si">🌿</span><span class="sn">Parcs / Végétation</span>
-            <input type="checkbox" id="grass-on" checked onclick="ev(event)">
-            <span class="sc o" id="ca-grass">▼</span>
-          </div>
-          <div class="sb h" id="sb-grass"></div>
+      <!-- Façade -->
+      <div class="dp-sec" id="dps-facade">
+        <div class="dp-sh">
+          <span class="dp-sn">Façade <span class="dp-info-icon" title="Options pour les faces latérales">ℹ</span></span>
+          <svg class="dp-arr" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-
-        <div class="sec">
-          <div class="sh" onclick="ts('road')">
-            <span class="si">🛣️</span><span class="sn">Routes</span>
-            <input type="checkbox" id="road-on" checked onclick="ev(event)">
-            <span class="sc o" id="ca-road">▼</span>
-          </div>
-          <div class="sb h" id="sb-road">
-            <div class="r"><label>Couleur</label><input type="color" id="road-col" value="#262626"></div>
-          </div>
-        </div>
-
-        <div class="sec">
-          <div class="sh" onclick="ts('build')">
-            <span class="si">🏢</span><span class="sn">Bâtiments</span>
-            <input type="checkbox" id="build-on" checked onclick="ev(event)">
-            <span class="sc o" id="ca-build">▼</span>
-          </div>
-          <div class="sb h" id="sb-build">
-            <div class="r"><label>Couleur</label><input type="color" id="build-col" value="#9090a0"></div>
-            <div class="r"><label>Hauteur ×</label><input type="number" id="build-hs" value="1.0" step="0.1" min="0.1" max="5"></div>
+        <div class="dp-sb dp-sb-collapsed">
+          <label class="dp-check">
+            <input type="checkbox" id="dp-flat">
+            Aplatir la façade <span class="dp-info-icon" title="Rendre les faces latérales parfaitement plates">ℹ</span>
+          </label>
+          <label class="dp-lbl">Largeur de la façade (nombre de murs) <span class="dp-info-icon" title="Épaisseur des parois latérales">ℹ</span></label>
+          <div class="dp-row-hint">
+            <input type="number" id="dp-walls" value="2" step="1" min="0" max="10" class="dp-input">
+            <span class="dp-hint" id="dp-wall-mm">0.84 mm</span>
           </div>
         </div>
+      </div>
 
-        <div class="sec">
-          <div class="sh" onclick="ts('gpx')"><span class="si">🏃</span><span class="sn">Trace GPX</span><span class="sc o" id="ca-gpx">▼</span></div>
-          <div class="sb h" id="sb-gpx">
-            <div class="r"><label>Couleur</label><input type="color" id="gpx-col" value="#ff4500"></div>
-            <div class="r"><label>Hauteur</label><input type="number" id="gpx-h" value="1.2" step="0.1" min="0.5" max="5"><span>mm</span></div>
-            <div class="r"><label>Larg. mini</label><input type="number" id="gpx-mw" value="1.5" step="0.1" min="0.5"><span>mm</span></div>
-            <div class="r"><label>Larg. réelle</label><input type="number" id="gpx-tw" value="3.0" step="0.5" min="0.5"><span>m</span></div>
-          </div>
-        </div>
-
-      </div><!-- /params-col -->
-
-      <div id="params-actions">
+      <!-- Nav -->
+      <div class="dp-nav">
         <button class="btn-back" id="btn-back-zone">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13 4l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
-          Retour zone
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>
+          Zone
         </button>
         <button id="btn-next-render" class="btn-next">
-          Générer le terrain
-          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          Générer
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
         </button>
+      </div>
+
+      <!-- Hidden legacy inputs so getSettings() still works -->
+      <div id="params-hidden">
+        <input type="color"    id="c-base"    value="#eeebe6">
+        <select id="t-res"><option value="128" selected>128</option><option value="56">56</option><option value="96">96</option><option value="256">256</option></select>
+        <input type="number"   id="t-smooth"  value="1">
+        <input type="number"   id="t-zoom"    value="15">
+        <input type="checkbox" id="water-on"  checked>
+        <input type="color"    id="water-col" value="#3399ff">
+        <input type="checkbox" id="grass-on"  checked>
+        <input type="checkbox" id="road-on"   checked>
+        <input type="color"    id="road-col"  value="#262626">
+        <input type="checkbox" id="build-on"  checked>
+        <input type="color"    id="build-col" value="#9090a0">
+        <input type="number"   id="build-hs"  value="1.0">
+        <input type="color"    id="gpx-col"   value="#ff4500">
+        <input type="number"   id="gpx-h"     value="1.2">
+        <input type="number"   id="gpx-mw"    value="1.5">
+        <input type="number"   id="gpx-tw"    value="3.0">
       </div>
 
     </div>

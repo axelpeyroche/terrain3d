@@ -76,10 +76,10 @@ export function getSettings(): Settings {
   return {
     cBase:     v('c-base')      || '#eeebe6',
     terrainRes:Number(v('t-res'))  || 128,
-    exag:      Number(v('t-exag')) || 2,
+    exag:      Number(v('dp-exag') || v('t-exag')) || 1,
     smooth:    Number(v('t-smooth'))|| 1,
-    baseH:     Number(v('t-base-h'))|| 3,
-    maxDim:    Number(v('t-maxdim'))|| 150,
+    baseH:     Number(v('dp-base') || v('t-base-h'))|| 5,
+    maxDim:    Number(v('t-maxdim'))|| 200,
     elevZoom:  Number(v('t-zoom')) || 15,
     waterOn:   b('water-on'),
     waterCol:  v('water-col')   || '#3399ff',
