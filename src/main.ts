@@ -4,6 +4,7 @@
    ════════════════════════════════════════════ */
 
 import './style.css';
+import 'leaflet/dist/leaflet.css';
 import { injectUI, setProgress, showProgress, showModal } from './ui/panel';
 import { initMap } from './map/leafletMap';
 import { ensureThree } from './scene/setup';

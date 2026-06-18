@@ -3,8 +3,7 @@
    Système de dessin sans plugin Leaflet.draw (handlers natifs).
    ════════════════════════════════════════════ */
 
-// Leaflet est chargé via CDN avant le module
-const L = (window as any).L as typeof import('leaflet');
+import L from 'leaflet';
 import { state } from '../state';
 
 /* ── Objets carte ── */
