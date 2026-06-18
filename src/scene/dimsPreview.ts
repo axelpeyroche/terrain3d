@@ -16,19 +16,27 @@ let cachedElev: { grid: Float32Array; minE: number; elevRange: number; bounds: L
 let cachedTexture: THREE.CanvasTexture | null = null;
 let cachedMask: THREE.CanvasTexture | null = null;
 let cachedZoneKey = '';
-let cachedWater: OSMEl[] = [];
-let cachedWaterKey = '';
+let cachedFeatures: OSMEl[] = [];
+let cachedFeaturesKey = '';
 
 const PREVIEW_GRID = 128;
+const TEX_SIZE = 1024; // high-res for precise zone boundaries
+
+interface OSMEl {
+  type: 'way' | 'relation' | string;
+  tags?: Record<string, string>;
+  geometry?: GeoPoint[];
+  members?: OSMMember[];
+}
+interface OSMMember {
+  type: string;
+  role: string;
+  geometry?: GeoPoint[];
+}
+interface GeoPoint { lat: number; lon: number }
 
 let sceneObjs: THREE.Object3D[] = [];
 const lblAnchors: { id: string; v: THREE.Vector3 }[] = [];
-
-interface OSMEl {
-  type: string;
-  tags?: Record<string, string>;
-  geometry?: Array<{ lat: number; lon: number }>;
-}
 
 /* ══════════════════════════════════════════════
    RENDERER INIT
@@ -53,7 +61,6 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
   scene.background = new THREE.Color(0x080c14);
 
   camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100000);
-
   controls = new OrbitControls(camera, canvas);
   controls.enableDamping = true;
   controls.dampingFactor = 0.06;
@@ -113,16 +120,16 @@ export async function buildDimsPreview(
     onProgress(5, 'Téléchargement des altitudes…');
     cachedElev = await loadElevation(bounds);
 
-    onProgress(40, 'Chargement des données géographiques…');
-    if (key !== cachedWaterKey) {
-      cachedWaterKey = key;
-      cachedWater = await fetchWaterBodies(bounds);
+    onProgress(35, 'Chargement des données géographiques…');
+    if (key !== cachedFeaturesKey) {
+      cachedFeaturesKey = key;
+      cachedFeatures = await fetchTerrainFeatures(bounds);
     }
 
-    onProgress(65, 'Génération de la texture…');
+    onProgress(70, 'Génération de la texture…');
     cachedTexture = buildMapTexture(
       bounds, cachedElev.grid, PREVIEW_GRID,
-      cachedElev.minE, cachedElev.elevRange, cachedWater,
+      cachedElev.minE, cachedElev.elevRange, cachedFeatures,
     );
   } else {
     onProgress(50, 'Reconstruction…');
@@ -135,7 +142,7 @@ export async function buildDimsPreview(
     cachedMask = buildZoneMask(settings.zonePts, settings.zoneType, bounds, settings.wMm, settings.dMm);
   }
 
-  onProgress(85, 'Construction de la scène 3D…');
+  onProgress(88, 'Construction de la scène 3D…');
   rebuildScene(settings);
   onProgress(100, '');
 }
@@ -149,22 +156,21 @@ export function rebuildScene(s: DimSettings): void {
 
   const { wMm, dMm, baseH, exag, flatFacade, facadeWidthMm, gpxPoints, zoneType, zonePts, bounds } = s;
   const { grid, minE, elevRange } = cachedElev;
-  const realBounds = bounds ?? cachedElev.bounds;
+  const rb = bounds ?? cachedElev.bounds;
 
-  // Elevation scale
-  const cLat = (realBounds.minLat + realBounds.maxLat) / 2;
-  const realW = (realBounds.maxLon - realBounds.minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
-  const realH = (realBounds.maxLat - realBounds.minLat) * 111320;
+  const cLat = (rb.minLat + rb.maxLat) / 2;
+  const realW = (rb.maxLon - rb.minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
+  const realH = (rb.maxLat - rb.minLat) * 111320;
   const avgLen = Math.max(realW, realH);
   const maxModelDim = Math.max(wMm, dMm);
   const elevScaleMm = Math.max(1, Math.min(maxModelDim * 0.5, (elevRange / avgLen) * maxModelDim * exag));
   const totalH = baseH + elevScaleMm;
 
   const G = PREVIEW_GRID;
-  const modelPts = zonePtsToModel(zonePts, zoneType, realBounds, wMm, dMm);
+  const modelPts = zonePtsToModel(zonePts, zoneType, rb, wMm, dMm);
   const facadeW = Math.max(1, facadeWidthMm);
 
-  // ── Terrain mesh ──────────────────────────────────────
+  // ── Terrain ───────────────────────────────────────────
   {
     const geo = new THREE.PlaneGeometry(wMm, dMm, G - 1, G - 1);
     geo.rotateX(-Math.PI / 2);
@@ -174,7 +180,6 @@ export function rebuildScene(s: DimSettings): void {
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
-
     add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
       map: cachedTexture,
       alphaMap: cachedMask ?? undefined,
@@ -184,23 +189,20 @@ export function rebuildScene(s: DimSettings): void {
 
   // ── Base ──────────────────────────────────────────────
   const baseColor = 0xc8c2ba;
-  {
-    const baseGeo = buildBaseGeo(modelPts, zoneType, wMm, dMm, baseH, facadeW);
-    add(new THREE.Mesh(baseGeo, new THREE.MeshLambertMaterial({ color: baseColor })));
-  }
+  add(new THREE.Mesh(
+    buildBaseGeo(modelPts, zoneType, wMm, dMm, baseH, facadeW),
+    new THREE.MeshLambertMaterial({ color: baseColor }),
+  ));
 
   // ── Facades ───────────────────────────────────────────
-  {
-    const facadeMat = new THREE.MeshLambertMaterial({ color: baseColor, side: THREE.DoubleSide });
-    for (const m of buildFacades(modelPts, zoneType, wMm, dMm, facadeW, flatFacade, totalH, grid, G, minE, elevRange, baseH, elevScaleMm)) {
-      m.material = facadeMat;
-      add(m);
-    }
+  const facadeMat = new THREE.MeshLambertMaterial({ color: baseColor, side: THREE.DoubleSide });
+  for (const m of buildFacades(modelPts, zoneType, wMm, dMm, facadeW, flatFacade, totalH, grid, G, minE, elevRange, baseH, elevScaleMm)) {
+    m.material = facadeMat; add(m);
   }
 
-  // ── GPX trace ─────────────────────────────────────────
+  // ── GPX ───────────────────────────────────────────────
   if (gpxPoints.length >= 2) {
-    const ln = buildGpxLine(gpxPoints, realBounds, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm);
+    const ln = buildGpxLine(gpxPoints, rb, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm);
     if (ln) add(ln);
   }
 
@@ -214,12 +216,11 @@ export function rebuildScene(s: DimSettings): void {
     add(bb);
   }
 
-  // ── Label anchors ─────────────────────────────────────
+  // ── Labels ────────────────────────────────────────────
   lblAnchors.length = 0;
   lblAnchors.push({ id: 'dl-width',  v: new THREE.Vector3(0, 2, dMm / 2 + facadeW + 14) });
   lblAnchors.push({ id: 'dl-depth',  v: new THREE.Vector3(wMm / 2 + facadeW + 14, totalH * 0.1, 0) });
   lblAnchors.push({ id: 'dl-height', v: new THREE.Vector3(-wMm / 2 - facadeW - 12, totalH / 2, dMm / 2 + 8) });
-
   txt('dl-width',       `${wMm} mm`);
   txt('dl-depth',       `${dMm} mm`);
   txt('dl-height',      `~${Math.round(totalH * 10) / 10} mm`);
@@ -227,14 +228,12 @@ export function rebuildScene(s: DimSettings): void {
   txt('dp-map-h',       `~${Math.round(elevScaleMm * 10) / 10}`);
   txt('dp-base-h-disp', `${baseH}`);
 
-  // ── Camera ───────────────────────────────────────────
+  // ── Camera ────────────────────────────────────────────
   const diag = Math.sqrt(wMm * wMm + dMm * dMm);
   if (controls.target.lengthSq() < 0.1) {
     camera!.position.set(wMm * 0.7, totalH + diag * 0.44, dMm * 0.92);
     const tgt = new THREE.Vector3(0, totalH * 0.2, 0);
-    camera!.lookAt(tgt);
-    controls!.target.copy(tgt);
-    controls!.update();
+    camera!.lookAt(tgt); controls!.target.copy(tgt); controls!.update();
   }
 }
 
@@ -246,28 +245,48 @@ export function resetDimsCamera(): void {
 }
 
 /* ══════════════════════════════════════════════
-   OSM WATER BODIES (Overpass API)
+   OSM TERRAIN FEATURES (Overpass)
+   Fetches: water, forest, scrub, grassland, glacier, bare rock, wetland
 ══════════════════════════════════════════════ */
-async function fetchWaterBodies(bounds: LatLonBounds): Promise<OSMEl[]> {
+async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   const { minLat, minLon, maxLat, maxLon } = bounds;
-  const query = `[out:json][timeout:18];
+  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
+  const query = `[out:json][timeout:28];
 (
-  way["natural"="water"](${minLat},${minLon},${maxLat},${maxLon});
-  way["waterway"="riverbank"](${minLat},${minLon},${maxLat},${maxLon});
-  way["natural"="glacier"](${minLat},${minLon},${maxLat},${maxLon});
-  way["waterway"~"^(river|canal|stream|ditch)$"](${minLat},${minLon},${maxLat},${maxLon});
+  way["natural"="water"]${bb};
+  relation["natural"="water"]${bb};
+  way["waterway"="riverbank"]${bb};
+  way["waterway"~"^(river|canal|stream|ditch)$"]${bb};
+  way["natural"="wood"]${bb};
+  relation["natural"="wood"]${bb};
+  way["landuse"="forest"]${bb};
+  relation["landuse"="forest"]${bb};
+  way["natural"="scrub"]${bb};
+  way["natural"="heath"]${bb};
+  way["natural"="fell"]${bb};
+  way["natural"="moor"]${bb};
+  way["natural"="grassland"]${bb};
+  way["landuse"~"^(meadow|grass|farmland)$"]${bb};
+  way["natural"="glacier"]${bb};
+  relation["natural"="glacier"]${bb};
+  way["natural"="snow"]${bb};
+  way["natural"="bare_rock"]${bb};
+  way["natural"="scree"]${bb};
+  way["natural"="sand"]${bb};
+  way["natural"="wetland"]${bb};
+  way["natural"="mud"]${bb};
 );
 out geom;`;
+
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 15000);
+  const t = setTimeout(() => ctrl.abort(), 22000);
   try {
     const res = await fetch(
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
       { signal: ctrl.signal },
     );
     clearTimeout(t);
-    const data = await res.json();
-    return (data.elements ?? []) as OSMEl[];
+    return ((await res.json()).elements ?? []) as OSMEl[];
   } catch {
     clearTimeout(t);
     return [];
@@ -275,26 +294,96 @@ out geom;`;
 }
 
 /* ══════════════════════════════════════════════
-   MAP TEXTURE: hypsometric + OSM water (no external tile labels)
+   MAP TEXTURE: layered OSM terrain zones
 ══════════════════════════════════════════════ */
+
+// Zone definitions: drawn bottom-to-top so upper layers override
+// Color: [R, G, B], fill: true = polygon, false = line
+const ZONE_LAYERS: Array<{
+  match: (tags: Record<string, string>) => boolean;
+  color: string;
+  fill: boolean;
+  lineWidth?: number;
+}> = [
+  // Bare terrain (drawn first, overridden by vegetation above)
+  {
+    match: t => t.natural === 'sand',
+    color: '#c8b870', fill: true,
+  },
+  {
+    match: t => t.natural === 'scree',
+    color: '#b8a888', fill: true,
+  },
+  {
+    match: t => t.natural === 'bare_rock',
+    color: '#9a8878', fill: true,
+  },
+  // Farmland (light beige)
+  {
+    match: t => t.landuse === 'farmland',
+    color: '#c8b890', fill: true,
+  },
+  // Low vegetation: grassland, meadow
+  {
+    match: t => t.natural === 'grassland' || t.landuse === 'meadow' || t.landuse === 'grass',
+    color: '#7eaa52', fill: true,
+  },
+  // Fell / moor / heath (transition)
+  {
+    match: t => t.natural === 'fell' || t.natural === 'moor' || t.natural === 'heath',
+    color: '#6a8c48', fill: true,
+  },
+  // Medium scrub
+  {
+    match: t => t.natural === 'scrub',
+    color: '#528040', fill: true,
+  },
+  // Dense forest/wood
+  {
+    match: t => t.natural === 'wood' || t.landuse === 'forest',
+    color: '#2e6828', fill: true,
+  },
+  // Wetland
+  {
+    match: t => t.natural === 'wetland' || t.natural === 'mud',
+    color: '#4a7870', fill: true,
+  },
+  // Glacier / snow (drawn above vegetation)
+  {
+    match: t => t.natural === 'glacier' || t.natural === 'snow',
+    color: 'rgba(218,238,252,0.92)', fill: true,
+  },
+  // Water: river banks and lakes (filled)
+  {
+    match: t => t.natural === 'water' || t.waterway === 'riverbank',
+    color: '#2e80be', fill: true,
+  },
+  // Waterways: rivers and streams (lines, drawn last)
+  {
+    match: t => !!t.waterway && t.waterway !== 'riverbank',
+    color: '#2e80be', fill: false,
+    lineWidth: 0, // computed dynamically
+  },
+];
+
 function buildMapTexture(
   bounds: LatLonBounds,
   grid: Float32Array, G: number,
   minE: number, elevRange: number,
-  waterEls: OSMEl[],
+  features: OSMEl[],
 ): THREE.CanvasTexture {
-  const SIZE = 512;
+  const S = TEX_SIZE;
   const cv = document.createElement('canvas');
-  cv.width = cv.height = SIZE;
+  cv.width = cv.height = S;
   const ctx = cv.getContext('2d')!;
 
-  // Step 1 — hypsometric base
-  const id = ctx.createImageData(SIZE, SIZE);
+  // Step 1 — hypsometric elevation base (always present, provides fallback coloring)
+  const id = ctx.createImageData(S, S);
   const d = id.data;
-  for (let row = 0; row < SIZE; row++) {
-    for (let col = 0; col < SIZE; col++) {
-      const gx = col / (SIZE - 1) * (G - 1);
-      const gy = row / (SIZE - 1) * (G - 1);
+  for (let row = 0; row < S; row++) {
+    for (let col = 0; col < S; col++) {
+      const gx = col / (S - 1) * (G - 1);
+      const gy = row / (S - 1) * (G - 1);
       const gi = Math.min(G - 2, Math.floor(gx));
       const gj = Math.min(G - 2, Math.floor(gy));
       const fx = gx - gi, fy = gy - gj;
@@ -302,72 +391,92 @@ function buildMapTexture(
               + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
       const t = Math.max(0, Math.min(1, (e - minE) / elevRange));
       const [r, g, b] = hypso(t);
-      const pi = (row * SIZE + col) * 4;
+      const pi = (row * S + col) * 4;
       d[pi] = r; d[pi+1] = g; d[pi+2] = b; d[pi+3] = 255;
     }
   }
   ctx.putImageData(id, 0, 0);
 
-  // Step 2 — OSM water bodies (clean, no labels)
-  for (const el of waterEls) {
-    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
-    const tags = el.tags ?? {};
-    const isArea = tags.natural === 'water' || tags.waterway === 'riverbank';
-    const isGlacier = tags.natural === 'glacier';
-    const wway = tags.waterway;
+  // Step 2 — draw each OSM layer in order
+  for (const layer of ZONE_LAYERS) {
+    const layerEls = features.filter(el => el.tags && layer.match(el.tags));
+    if (!layerEls.length) continue;
 
     ctx.beginPath();
-    for (let i = 0; i < el.geometry.length; i++) {
-      const pt = el.geometry[i];
-      const cx = (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * SIZE;
-      const cy = (1 - (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * SIZE;
-      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    for (const el of layerEls) {
+      traceGeometry(ctx, el, bounds, S);
     }
 
-    if (isGlacier) {
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(215,235,252,0.88)';
-      ctx.fill();
-    } else if (isArea) {
-      ctx.closePath();
-      ctx.fillStyle = '#3a8ec8';
-      ctx.fill();
-    } else if (wway) {
-      ctx.strokeStyle = '#3a8ec8';
-      ctx.lineWidth = wway === 'river' ? 6 : wway === 'canal' ? 4 : 2;
-      ctx.lineCap = 'round';
-      ctx.stroke();
+    if (layer.fill) {
+      ctx.fillStyle = layer.color;
+      ctx.fill('evenodd');
+    } else {
+      // Waterway lines — dynamic width by type
+      for (const el of layerEls) {
+        if (!el.tags) continue;
+        const ww = el.tags.waterway ?? '';
+        const lw = ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5;
+        ctx.beginPath();
+        traceGeometry(ctx, el, bounds, S);
+        ctx.strokeStyle = '#2e80be';
+        ctx.lineWidth = lw;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
     }
   }
 
   return new THREE.CanvasTexture(cv);
 }
 
+/** Trace element geometry into the current canvas path (supports ways + relations) */
+function traceGeometry(
+  ctx: CanvasRenderingContext2D,
+  el: OSMEl,
+  bounds: LatLonBounds,
+  S: number,
+): void {
+  const drawPts = (pts: GeoPoint[]) => {
+    if (!pts || pts.length < 2) return;
+    for (let i = 0; i < pts.length; i++) {
+      const cx = (pts[i].lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+      const cy = (1 - (pts[i].lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
+      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    }
+    ctx.closePath();
+  };
+
+  if (el.type === 'way' && el.geometry) {
+    drawPts(el.geometry);
+  } else if (el.type === 'relation' && el.members) {
+    for (const m of el.members) {
+      if (m.role === 'outer' && m.geometry) drawPts(m.geometry);
+    }
+  }
+}
+
 /* ══════════════════════════════════════════════
-   ALPHA MASK — zone shape clipping
+   ALPHA MASK
 ══════════════════════════════════════════════ */
 function buildZoneMask(
   zonePts: [number, number][] | null, zoneType: string,
   bounds: LatLonBounds, wMm: number, dMm: number,
 ): THREE.CanvasTexture | null {
   if (!zonePts || zonePts.length < 3 || zoneType === 'rect' || zoneType === 'sq') return null;
-
-  const SIZE = 512;
+  const S = 512;
   const cv = document.createElement('canvas');
-  cv.width = cv.height = SIZE;
+  cv.width = cv.height = S;
   const ctx = cv.getContext('2d')!;
-  ctx.fillStyle = 'black';
-  ctx.fillRect(0, 0, SIZE, SIZE);
-  ctx.fillStyle = 'white';
-  ctx.beginPath();
+  ctx.fillStyle = 'black'; ctx.fillRect(0, 0, S, S);
+  ctx.fillStyle = 'white'; ctx.beginPath();
   for (let i = 0; i < zonePts.length; i++) {
     const [lat, lon] = zonePts[i];
-    const cx = (lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * SIZE;
-    const cy = (1 - (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * SIZE;
+    const cx = (lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+    const cy = (1 - (lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
     if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
   }
-  ctx.closePath();
-  ctx.fill();
+  ctx.closePath(); ctx.fill();
   return new THREE.CanvasTexture(cv);
 }
 
@@ -379,7 +488,7 @@ function zonePtsToModel(
   bounds: LatLonBounds, wMm: number, dMm: number,
 ): Array<[number, number]> {
   if (!zonePts || zonePts.length < 3 || zoneType === 'rect' || zoneType === 'sq') {
-    return [[-wMm/2, -dMm/2], [wMm/2, -dMm/2], [wMm/2, dMm/2], [-wMm/2, dMm/2]];
+    return [[-wMm/2,-dMm/2],[wMm/2,-dMm/2],[wMm/2,dMm/2],[-wMm/2,dMm/2]];
   }
   return zonePts.map(([lat, lon]): [number, number] => [
     (lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * wMm - wMm / 2,
@@ -388,7 +497,7 @@ function zonePtsToModel(
 }
 
 /* ══════════════════════════════════════════════
-   BASE GEOMETRY (zone shape, includes facade footprint for rect)
+   BASE GEOMETRY
 ══════════════════════════════════════════════ */
 function buildBaseGeo(
   modelPts: Array<[number, number]>, zoneType: string,
@@ -399,14 +508,13 @@ function buildBaseGeo(
     geo.translate(0, baseH / 2, 0);
     return geo;
   }
-
   const shape = new THREE.Shape();
   if (zoneType === 'circ') {
     const rx = wMm / 2 + facadeW, rz = dMm / 2 + facadeW;
     for (let i = 0; i <= 64; i++) {
       const a = i / 64 * Math.PI * 2;
-      if (i === 0) shape.moveTo(Math.cos(a) * rx, Math.sin(a) * rz);
-      else         shape.lineTo(Math.cos(a) * rx, Math.sin(a) * rz);
+      if (i === 0) shape.moveTo(Math.cos(a)*rx, Math.sin(a)*rz);
+      else         shape.lineTo(Math.cos(a)*rx, Math.sin(a)*rz);
     }
   } else {
     shape.moveTo(modelPts[0][0], modelPts[0][1]);
@@ -428,71 +536,51 @@ function buildFacades(
   grid: Float32Array, G: number,
   minE: number, elevRange: number, baseH: number, elevScaleMm: number,
 ): THREE.Mesh[] {
-  // Terrain height at a model-space point
   const terrainAt = (x: number, z: number): number => {
-    const u = Math.max(0, Math.min(1, (x + wMm / 2) / wMm));
-    const v = Math.max(0, Math.min(1, (z + dMm / 2) / dMm));
-    const gx = u * (G - 1), gy = v * (G - 1);
+    const u = Math.max(0, Math.min(1, (x + wMm/2) / wMm));
+    const v = Math.max(0, Math.min(1, (z + dMm/2) / dMm));
+    const gx = u*(G-1), gy = v*(G-1);
     const gi = Math.min(G-2, Math.floor(gx)), gj = Math.min(G-2, Math.floor(gy));
-    const fx = gx - gi, fy = gy - gj;
+    const fx = gx-gi, fy = gy-gj;
     const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
             + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-    return baseH + ((e - minE) / elevRange) * elevScaleMm;
+    return baseH + ((e-minE)/elevRange)*elevScaleMm;
   };
 
-  // Flat facade: uniform height = totalH (the model's highest point)
-  const elevAt = flatFacade ? (_x: number, _z: number) => totalH : terrainAt;
-
   if (zoneType === 'rect' || zoneType === 'sq') {
-    if (flatFacade) {
-      return buildFlatRectFacades(wMm, dMm, facadeW, totalH);
-    }
-    return buildProfileRectFacades(wMm, dMm, facadeW, G, grid, minE, elevRange, baseH, elevScaleMm);
+    return flatFacade
+      ? buildFlatRectFacades(wMm, dMm, facadeW, totalH)
+      : buildProfileRectFacades(wMm, dMm, facadeW, G, grid, minE, elevRange, baseH, elevScaleMm);
   }
+  const elevAt = flatFacade ? () => totalH : terrainAt;
   return buildPolygonFacades(modelPts, facadeW, elevAt);
 }
 
-// Flat rect facades: 4 simple boxes, uniform height = totalH
 function buildFlatRectFacades(wMm: number, dMm: number, facadeW: number, totalH: number): THREE.Mesh[] {
-  const box = (w: number, h: number, d: number, x: number, z: number) => {
-    const geo = new THREE.BoxGeometry(w, h, d);
-    const m = new THREE.Mesh(geo);
-    m.position.set(x, h / 2, z);
-    return m;
+  const box = (w: number, h: number, dp: number, x: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, dp));
+    m.position.set(x, h / 2, z); return m;
   };
   return [
-    box(wMm + facadeW * 2, totalH, facadeW, 0,              dMm / 2 + facadeW / 2),  // South
-    box(wMm + facadeW * 2, totalH, facadeW, 0,             -dMm / 2 - facadeW / 2),  // North
-    box(facadeW,           totalH, dMm,     wMm / 2 + facadeW / 2, 0),               // East
-    box(facadeW,           totalH, dMm,    -wMm / 2 - facadeW / 2, 0),               // West
+    box(wMm + facadeW*2, totalH, facadeW, 0,              dMm/2 + facadeW/2),
+    box(wMm + facadeW*2, totalH, facadeW, 0,             -dMm/2 - facadeW/2),
+    box(facadeW,         totalH, dMm,     wMm/2 + facadeW/2, 0),
+    box(facadeW,         totalH, dMm,    -wMm/2 - facadeW/2, 0),
   ];
 }
 
-// Profile-following rect facades: top edge follows terrain
 function buildProfileRectFacades(
   wMm: number, dMm: number, facadeW: number,
   G: number, grid: Float32Array, minE: number, elevRange: number,
   baseH: number, elevScaleMm: number,
 ): THREE.Mesh[] {
   const h = (ix: number, iy: number) =>
-    baseH + ((grid[iy * G + ix] - minE) / elevRange) * elevScaleMm;
+    baseH + ((grid[iy*G + ix] - minE) / elevRange) * elevScaleMm;
   return [
-    buildEdgeWall(
-      Array.from({ length: G }, (_, i) => [-wMm/2 + i/(G-1)*wMm, dMm/2,  h(i, G-1)] as [number, number, number]),
-      [0, 0, 1], facadeW,
-    ),
-    buildEdgeWall(
-      Array.from({ length: G }, (_, i) => [wMm/2 - i/(G-1)*wMm, -dMm/2, h(G-1-i, 0)] as [number, number, number]),
-      [0, 0, -1], facadeW,
-    ),
-    buildEdgeWall(
-      Array.from({ length: G }, (_, j) => [wMm/2,  dMm/2 - j/(G-1)*dMm, h(G-1, G-1-j)] as [number, number, number]),
-      [1, 0, 0], facadeW,
-    ),
-    buildEdgeWall(
-      Array.from({ length: G }, (_, j) => [-wMm/2, -dMm/2 + j/(G-1)*dMm, h(0, j)] as [number, number, number]),
-      [-1, 0, 0], facadeW,
-    ),
+    buildEdgeWall(Array.from({length:G},(_,i)=>[-wMm/2+i/(G-1)*wMm, dMm/2,  h(i,G-1)] as [number,number,number]), [0,0,1],  facadeW),
+    buildEdgeWall(Array.from({length:G},(_,i)=>[ wMm/2-i/(G-1)*wMm,-dMm/2,  h(G-1-i,0)] as [number,number,number]), [0,0,-1], facadeW),
+    buildEdgeWall(Array.from({length:G},(_,j)=>[ wMm/2, dMm/2-j/(G-1)*dMm, h(G-1,G-1-j)] as [number,number,number]), [1,0,0],  facadeW),
+    buildEdgeWall(Array.from({length:G},(_,j)=>[-wMm/2,-dMm/2+j/(G-1)*dMm, h(0,j)] as [number,number,number]),       [-1,0,0], facadeW),
   ];
 }
 
@@ -503,57 +591,54 @@ function buildPolygonFacades(
   const meshes: THREE.Mesh[] = [];
   const n = modelPts.length;
   for (let i = 0; i < n; i++) {
-    const [ax, az] = modelPts[i];
-    const [bx, bz] = modelPts[(i + 1) % n];
-    const dx = bx - ax, dz = bz - az, len = Math.sqrt(dx*dx + dz*dz);
+    const [ax, az] = modelPts[i], [bx, bz] = modelPts[(i+1)%n];
+    const dx = bx-ax, dz = bz-az, len = Math.sqrt(dx*dx+dz*dz);
     if (len < 0.5) continue;
-    const nx = dz / len, nz = -dx / len;
-    const S = Math.max(2, Math.round(len / 3));
+    const nx = dz/len, nz = -dx/len;
+    const S2 = Math.max(2, Math.round(len/3));
     const profile: [number, number, number][] = [];
-    for (let k = 0; k <= S; k++) {
-      const t = k / S;
-      const px = ax + dx*t, pz = az + dz*t;
+    for (let k = 0; k <= S2; k++) {
+      const t = k/S2;
+      const px = ax+dx*t, pz = az+dz*t;
       profile.push([px, pz, elevAt(px, pz)]);
     }
-    meshes.push(buildEdgeWall(profile, [nx, 0, nz], facadeW));
+    meshes.push(buildEdgeWall(profile, [nx,0,nz], facadeW));
   }
   return meshes;
 }
 
-/**
- * Build a facade wall from a top-profile [x, z, topY][].
- * Creates outer face, inner face, top cap, bottom cap — all solid.
- */
 function buildEdgeWall(
   profile: [number, number, number][],
   outward: [number, number, number],
   facadeW: number,
 ): THREE.Mesh {
   const n = profile.length;
-  const [nx, , nz] = outward;
+  const [nx,,nz] = outward;
   const verts: number[] = [];
   const idx: number[] = [];
 
-  const push4 = (pts: [number, number, number][]) => {
-    for (const [x, z, y] of pts) verts.push(x, y, z);
-  };
+  // Each group: n*2 vertices (bottom+top pair per profile point)
+  for (const [x, z, y] of profile) {  // outer
+    verts.push(x+nx*facadeW, 0, z+nz*facadeW);
+    verts.push(x+nx*facadeW, y, z+nz*facadeW);
+  }
+  for (const [x, z, y] of profile) {  // inner
+    verts.push(x, 0, z); verts.push(x, y, z);
+  }
+  for (const [x, z, y] of profile) {  // top cap
+    verts.push(x+nx*facadeW, y, z+nz*facadeW); verts.push(x, y, z);
+  }
+  for (const [x, z] of profile) {     // bottom cap
+    verts.push(x+nx*facadeW, 0, z+nz*facadeW); verts.push(x, 0, z);
+  }
 
-  // Outer face (at base + outward*facadeW)
-  push4(profile.flatMap(([x, z, y]) => [[x + nx*facadeW, z + nz*facadeW, 0], [x + nx*facadeW, z + nz*facadeW, y]]) as any);
-  // Inner face
-  push4(profile.flatMap(([x, z, y]) => [[x, z, 0], [x, z, y]]) as any);
-  // Top cap
-  push4(profile.flatMap(([x, z, y]) => [[x + nx*facadeW, z + nz*facadeW, y], [x, z, y]]) as any);
-  // Bottom cap
-  push4(profile.flatMap(([x, z]) => [[x + nx*facadeW, z + nz*facadeW, 0], [x, z, 0]]) as any);
-
-  const O = 0, I = n*2, T = n*4, B = n*6;
-  for (let i = 0; i < n - 1; i++) {
-    const k = i * 2;
-    idx.push(O+k, O+k+2, O+k+1,  O+k+1, O+k+2, O+k+3);
-    idx.push(I+k, I+k+1, I+k+2,  I+k+1, I+k+3, I+k+2);
-    idx.push(T+k, T+k+1, T+k+2,  T+k+1, T+k+3, T+k+2);
-    idx.push(B+k, B+k+2, B+k+1,  B+k+1, B+k+2, B+k+3);
+  const O=0, I=n*2, T=n*4, B=n*6;
+  for (let i = 0; i < n-1; i++) {
+    const k = i*2;
+    idx.push(O+k,O+k+2,O+k+1, O+k+1,O+k+2,O+k+3);
+    idx.push(I+k,I+k+1,I+k+2, I+k+1,I+k+3,I+k+2);
+    idx.push(T+k,T+k+1,T+k+2, T+k+1,T+k+3,T+k+2);
+    idx.push(B+k,B+k+2,B+k+1, B+k+1,B+k+2,B+k+3);
   }
 
   const geo = new THREE.BufferGeometry();
@@ -577,13 +662,13 @@ function buildGpxLine(
     const u = (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon);
     const v = (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat);
     if (u < 0 || u > 1 || v < 0 || v > 1) continue;
-    const x = (u - 0.5) * wMm, z = (0.5 - v) * dMm;
+    const x = (u-0.5)*wMm, z = (0.5-v)*dMm;
     const gx = u*(G-1), gv = (1-v)*(G-1);
     const gi = Math.min(G-2, Math.floor(gx)), gj = Math.min(G-2, Math.floor(gv));
     const fx = gx-gi, fy = gv-gj;
     const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
             + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-    verts.push(new THREE.Vector3(x, baseH + ((e-minE)/elevRange)*elevScaleMm + 1, z));
+    verts.push(new THREE.Vector3(x, baseH+((e-minE)/elevRange)*elevScaleMm+1, z));
   }
   if (verts.length < 2) return null;
   return new THREE.Line(
@@ -601,19 +686,19 @@ function lerp3(a: RGB, b: RGB, t: number): RGB {
 }
 function hypso(t: number): RGB {
   const stops: [number, RGB][] = [
-    [0.00, [0x30, 0x88, 0xcc]],  // water/very low
-    [0.06, [0x44, 0x9a, 0xb4]],  // riparian
-    [0.12, [0x4c, 0x88, 0x3c]],  // dark green lowland
-    [0.30, [0x5e, 0x98, 0x42]],  // plain
-    [0.46, [0x78, 0x9c, 0x48]],  // upland
-    [0.59, [0x96, 0x8c, 0x52]],  // scrub/transition
-    [0.71, [0xa0, 0x7e, 0x54]],  // rocky
-    [0.83, [0xa4, 0x94, 0x80]],  // high alpine
-    [1.00, [0xf0, 0xee, 0xea]],  // snow/ice
+    [0.00, [0x30, 0x88, 0xcc]],
+    [0.06, [0x44, 0x9a, 0xb4]],
+    [0.12, [0x4c, 0x88, 0x3c]],
+    [0.30, [0x5e, 0x98, 0x42]],
+    [0.46, [0x78, 0x9c, 0x48]],
+    [0.59, [0x96, 0x8c, 0x52]],
+    [0.71, [0xa0, 0x7e, 0x54]],
+    [0.83, [0xa4, 0x94, 0x80]],
+    [1.00, [0xf0, 0xee, 0xea]],
   ];
   for (let i = 1; i < stops.length; i++) {
     if (t <= stops[i][0]) {
-      const f = (t - stops[i-1][0]) / (stops[i][0] - stops[i-1][0]);
+      const f = (t-stops[i-1][0]) / (stops[i][0]-stops[i-1][0]);
       return lerp3(stops[i-1][1], stops[i][1], f);
     }
   }
@@ -660,7 +745,7 @@ function tickLabels(): void {
     const p = v.clone().project(camera);
     if (p.z > 1) { el.style.opacity = '0'; continue; }
     el.style.opacity = '1';
-    el.style.left = `${(p.x + 1) / 2 * W}px`;
-    el.style.top  = `${-(p.y - 1) / 2 * H}px`;
+    el.style.left = `${(p.x+1)/2*W}px`;
+    el.style.top  = `${-(p.y-1)/2*H}px`;
   }
 }
