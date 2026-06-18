@@ -44,8 +44,8 @@ export const state: AppState = {
   bounds: null,
   zoneType: 'rect',
   zonePts: null,
-  wMm: 150,
-  dMm: 150,
+  wMm: 200,
+  dMm: 200,
   realW: 0,
   realH: 0,
 

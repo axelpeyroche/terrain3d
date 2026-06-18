@@ -19,6 +19,27 @@ let cachedZoneKey = '';
 let cachedFeatures: OSMEl[] = [];
 let cachedFeaturesKey = '';
 
+// Color slots 1-6 (Bambu-style filament colors)
+export const colorSlots: Record<number, string> = {
+  1: '#c0af88',  // Terrain nu + Façade
+  2: '#e4eee8',  // Neige et glace
+  3: '#8ab858',  // Végétation basse
+  4: '#3a6828',  // Végétation dense
+  5: '#4a88c0',  // Plans d'eau + Voies navigables
+  6: '#ff4500',  // Marqueurs / GPX
+};
+
+// Layer visibility
+export const layerVisible: Record<string, boolean> = {
+  veg_low: true, veg_dense: true, wetland: true,
+  snow: true, water: true, waterways: true,
+};
+
+// Mesh references for live color updates
+let terrainMeshRef: THREE.Mesh | null = null;
+let facadeMeshRefs: THREE.Mesh[] = [];
+let dimsCanvas: HTMLCanvasElement | null = null;
+
 const PREVIEW_GRID = 128;
 const TEX_SIZE = 1024; // high-res for precise zone boundaries
 
@@ -42,7 +63,15 @@ const lblAnchors: { id: string; v: THREE.Vector3 }[] = [];
    RENDERER INIT
 ══════════════════════════════════════════════ */
 export function initDimsRenderer(viewEl: HTMLElement): void {
-  const canvas = viewEl.querySelector<HTMLCanvasElement>('#dims-canvas')!;
+  // Find canvas once (it might have been moved between tabs)
+  if (!dimsCanvas) {
+    dimsCanvas = document.getElementById('dims-canvas') as HTMLCanvasElement;
+  }
+  // Move canvas to this container if needed
+  if (dimsCanvas && !viewEl.contains(dimsCanvas)) {
+    viewEl.appendChild(dimsCanvas);
+  }
+
   const W = viewEl.clientWidth || 800;
   const H = viewEl.clientHeight || 600;
 
@@ -53,7 +82,7 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
     return;
   }
 
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer = new THREE.WebGLRenderer({ canvas: dimsCanvas!, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(W, H, false);
 
@@ -61,7 +90,7 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
   scene.background = new THREE.Color(0x080c14);
 
   camera = new THREE.PerspectiveCamera(42, W / H, 0.1, 100000);
-  controls = new OrbitControls(camera, canvas);
+  controls = new OrbitControls(camera, dimsCanvas!);
   controls.enableDamping = true;
   controls.dampingFactor = 0.06;
 
@@ -78,13 +107,57 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
   };
   loop();
 
+  // Resize based on canvas parent (works after canvas moves)
   new ResizeObserver(() => {
-    const W2 = viewEl.clientWidth, H2 = viewEl.clientHeight;
+    const parent = dimsCanvas!.parentElement;
+    if (!parent) return;
+    const W2 = parent.clientWidth, H2 = parent.clientHeight;
     if (!W2 || !H2) return;
     camera!.aspect = W2 / H2;
     camera!.updateProjectionMatrix();
     renderer!.setSize(W2, H2, false);
-  }).observe(viewEl);
+  }).observe(dimsCanvas!);
+}
+
+/** Move the 3D canvas to another container (tab switch) */
+export function reattachDimsCanvas(viewEl: HTMLElement): void {
+  if (!dimsCanvas) return;
+  if (!viewEl.contains(dimsCanvas)) viewEl.appendChild(dimsCanvas);
+  if (!renderer || !camera) return;
+  const W = viewEl.clientWidth || 800;
+  const H = viewEl.clientHeight || 600;
+  renderer.setSize(W, H, false);
+  camera.aspect = W / H;
+  camera.updateProjectionMatrix();
+}
+
+/** Update one or more color slots and live-refresh the 3D preview */
+export function updateColorSlots(slots: Partial<Record<number, string>>): void {
+  Object.assign(colorSlots, slots);
+  // Rebuild map texture with new colors
+  if (cachedElev) {
+    if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+    cachedTexture = buildMapTexture(
+      cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
+      cachedElev.minE, cachedElev.elevRange, cachedFeatures,
+    );
+    if (terrainMeshRef) {
+      const mat = terrainMeshRef.material as THREE.MeshLambertMaterial;
+      mat.map = cachedTexture;
+      mat.needsUpdate = true;
+    }
+  }
+  // Update facade/base color from slot 1
+  const fColor = new THREE.Color(colorSlots[1]);
+  for (const m of facadeMeshRefs) {
+    (m.material as THREE.MeshLambertMaterial).color.set(fColor);
+  }
+}
+
+/** Toggle visibility of an OSM layer and rebuild texture */
+export function setLayerVisible(id: string, visible: boolean): void {
+  layerVisible[id] = visible;
+  updateColorSlots({});  // trigger texture rebuild
 }
 
 /* ══════════════════════════════════════════════
@@ -170,6 +243,9 @@ export function rebuildScene(s: DimSettings): void {
   const modelPts = zonePtsToModel(zonePts, zoneType, rb, wMm, dMm);
   const facadeW = Math.max(1, facadeWidthMm);
 
+  terrainMeshRef = null;
+  facadeMeshRefs = [];
+
   // ── Terrain ───────────────────────────────────────────
   {
     const geo = new THREE.PlaneGeometry(wMm, dMm, G - 1, G - 1);
@@ -180,24 +256,30 @@ export function rebuildScene(s: DimSettings): void {
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
-    add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+    const tm = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
       map: cachedTexture,
       alphaMap: cachedMask ?? undefined,
       transparent: !!cachedMask,
-    })));
+    }));
+    terrainMeshRef = tm;
+    add(tm);
   }
 
   // ── Base ──────────────────────────────────────────────
-  const baseColor = 0xc8c2ba;
-  add(new THREE.Mesh(
+  const baseColor = new THREE.Color(colorSlots[1]);
+  const baseMesh = new THREE.Mesh(
     buildBaseGeo(modelPts, zoneType, wMm, dMm, baseH, facadeW),
     new THREE.MeshLambertMaterial({ color: baseColor }),
-  ));
+  );
+  facadeMeshRefs.push(baseMesh);
+  add(baseMesh);
 
   // ── Facades ───────────────────────────────────────────
   const facadeMat = new THREE.MeshLambertMaterial({ color: baseColor, side: THREE.DoubleSide });
   for (const m of buildFacades(modelPts, zoneType, wMm, dMm, facadeW, flatFacade, totalH, grid, G, minE, elevRange, baseH, elevScaleMm)) {
-    m.material = facadeMat; add(m);
+    m.material = facadeMat;
+    facadeMeshRefs.push(m);
+    add(m);
   }
 
   // ── GPX ───────────────────────────────────────────────
@@ -297,48 +379,19 @@ out geom;`;
    MAP TEXTURE: layered OSM terrain zones
 ══════════════════════════════════════════════ */
 
-// Zone definitions: drawn bottom-to-top so upper layers override
-// Terrain nu = hypsometric base (tan/beige). Only OSM-tagged features get color.
+// Zone definitions: drawn bottom-to-top. Colors driven by colorSlots.
 const ZONE_LAYERS: Array<{
+  id: string;
   match: (tags: Record<string, string>) => boolean;
-  color: string;
+  slot: number;
   fill: boolean;
 }> = [
-  // Végétation basse: prairies, prés, cultures
-  {
-    match: t => t.natural === 'grassland' || t.landuse === 'meadow' || t.landuse === 'grass' || t.landuse === 'farmland',
-    color: '#8ab858', fill: true,
-  },
-  // Végétation intermédiaire: lande, heath, fell, maquis
-  {
-    match: t => t.natural === 'fell' || t.natural === 'moor' || t.natural === 'heath' || t.natural === 'scrub',
-    color: '#5e9040', fill: true,
-  },
-  // Végétation dense: forêt, bois
-  {
-    match: t => t.natural === 'wood' || t.landuse === 'forest',
-    color: '#3a6828', fill: true,
-  },
-  // Zones humides
-  {
-    match: t => t.natural === 'wetland' || t.natural === 'mud',
-    color: '#4a7848', fill: true,
-  },
-  // Neige et glace
-  {
-    match: t => t.natural === 'glacier' || t.natural === 'snow',
-    color: '#e4eee8', fill: true,
-  },
-  // Plans d'eau (lacs, rivières larges)
-  {
-    match: t => t.natural === 'water' || t.waterway === 'riverbank',
-    color: '#4a88c0', fill: true,
-  },
-  // Voies navigables (lignes)
-  {
-    match: t => !!t.waterway && t.waterway !== 'riverbank',
-    color: '#4a88c0', fill: false,
-  },
+  { id: 'veg_low',   match: t => t.natural === 'grassland' || t.landuse === 'meadow' || t.landuse === 'grass' || t.landuse === 'farmland' || t.natural === 'fell' || t.natural === 'moor' || t.natural === 'heath' || t.natural === 'scrub', slot: 3, fill: true },
+  { id: 'veg_dense', match: t => t.natural === 'wood' || t.landuse === 'forest', slot: 4, fill: true },
+  { id: 'wetland',   match: t => t.natural === 'wetland' || t.natural === 'mud',  slot: 3, fill: true },
+  { id: 'snow',      match: t => t.natural === 'glacier' || t.natural === 'snow', slot: 2, fill: true },
+  { id: 'water',     match: t => t.natural === 'water' || t.waterway === 'riverbank', slot: 5, fill: true },
+  { id: 'waterways', match: t => !!t.waterway && t.waterway !== 'riverbank',          slot: 5, fill: false },
 ];
 
 function buildMapTexture(
@@ -374,16 +427,16 @@ function buildMapTexture(
 
   // Step 2 — draw each OSM layer in order
   for (const layer of ZONE_LAYERS) {
+    if (!layerVisible[layer.id]) continue;
     const layerEls = features.filter(el => el.tags && layer.match(el.tags));
     if (!layerEls.length) continue;
 
-    ctx.beginPath();
-    for (const el of layerEls) {
-      traceGeometry(ctx, el, bounds, S);
-    }
+    const col = colorSlots[layer.slot] ?? '#888';
 
     if (layer.fill) {
-      ctx.fillStyle = layer.color;
+      ctx.beginPath();
+      for (const el of layerEls) traceGeometry(ctx, el, bounds, S);
+      ctx.fillStyle = col;
       ctx.fill('evenodd');
     } else {
       // Waterway lines — dynamic width by type
@@ -393,7 +446,7 @@ function buildMapTexture(
         const lw = ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5;
         ctx.beginPath();
         traceGeometry(ctx, el, bounds, S);
-        ctx.strokeStyle = '#2e80be';
+        ctx.strokeStyle = col;
         ctx.lineWidth = lw;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -673,14 +726,20 @@ type RGB = [number, number, number];
 function lerp3(a: RGB, b: RGB, t: number): RGB {
   return [Math.round(a[0]+(b[0]-a[0])*t), Math.round(a[1]+(b[1]-a[1])*t), Math.round(a[2]+(b[2]-a[2])*t)];
 }
+function hexToRgb(hex: string): RGB {
+  const c = parseInt(hex.replace('#', ''), 16);
+  return [(c >> 16) & 0xff, (c >> 8) & 0xff, c & 0xff];
+}
+
 function hypso(t: number): RGB {
-  // Warm tan/beige gradient — terrain nu. Vegetation/water/snow come from OSM layers.
+  // Gradient based on slot 1 (Terrain nu) so user can change it
+  const [r, g, b] = hexToRgb(colorSlots[1]);
   const stops: [number, RGB][] = [
-    [0.00, [0xa8, 0x94, 0x68]],  // tan foncé (fond de vallée)
-    [0.35, [0xb8, 0xa4, 0x74]],  // beige moyen
-    [0.65, [0xc4, 0xb0, 0x80]],  // beige clair
-    [0.85, [0xcc, 0xb8, 0x8a]],  // beige haut
-    [1.00, [0xd8, 0xcc, 0xa8]],  // beige très clair (sommets)
+    [0.00, [Math.round(r * 0.64), Math.round(g * 0.63), Math.round(b * 0.58)]],
+    [0.35, [Math.round(r * 0.82), Math.round(g * 0.81), Math.round(b * 0.76)]],
+    [0.65, [r, g, b]],
+    [0.85, [Math.min(255, Math.round(r * 1.12)), Math.min(255, Math.round(g * 1.10)), Math.min(255, Math.round(b * 1.06))]],
+    [1.00, [Math.min(255, Math.round(r * 1.28)), Math.min(255, Math.round(g * 1.26)), Math.min(255, Math.round(b * 1.18))]],
   ];
   for (let i = 1; i < stops.length; i++) {
     if (t <= stops[i][0]) {

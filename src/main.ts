@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, reattachDimsCanvas, updateColorSlots, setLayerVisible, colorSlots, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -178,10 +178,12 @@ export function updateZoneFooter(): void {
   if (state.bounds) {
     footer.classList.add('visible');
     document.getElementById('tab-params-btn')?.removeAttribute('disabled');
+    document.getElementById('tab-colors-btn')?.removeAttribute('disabled');
     resetDimsCamera(); // zone changed → reset 3D view on next open
   } else {
     footer.classList.remove('visible');
     document.getElementById('tab-params-btn')?.setAttribute('disabled', '');
+    document.getElementById('tab-colors-btn')?.setAttribute('disabled', '');
     document.getElementById('tab-render-btn')?.setAttribute('disabled', '');
   }
 }
@@ -234,12 +236,14 @@ function syncDimsInputsFromState(): void {
 }
 
 function updateDimsHints(): void {
-  const baseH = Number((document.getElementById('dp-base') as HTMLInputElement)?.value ?? 5) || 5;
-  const walls = Number((document.getElementById('dp-walls') as HTMLInputElement)?.value ?? 2) || 2;
+  const baseH  = Number((document.getElementById('dp-base')  as HTMLInputElement)?.value ?? 5) || 5;
+  const walls  = Number((document.getElementById('dp-walls') as HTMLInputElement)?.value ?? 2) || 2;
+  const layerH = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+  const wallW  = Number((document.getElementById('ps-wall-w')  as HTMLInputElement)?.value ?? 0.42) || 0.42;
   const layersEl = document.getElementById('dp-layers-hint');
   const wallMmEl = document.getElementById('dp-wall-mm');
-  if (layersEl) layersEl.textContent = `${Math.round(baseH / 0.2)} couches`;
-  if (wallMmEl) wallMmEl.textContent = `${(walls * 0.42).toFixed(2)} mm`;
+  if (layersEl) layersEl.textContent = `${Math.round(baseH / layerH)} couches`;
+  if (wallMmEl) wallMmEl.textContent = `${(walls * wallW).toFixed(2)} mm`;
 }
 
 async function triggerDimsBuild(): Promise<void> {
@@ -302,6 +306,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (!tab || (btn as HTMLButtonElement).disabled) return;
     switchTab(tab);
     if (tab === 'params') onDimsTabOpen();
+    if (tab === 'colors') onColorsTabOpen();
     if (tab === 'render') {
       const canvas = document.getElementById('c3d') as HTMLCanvasElement;
       if (canvas) ensureThree(canvas);
@@ -309,7 +314,14 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-/* ── Bouton "Générer le terrain" (onglet 2 → 3) ── */
+/* ── Bouton "Couleurs" (onglet 2 → 3) ── */
+document.getElementById('btn-next-colors')?.addEventListener('click', () => {
+  document.getElementById('tab-colors-btn')?.removeAttribute('disabled');
+  switchTab('colors');
+  onColorsTabOpen();
+});
+
+/* ── Bouton "Générer" (onglet 3 → 4) ── */
 document.getElementById('btn-next-render')?.addEventListener('click', () => {
   document.getElementById('tab-render-btn')?.removeAttribute('disabled');
   switchTab('render');
@@ -320,6 +332,7 @@ document.getElementById('btn-next-render')?.addEventListener('click', () => {
 
 /* ── Boutons retour ── */
 document.getElementById('btn-back-zone')?.addEventListener('click', () => switchTab('zone'));
+document.getElementById('btn-back-dims')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
 document.getElementById('btn-back-params')?.addEventListener('click', () => switchTab('params'));
 
 /* ── Generate (onglet 3 manuel) ── */
@@ -383,4 +396,120 @@ document.querySelectorAll('#params-col input, #params-col select').forEach(el =>
       if (valEl) valEl.textContent = (el as HTMLInputElement).value;
     }
   });
+});
+
+/* ═══════════════════════════════════════════
+   COLORS TAB
+   ═══════════════════════════════════════════ */
+function onColorsTabOpen(): void {
+  if (!state.bounds) return;
+  const area = document.getElementById('colors-3d-area')!;
+  reattachDimsCanvas(area);
+  // Sync swatch backgrounds from current color slots
+  syncSwatchUI();
+}
+
+function syncSwatchUI(): void {
+  document.querySelectorAll<HTMLElement>('.cp-sw-mini[data-slot]').forEach(el => {
+    const slot = Number(el.dataset.slot);
+    if (colorSlots[slot]) el.style.background = colorSlots[slot];
+  });
+  document.querySelectorAll<HTMLElement>('.cp-sw-inner').forEach(el => {
+    const label = el.closest<HTMLElement>('.cp-swatch');
+    const input = label?.querySelector<HTMLInputElement>('input[type=color]');
+    if (input) el.style.background = input.value;
+  });
+}
+
+// Color picker inputs → live update
+document.querySelectorAll<HTMLInputElement>('.cp-color-input').forEach(input => {
+  const slot = Number(input.dataset.slot);
+  // Set initial background of inner div
+  input.addEventListener('input', () => {
+    const col = input.value;
+    const inner = input.nextElementSibling as HTMLElement;
+    if (inner) inner.style.background = col;
+    // Update all mini swatches for this slot
+    document.querySelectorAll<HTMLElement>(`.cp-sw-mini[data-slot="${slot}"]`).forEach(el => {
+      el.style.background = col;
+    });
+    // Rebuild 3D texture
+    updateColorSlots({ [slot]: col });
+  });
+  // Init swatch background
+  const inner = input.nextElementSibling as HTMLElement;
+  if (inner) inner.style.background = input.value;
+});
+
+// Layer visibility toggle
+document.querySelectorAll<HTMLButtonElement>('.cp-eye').forEach(btn => {
+  const layerId = btn.dataset.layer;
+  if (!layerId) return;
+  btn.addEventListener('click', () => {
+    btn.classList.toggle('hidden-layer');
+    const visible = !btn.classList.contains('hidden-layer');
+    setLayerVisible(layerId, visible);
+  });
+});
+
+// Preset models
+const PRESETS: Record<string, Record<number, string>> = {
+  alpes:  { 1: '#c0af88', 2: '#e8ecf0', 3: '#8ab858', 4: '#3a6828', 5: '#4a88c0', 6: '#ff4500' },
+  mono:   { 1: '#a0a090', 2: '#d8d8d8', 3: '#888878', 4: '#606050', 5: '#787878', 6: '#505050' },
+  desert: { 1: '#d4a96a', 2: '#f0e8c8', 3: '#c8a858', 4: '#a07840', 5: '#5888a0', 6: '#c04820' },
+};
+document.getElementById('cp-apply')?.addEventListener('click', () => {
+  const sel = (document.getElementById('cp-preset') as HTMLSelectElement).value;
+  const preset = PRESETS[sel];
+  if (!preset) return;
+  updateColorSlots(preset);
+  // Update picker inputs
+  Object.entries(preset).forEach(([slot, col]) => {
+    const input = document.querySelector<HTMLInputElement>(`.cp-color-input[data-slot="${slot}"]`);
+    if (input) {
+      input.value = col;
+      const inner = input.nextElementSibling as HTMLElement;
+      if (inner) inner.style.background = col;
+    }
+  });
+  document.querySelectorAll<HTMLElement>('.cp-sw-mini[data-slot]').forEach(el => {
+    const slot = Number(el.dataset.slot);
+    if (preset[slot]) el.style.background = preset[slot];
+  });
+});
+
+/* ── Print Settings dialog ── */
+const psOverlay = document.getElementById('print-settings-overlay')!;
+document.getElementById('btn-print-settings')?.addEventListener('click', () => {
+  psOverlay.classList.remove('hidden');
+});
+document.getElementById('ps-close')?.addEventListener('click', () => {
+  psOverlay.classList.add('hidden');
+});
+psOverlay?.addEventListener('click', (e) => {
+  if (e.target === psOverlay) psOverlay.classList.add('hidden');
+});
+
+// Live slider value display
+const psLayerH = document.getElementById('ps-layer-h') as HTMLInputElement;
+const psWallW  = document.getElementById('ps-wall-w')  as HTMLInputElement;
+const psLayerHVal = document.getElementById('ps-layer-h-val')!;
+const psWallWVal  = document.getElementById('ps-wall-w-val')!;
+psLayerH?.addEventListener('input', () => {
+  psLayerHVal.textContent = Number(psLayerH.value).toFixed(2);
+  updateDimsHints(); // recalculate layer count
+});
+psWallW?.addEventListener('input', () => {
+  psWallWVal.textContent = Number(psWallW.value).toFixed(2);
+  updateDimsHints(); // recalculate wall thickness
+});
+
+document.getElementById('ps-confirm')?.addEventListener('click', () => {
+  psOverlay.classList.add('hidden');
+  updateDimsHints();
+});
+document.getElementById('ps-reset')?.addEventListener('click', () => {
+  if (psLayerH) { psLayerH.value = '0.20'; psLayerHVal.textContent = '0.20'; }
+  if (psWallW)  { psWallW.value  = '0.42'; psWallWVal.textContent  = '0.42'; }
+  updateDimsHints();
 });
