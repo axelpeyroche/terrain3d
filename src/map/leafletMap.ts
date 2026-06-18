@@ -55,7 +55,7 @@ export function initMap(onZone?: () => void): void {
   L.control.zoom({ position: 'topright' }).addTo(map);
   L.control.layers({ 'OSM': osmL, 'Satellite': satL, 'IGN': ignL }, {}, { position: 'topright' }).addTo(map);
 
-  new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById('mp')!);
+  new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById('map')!);
   setTimeout(() => map.invalidateSize(), 300);
 
   setupDrawButtons();
@@ -224,7 +224,7 @@ function updateGPXLayer(): void {
   if (state.gpxPoints.length < 2) return;
   gpxLayer = L.polyline(
     state.gpxPoints.map(p => [p.lat, p.lon] as [number, number]),
-    { color: '#f43f5e', weight: 3.5, opacity: 0.92 },
+    { color: '#ff4500', weight: 4, opacity: 0.95 },
   ).addTo(map);
 }
 
@@ -341,10 +341,7 @@ function setupDrawButtons(): void {
     state.bounds = null; state.zonePts = null; state.gpxPoints = []; tracePts = [];
     const badge = document.getElementById('gpx-badge'); if (badge) badge.style.display = 'none';
     const cgpx = document.getElementById('db-cgpx'); if (cgpx) cgpx.style.display = 'none';
-    const bw = document.getElementById('bot-wrap'); if (bw) bw.style.display = 'none';
     const snap = document.getElementById('snap'); if (snap) snap.style.display = 'none';
-    const lbl = document.getElementById('gpx-lbl');
-    if (lbl) { lbl.textContent = '📂 Importer .gpx'; lbl.classList.remove('on'); }
     const fi = document.getElementById('gpx-file') as HTMLInputElement;
     if (fi) fi.value = '';
   });
@@ -360,7 +357,7 @@ function setupDrawButtons(): void {
     const la = state.gpxPoints.map(p => p.lat), lo = state.gpxPoints.map(p => p.lon);
     map.fitBounds(
       [[Math.min(...la), Math.min(...lo)], [Math.max(...la), Math.max(...lo)]],
-      { paddingTopLeft: [180, 80], paddingBottomRight: [80, 80], maxZoom: 12 },
+      { paddingTopLeft: [110, 80], paddingBottomRight: [80, 80], maxZoom: 14 },
     );
   });
 }
@@ -389,8 +386,8 @@ function setupGPX(): void {
 
         state.gpxPoints = pts;
         updateGPXLayer();
-        if (!state.bounds && gpxLayer) {
-          map.fitBounds(gpxLayer.getBounds(), { padding: [60, 60], maxZoom: 12 });
+        if (gpxLayer) {
+          map.fitBounds(gpxLayer.getBounds(), { padding: [80, 100], maxZoom: 14 });
         }
 
         // Distance haversine
@@ -406,8 +403,6 @@ function setupGPX(): void {
         }
 
         showGPXBadge(`📍 ${pts.length.toLocaleString()} pts · ${d.toFixed(1)} km`);
-        const lbl = document.getElementById('gpx-lbl');
-        if (lbl) { lbl.textContent = '✓ ' + f.name.replace('.gpx', '').substring(0, 16); lbl.classList.add('on'); }
         const cgpx = document.getElementById('db-cgpx'); if (cgpx) cgpx.style.display = 'flex';
       } catch { /* ignore */ }
     };
