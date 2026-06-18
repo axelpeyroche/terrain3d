@@ -173,12 +173,9 @@ function updateRenderInfo(minE: number, maxE: number, scaleMm: number, wMm: numb
    ═══════════════════════════════════════════ */
 export function updateZoneFooter(): void {
   const footer = document.getElementById('zone-footer');
-  const dims   = document.getElementById('zone-dims');
-  if (!footer || !dims) return;
+  if (!footer) return;
   if (state.bounds) {
-    dims.textContent = `${state.wMm} × ${state.dMm} mm`;
     footer.classList.add('visible');
-    // Activer l'onglet 2
     document.getElementById('tab-params-btn')?.removeAttribute('disabled');
   } else {
     footer.classList.remove('visible');

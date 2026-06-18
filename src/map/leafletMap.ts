@@ -23,6 +23,11 @@ let prevPoly: L.Polygon | L.Polyline | null = null;
 let firstPolyMarker: L.CircleMarker | null = null;
 let _clickTimer: ReturnType<typeof setTimeout> | null = null;
 
+/* ── Contrôles de zone active ── */
+let zoneActionMode: 'none' | 'resize' | 'move' = 'none';
+let moveAnchor: L.LatLng | null = null;
+let zonePtsAtMoveStart: [number, number][] = [];
+
 const HINTS: Record<string, string> = {
   rect:  'Cliquez 1er coin puis coin opposé',
   sq:    'Cliquez 1er coin (carré automatique)',
@@ -51,14 +56,26 @@ export function initMap(onZone?: () => void): void {
     { maxZoom: 19, attribution: '© IGN' },
   );
 
-  map = L.map('map', { center: [48.8584, 2.2945], zoom: 15, zoomControl: false, layers: [osmL] });
+  const topoL = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom: 17, attribution: '© OpenTopoMap',
+  });
+  const cartoL = L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}@2x.png',
+    { maxZoom: 19, attribution: '© CARTO' },
+  );
+
+  map = L.map('map', { center: [48.8584, 2.2945], zoom: 13, zoomControl: false, layers: [osmL] });
   L.control.zoom({ position: 'topright' }).addTo(map);
-  L.control.layers({ 'OSM': osmL, 'Satellite': satL, 'IGN': ignL }, {}, { position: 'topright' }).addTo(map);
+  L.control.layers(
+    { 'Plan (OSM)': osmL, 'Satellite': satL, 'Topographique': topoL, 'Voyager': cartoL, 'IGN (France)': ignL },
+    {}, { position: 'topright' },
+  ).addTo(map);
 
   new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById('map')!);
   setTimeout(() => map.invalidateSize(), 300);
 
   setupDrawButtons();
+  setupZoneControls();
   setupGPX();
   setupSearch();
   setupMapEvents();
@@ -167,6 +184,118 @@ function updateSnapDot(ll: L.LatLng, target: L.LatLng | null): void {
 }
 
 /* ════════════════════════════════════════════
+   CONTRÔLES DE ZONE ACTIVE
+   ════════════════════════════════════════════ */
+function showZoneControls(): void {
+  const el = document.getElementById('zone-controls');
+  if (el) el.style.display = 'block';
+}
+
+function hideZoneControls(): void {
+  const el = document.getElementById('zone-controls');
+  if (el) el.style.display = 'none';
+  setZoneActionMode('none');
+}
+
+function setZoneActionMode(m: 'none' | 'resize' | 'move'): void {
+  if (zoneActionMode === 'move' && m !== 'move') map.dragging.enable();
+  zoneActionMode = m;
+  document.getElementById('zc-resize')?.classList.toggle('active', m === 'resize');
+  document.getElementById('zc-move')?.classList.toggle('active', m === 'move');
+  const c = map.getContainer();
+  if (m === 'move') { map.dragging.disable(); c.style.cursor = 'grab'; }
+  else if (m === 'resize') { map.scrollWheelZoom.disable(); c.style.cursor = 'ew-resize'; }
+  else { map.scrollWheelZoom.enable(); c.style.cursor = ''; }
+}
+
+function updateZoneLayerFromPts(pts: [number, number][]): void {
+  if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
+  zoneLayer = L.polygon(pts as any, {
+    color: '#f43f5e', weight: 2.5, fillColor: '#f43f5e', fillOpacity: 0.08, dashArray: '6,4',
+  }).addTo(map);
+  const lats = pts.map(p => p[0]), lons = pts.map(p => p[1]);
+  state.bounds = {
+    minLat: Math.min(...lats), maxLat: Math.max(...lats),
+    minLon: Math.min(...lons), maxLon: Math.max(...lons),
+  };
+  const cLat = (state.bounds.minLat + state.bounds.maxLat) / 2;
+  const realW = (state.bounds.maxLon - state.bounds.minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
+  const realH = (state.bounds.maxLat - state.bounds.minLat) * 111320;
+  const maxDim = Number((document.getElementById('t-maxdim') as HTMLInputElement)?.value || 150);
+  const sc = maxDim / Math.max(realH, realW);
+  state.wMm = Math.round(realW * sc);
+  state.dMm = Math.round(realH * sc);
+  onZoneReady?.();
+}
+
+function scaleZone(factor: number): void {
+  if (!state.zonePts) return;
+  const lats = state.zonePts.map(p => p[0]), lons = state.zonePts.map(p => p[1]);
+  const cLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const cLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+  const newPts: [number, number][] = state.zonePts.map(([la, lo]) => [
+    cLat + (la - cLat) * factor,
+    cLon + (lo - cLon) * factor,
+  ]);
+  state.zonePts = newPts;
+  updateZoneLayerFromPts(newPts);
+}
+
+function setupZoneControls(): void {
+  document.getElementById('zc-delete')?.addEventListener('click', () => {
+    if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
+    state.bounds = null; state.zonePts = null;
+    hideZoneControls();
+    onZoneReady?.();
+  });
+
+  document.getElementById('zc-resize')?.addEventListener('click', () => {
+    setZoneActionMode(zoneActionMode === 'resize' ? 'none' : 'resize');
+  });
+
+  document.getElementById('zc-move')?.addEventListener('click', () => {
+    setZoneActionMode(zoneActionMode === 'move' ? 'none' : 'move');
+  });
+
+  /* Resize via molette */
+  map.getContainer().addEventListener('wheel', (e: WheelEvent) => {
+    if (zoneActionMode !== 'resize') return;
+    e.preventDefault(); e.stopPropagation();
+    scaleZone(e.deltaY < 0 ? 1.06 : 0.94);
+  }, { passive: false });
+
+  /* Move via drag */
+  map.on('mousedown', (e: L.LeafletMouseEvent) => {
+    if (zoneActionMode !== 'move' || !state.zonePts) return;
+    moveAnchor = e.latlng;
+    zonePtsAtMoveStart = state.zonePts.map(p => [...p] as [number, number]);
+    map.getContainer().style.cursor = 'grabbing';
+  });
+
+  map.on('mousemove', (e: L.LeafletMouseEvent) => {
+    if (zoneActionMode !== 'move' || !moveAnchor || !zonePtsAtMoveStart.length) return;
+    const dLat = e.latlng.lat - moveAnchor.lat;
+    const dLon = e.latlng.lng - moveAnchor.lng;
+    const newPts = zonePtsAtMoveStart.map(([la, lo]) => [la + dLat, lo + dLon] as [number, number]);
+    if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
+    zoneLayer = L.polygon(newPts as any, {
+      color: '#f43f5e', weight: 2.5, fillColor: '#f43f5e', fillOpacity: 0.08, dashArray: '6,4',
+    }).addTo(map);
+  });
+
+  map.on('mouseup', (e: L.LeafletMouseEvent) => {
+    if (zoneActionMode !== 'move' || !moveAnchor || !zonePtsAtMoveStart.length) return;
+    const dLat = e.latlng.lat - moveAnchor.lat;
+    const dLon = e.latlng.lng - moveAnchor.lng;
+    const newPts = zonePtsAtMoveStart.map(([la, lo]) => [la + dLat, lo + dLon] as [number, number]);
+    moveAnchor = null; zonePtsAtMoveStart = [];
+    state.zonePts = newPts;
+    updateZoneLayerFromPts(newPts);
+    map.getContainer().style.cursor = 'grab';
+  });
+}
+
+/* ════════════════════════════════════════════
    FINALISATION DE ZONE
    ════════════════════════════════════════════ */
 function finalizeZone(pts: [number, number][], zType: typeof state.zoneType): void {
@@ -193,6 +322,7 @@ function finalizeZone(pts: [number, number][], zType: typeof state.zoneType): vo
   state.dMm = Math.round(realH * sc);
 
   onZoneReady?.();
+  showZoneControls();
   resetDraw();
 }
 
@@ -339,11 +469,13 @@ function setupDrawButtons(): void {
     if (gpxLayer) { map.removeLayer(gpxLayer); gpxLayer = null; }
     if (searchMarker) { map.removeLayer(searchMarker); searchMarker = null; }
     state.bounds = null; state.zonePts = null; state.gpxPoints = []; tracePts = [];
+    hideZoneControls();
     const badge = document.getElementById('gpx-badge'); if (badge) badge.style.display = 'none';
     const cgpx = document.getElementById('db-cgpx'); if (cgpx) cgpx.style.display = 'none';
     const snap = document.getElementById('snap'); if (snap) snap.style.display = 'none';
     const fi = document.getElementById('gpx-file') as HTMLInputElement;
     if (fi) fi.value = '';
+    onZoneReady?.();
   });
 
   document.getElementById('btn-czone')?.addEventListener('click', () => {

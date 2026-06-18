@@ -127,6 +127,34 @@ export function injectUI(): void {
           </svg>
           <span>Effacer</span>
         </button>
+
+        <!-- Contrôles de zone (apparaissent quand zone définie) -->
+        <div id="zone-controls" style="display:none">
+          <div class="zt-sep"></div>
+          <div class="zt-section-label">Zone active</div>
+
+          <button class="zt-btn zt-danger" id="zc-delete" title="Supprimer la zone">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <polyline points="3,6 21,6"/><path d="M8,6V4h8v2"/>
+              <rect x="5" y="6" width="14" height="14" rx="2"/>
+            </svg>
+            <span>Supprimer</span>
+          </button>
+
+          <button class="zt-btn" id="zc-resize" title="Redimensionner · Molette souris">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Taille</span>
+          </button>
+
+          <button class="zt-btn" id="zc-move" title="Déplacer la zone">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 2v20M2 12h20M12 6l-3-3M12 6l3-3M12 18l-3 3M12 18l3 3M6 12l-3-3M6 12l-3 3M18 12l3-3M18 12l3 3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Déplacer</span>
+          </button>
+        </div>
       </div>
 
       <!-- Carte Leaflet -->
@@ -136,11 +164,11 @@ export function injectUI(): void {
       <div id="snap"></div>
       <div id="dch"></div>
 
-      <!-- Footer zone définie -->
+      <!-- Footer — bouton vers onglet suivant (sans dimensions) -->
       <div id="zone-footer">
         <div id="zone-info">
-          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 2a5 5 0 110 10A5 5 0 018 3z" opacity=".4"/><path d="M8 5a3 3 0 100 6A3 3 0 008 5z"/></svg>
-          Zone sélectionnée : <strong id="zone-dims">—</strong>
+          <svg viewBox="0 0 16 16" fill="#10b981"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm3.7 5.7l-4 4a1 1 0 01-1.4 0l-2-2a1 1 0 011.4-1.4L7 8.6l3.3-3.3a1 1 0 011.4 1.4z"/></svg>
+          Zone définie
         </div>
         <button id="btn-next-tab" class="btn-next">
           Dimensions
