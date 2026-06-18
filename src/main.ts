@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -178,6 +178,7 @@ export function updateZoneFooter(): void {
   if (state.bounds) {
     footer.classList.add('visible');
     document.getElementById('tab-params-btn')?.removeAttribute('disabled');
+    resetDimsCamera(); // zone changed → reset 3D view on next open
   } else {
     footer.classList.remove('visible');
     document.getElementById('tab-params-btn')?.setAttribute('disabled', '');
@@ -193,11 +194,14 @@ let dimsBuilding = false;
 
 function getDimSettings(): DimSettings {
   const n = (id: string, def: number) => Number((document.getElementById(id) as HTMLInputElement)?.value ?? def) || def;
+  const b = (id: string) => (document.getElementById(id) as HTMLInputElement)?.checked ?? false;
   return {
-    wMm:   n('dp-w',    state.wMm   || 200),
-    dMm:   n('dp-d',    state.dMm   || 200),
-    baseH: n('dp-base', 5),
-    exag:  n('dp-exag', 1),
+    wMm:       n('dp-w',    state.wMm   || 200),
+    dMm:       n('dp-d',    state.dMm   || 200),
+    baseH:     n('dp-base', 5),
+    exag:      n('dp-exag', 1),
+    flatFacade: b('dp-flat'),
+    gpxPoints: state.gpxPoints,
   };
 }
 
@@ -331,6 +335,10 @@ dimsInputIds.forEach(id => {
 });
 
 document.getElementById('dp-walls')?.addEventListener('input', updateDimsHints);
+
+document.getElementById('dp-flat')?.addEventListener('change', () => {
+  rebuildScene(getDimSettings());
+});
 
 /* ── Quick export button in Dimensions panel ── */
 document.getElementById('dp-dl-btn')?.addEventListener('click', () => {
