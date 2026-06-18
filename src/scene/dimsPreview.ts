@@ -298,71 +298,46 @@ out geom;`;
 ══════════════════════════════════════════════ */
 
 // Zone definitions: drawn bottom-to-top so upper layers override
-// Color: [R, G, B], fill: true = polygon, false = line
+// Terrain nu = hypsometric base (tan/beige). Only OSM-tagged features get color.
 const ZONE_LAYERS: Array<{
   match: (tags: Record<string, string>) => boolean;
   color: string;
   fill: boolean;
-  lineWidth?: number;
 }> = [
-  // Bare terrain (drawn first, overridden by vegetation above)
+  // Végétation basse: prairies, prés, cultures
   {
-    match: t => t.natural === 'sand',
-    color: '#c8b870', fill: true,
+    match: t => t.natural === 'grassland' || t.landuse === 'meadow' || t.landuse === 'grass' || t.landuse === 'farmland',
+    color: '#8ab858', fill: true,
   },
+  // Végétation intermédiaire: lande, heath, fell, maquis
   {
-    match: t => t.natural === 'scree',
-    color: '#b8a888', fill: true,
+    match: t => t.natural === 'fell' || t.natural === 'moor' || t.natural === 'heath' || t.natural === 'scrub',
+    color: '#5e9040', fill: true,
   },
-  {
-    match: t => t.natural === 'bare_rock',
-    color: '#9a8878', fill: true,
-  },
-  // Farmland (light beige)
-  {
-    match: t => t.landuse === 'farmland',
-    color: '#c8b890', fill: true,
-  },
-  // Low vegetation: grassland, meadow
-  {
-    match: t => t.natural === 'grassland' || t.landuse === 'meadow' || t.landuse === 'grass',
-    color: '#7eaa52', fill: true,
-  },
-  // Fell / moor / heath (transition)
-  {
-    match: t => t.natural === 'fell' || t.natural === 'moor' || t.natural === 'heath',
-    color: '#6a8c48', fill: true,
-  },
-  // Medium scrub
-  {
-    match: t => t.natural === 'scrub',
-    color: '#528040', fill: true,
-  },
-  // Dense forest/wood
+  // Végétation dense: forêt, bois
   {
     match: t => t.natural === 'wood' || t.landuse === 'forest',
-    color: '#2e6828', fill: true,
+    color: '#3a6828', fill: true,
   },
-  // Wetland
+  // Zones humides
   {
     match: t => t.natural === 'wetland' || t.natural === 'mud',
-    color: '#4a7870', fill: true,
+    color: '#4a7848', fill: true,
   },
-  // Glacier / snow (drawn above vegetation)
+  // Neige et glace
   {
     match: t => t.natural === 'glacier' || t.natural === 'snow',
-    color: 'rgba(218,238,252,0.92)', fill: true,
+    color: '#e4eee8', fill: true,
   },
-  // Water: river banks and lakes (filled)
+  // Plans d'eau (lacs, rivières larges)
   {
     match: t => t.natural === 'water' || t.waterway === 'riverbank',
-    color: '#2e80be', fill: true,
+    color: '#4a88c0', fill: true,
   },
-  // Waterways: rivers and streams (lines, drawn last)
+  // Voies navigables (lignes)
   {
     match: t => !!t.waterway && t.waterway !== 'riverbank',
-    color: '#2e80be', fill: false,
-    lineWidth: 0, // computed dynamically
+    color: '#4a88c0', fill: false,
   },
 ];
 
@@ -576,9 +551,23 @@ function buildProfileRectFacades(
 ): THREE.Mesh[] {
   const h = (ix: number, iy: number) =>
     baseH + ((grid[iy*G + ix] - minE) / elevRange) * elevScaleMm;
+  // Corner heights
+  const hSW = h(0, G-1), hSE = h(G-1, G-1);
+  const hNW = h(0, 0),   hNE = h(G-1, 0);
+  // South/north walls extended by facadeW on each side to fill corners
+  const southPts: [number,number,number][] = [
+    [-wMm/2 - facadeW, dMm/2, hSW],
+    ...Array.from({length:G}, (_,i) => [-wMm/2+i/(G-1)*wMm, dMm/2, h(i,G-1)] as [number,number,number]),
+    [ wMm/2 + facadeW, dMm/2, hSE],
+  ];
+  const northPts: [number,number,number][] = [
+    [ wMm/2 + facadeW, -dMm/2, hNE],
+    ...Array.from({length:G}, (_,i) => [wMm/2-i/(G-1)*wMm, -dMm/2, h(G-1-i, 0)] as [number,number,number]),
+    [-wMm/2 - facadeW, -dMm/2, hNW],
+  ];
   return [
-    buildEdgeWall(Array.from({length:G},(_,i)=>[-wMm/2+i/(G-1)*wMm, dMm/2,  h(i,G-1)] as [number,number,number]), [0,0,1],  facadeW),
-    buildEdgeWall(Array.from({length:G},(_,i)=>[ wMm/2-i/(G-1)*wMm,-dMm/2,  h(G-1-i,0)] as [number,number,number]), [0,0,-1], facadeW),
+    buildEdgeWall(southPts, [0,0,1], facadeW),
+    buildEdgeWall(northPts, [0,0,-1], facadeW),
     buildEdgeWall(Array.from({length:G},(_,j)=>[ wMm/2, dMm/2-j/(G-1)*dMm, h(G-1,G-1-j)] as [number,number,number]), [1,0,0],  facadeW),
     buildEdgeWall(Array.from({length:G},(_,j)=>[-wMm/2,-dMm/2+j/(G-1)*dMm, h(0,j)] as [number,number,number]),       [-1,0,0], facadeW),
   ];
@@ -685,16 +674,13 @@ function lerp3(a: RGB, b: RGB, t: number): RGB {
   return [Math.round(a[0]+(b[0]-a[0])*t), Math.round(a[1]+(b[1]-a[1])*t), Math.round(a[2]+(b[2]-a[2])*t)];
 }
 function hypso(t: number): RGB {
+  // Warm tan/beige gradient — terrain nu. Vegetation/water/snow come from OSM layers.
   const stops: [number, RGB][] = [
-    [0.00, [0x30, 0x88, 0xcc]],
-    [0.06, [0x44, 0x9a, 0xb4]],
-    [0.12, [0x4c, 0x88, 0x3c]],
-    [0.30, [0x5e, 0x98, 0x42]],
-    [0.46, [0x78, 0x9c, 0x48]],
-    [0.59, [0x96, 0x8c, 0x52]],
-    [0.71, [0xa0, 0x7e, 0x54]],
-    [0.83, [0xa4, 0x94, 0x80]],
-    [1.00, [0xf0, 0xee, 0xea]],
+    [0.00, [0xa8, 0x94, 0x68]],  // tan foncé (fond de vallée)
+    [0.35, [0xb8, 0xa4, 0x74]],  // beige moyen
+    [0.65, [0xc4, 0xb0, 0x80]],  // beige clair
+    [0.85, [0xcc, 0xb8, 0x8a]],  // beige haut
+    [1.00, [0xd8, 0xcc, 0xa8]],  // beige très clair (sommets)
   ];
   for (let i = 1; i < stops.length; i++) {
     if (t <= stops[i][0]) {
