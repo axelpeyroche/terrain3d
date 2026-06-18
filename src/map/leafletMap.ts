@@ -187,25 +187,37 @@ function updateSnapDot(ll: L.LatLng, target: L.LatLng | null): void {
    CONTRÔLES DE ZONE ACTIVE
    ════════════════════════════════════════════ */
 function showZoneControls(): void {
-  const el = document.getElementById('zone-controls');
-  if (el) el.style.display = 'block';
+  document.getElementById('zone-controls')?.classList.add('visible');
+  positionZoneControls();
 }
 
 function hideZoneControls(): void {
-  const el = document.getElementById('zone-controls');
-  if (el) el.style.display = 'none';
+  document.getElementById('zone-controls')?.classList.remove('visible');
   setZoneActionMode('none');
 }
 
+function positionZoneControls(): void {
+  if (!state.bounds) return;
+  const el = document.getElementById('zone-controls');
+  if (!el) return;
+  const ne = L.latLng(state.bounds.maxLat, state.bounds.maxLon);
+  const pt = map.latLngToContainerPoint(ne);
+  const elW = 40;
+  el.style.left = (pt.x + 10) + 'px';
+  el.style.top  = Math.max(10, pt.y - elW / 2) + 'px';
+}
+
 function setZoneActionMode(m: 'none' | 'resize' | 'move'): void {
-  if (zoneActionMode === 'move' && m !== 'move') map.dragging.enable();
+  if (zoneActionMode === 'move' && m !== 'move') {
+    map.dragging.enable();
+    map.getContainer().style.cursor = '';
+  }
   zoneActionMode = m;
-  document.getElementById('zc-resize')?.classList.toggle('active', m === 'resize');
   document.getElementById('zc-move')?.classList.toggle('active', m === 'move');
-  const c = map.getContainer();
-  if (m === 'move') { map.dragging.disable(); c.style.cursor = 'grab'; }
-  else if (m === 'resize') { map.scrollWheelZoom.disable(); c.style.cursor = 'ew-resize'; }
-  else { map.scrollWheelZoom.enable(); c.style.cursor = ''; }
+  if (m === 'move') {
+    map.dragging.disable();
+    map.getContainer().style.cursor = 'grab';
+  }
 }
 
 function updateZoneLayerFromPts(pts: [number, number][]): void {
@@ -242,6 +254,7 @@ function scaleZone(factor: number): void {
 }
 
 function setupZoneControls(): void {
+  /* Supprimer */
   document.getElementById('zc-delete')?.addEventListener('click', () => {
     if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
     state.bounds = null; state.zonePts = null;
@@ -249,33 +262,35 @@ function setupZoneControls(): void {
     onZoneReady?.();
   });
 
-  document.getElementById('zc-resize')?.addEventListener('click', () => {
-    setZoneActionMode(zoneActionMode === 'resize' ? 'none' : 'resize');
-  });
+  /* Agrandir / Réduire — boutons directs */
+  document.getElementById('zc-zoom-in')?.addEventListener('click', () => scaleZone(1.2));
+  document.getElementById('zc-zoom-out')?.addEventListener('click', () => scaleZone(0.8));
 
+  /* Déplacer — toggle drag mode */
   document.getElementById('zc-move')?.addEventListener('click', () => {
     setZoneActionMode(zoneActionMode === 'move' ? 'none' : 'move');
   });
 
-  /* Resize via molette */
-  map.getContainer().addEventListener('wheel', (e: WheelEvent) => {
-    if (zoneActionMode !== 'resize') return;
-    e.preventDefault(); e.stopPropagation();
-    scaleZone(e.deltaY < 0 ? 1.06 : 0.94);
-  }, { passive: false });
+  /* Move via drag natif (events sur document pour capturer hors carte) */
+  let moveStartPx: { x: number; y: number } | null = null;
 
-  /* Move via drag */
-  map.on('mousedown', (e: L.LeafletMouseEvent) => {
+  map.getContainer().addEventListener('mousedown', (e: MouseEvent) => {
     if (zoneActionMode !== 'move' || !state.zonePts) return;
-    moveAnchor = e.latlng;
-    zonePtsAtMoveStart = state.zonePts.map(p => [...p] as [number, number]);
+    moveStartPx = { x: e.clientX, y: e.clientY };
+    zonePtsAtMoveStart = state.zonePts.map(p => [p[0], p[1]] as [number, number]);
     map.getContainer().style.cursor = 'grabbing';
+    e.stopPropagation();
   });
 
-  map.on('mousemove', (e: L.LeafletMouseEvent) => {
-    if (zoneActionMode !== 'move' || !moveAnchor || !zonePtsAtMoveStart.length) return;
-    const dLat = e.latlng.lat - moveAnchor.lat;
-    const dLon = e.latlng.lng - moveAnchor.lng;
+  document.addEventListener('mousemove', (e: MouseEvent) => {
+    if (zoneActionMode !== 'move' || !moveStartPx || !zonePtsAtMoveStart.length) return;
+    const rect = map.getContainer().getBoundingClientRect();
+    const startLL = map.containerPointToLatLng(
+      L.point(moveStartPx.x - rect.left, moveStartPx.y - rect.top));
+    const curLL = map.containerPointToLatLng(
+      L.point(e.clientX - rect.left, e.clientY - rect.top));
+    const dLat = curLL.lat - startLL.lat;
+    const dLon = curLL.lng - startLL.lng;
     const newPts = zonePtsAtMoveStart.map(([la, lo]) => [la + dLat, lo + dLon] as [number, number]);
     if (zoneLayer) { map.removeLayer(zoneLayer); zoneLayer = null; }
     zoneLayer = L.polygon(newPts as any, {
@@ -283,16 +298,25 @@ function setupZoneControls(): void {
     }).addTo(map);
   });
 
-  map.on('mouseup', (e: L.LeafletMouseEvent) => {
-    if (zoneActionMode !== 'move' || !moveAnchor || !zonePtsAtMoveStart.length) return;
-    const dLat = e.latlng.lat - moveAnchor.lat;
-    const dLon = e.latlng.lng - moveAnchor.lng;
+  document.addEventListener('mouseup', (e: MouseEvent) => {
+    if (zoneActionMode !== 'move' || !moveStartPx || !zonePtsAtMoveStart.length) return;
+    const rect = map.getContainer().getBoundingClientRect();
+    const startLL = map.containerPointToLatLng(
+      L.point(moveStartPx.x - rect.left, moveStartPx.y - rect.top));
+    const curLL = map.containerPointToLatLng(
+      L.point(e.clientX - rect.left, e.clientY - rect.top));
+    const dLat = curLL.lat - startLL.lat;
+    const dLon = curLL.lng - startLL.lng;
     const newPts = zonePtsAtMoveStart.map(([la, lo]) => [la + dLat, lo + dLon] as [number, number]);
-    moveAnchor = null; zonePtsAtMoveStart = [];
+    moveStartPx = null; zonePtsAtMoveStart = [];
     state.zonePts = newPts;
     updateZoneLayerFromPts(newPts);
+    positionZoneControls();
     map.getContainer().style.cursor = 'grab';
   });
+
+  /* Repositionner les contrôles quand la carte bouge */
+  map.on('move zoom moveend zoomend', positionZoneControls);
 }
 
 /* ════════════════════════════════════════════

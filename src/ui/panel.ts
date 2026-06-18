@@ -128,37 +128,36 @@ export function injectUI(): void {
           <span>Effacer</span>
         </button>
 
-        <!-- Contrôles de zone (apparaissent quand zone définie) -->
-        <div id="zone-controls" style="display:none">
-          <div class="zt-sep"></div>
-          <div class="zt-section-label">Zone active</div>
-
-          <button class="zt-btn zt-danger" id="zc-delete" title="Supprimer la zone">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <polyline points="3,6 21,6"/><path d="M8,6V4h8v2"/>
-              <rect x="5" y="6" width="14" height="14" rx="2"/>
-            </svg>
-            <span>Supprimer</span>
-          </button>
-
-          <button class="zt-btn" id="zc-resize" title="Redimensionner · Molette souris">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>Taille</span>
-          </button>
-
-          <button class="zt-btn" id="zc-move" title="Déplacer la zone">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-              <path d="M12 2v20M2 12h20M12 6l-3-3M12 6l3-3M12 18l-3 3M12 18l3 3M6 12l-3-3M6 12l-3 3M18 12l3-3M18 12l3 3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>Déplacer</span>
-          </button>
-        </div>
       </div>
 
       <!-- Carte Leaflet -->
       <div id="map"></div>
+
+      <!-- Contrôles flottants de zone (position mise à jour par JS) -->
+      <div id="zone-controls">
+        <button class="zc-btn" id="zc-move" title="Déplacer la zone">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M10 2v16M2 10h16M10 5L7 2M10 5l3-3M10 15l-3 3M10 15l3 3M5 10l-3-3M5 10l-3 3M15 10l3-3M15 10l3 3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="zc-btn" id="zc-zoom-in" title="Agrandir la zone">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M13 3h4v4M3 13v4h4M17 3l-6 6M3 17l6-6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="zc-btn" id="zc-zoom-out" title="Réduire la zone">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M7 13L3 17M17 3l-4 4M3 13h4v4M13 3v4h4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <div class="zc-sep"></div>
+        <button class="zc-btn zc-danger" id="zc-delete" title="Supprimer la zone">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <polyline points="2,5 18,5"/><path d="M7,5V3h6v2"/>
+            <rect x="4" y="5" width="12" height="12" rx="1.5"/>
+          </svg>
+        </button>
+      </div>
 
       <!-- Overlays dessin -->
       <div id="snap"></div>

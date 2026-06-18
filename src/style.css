@@ -127,6 +127,32 @@ input[type=file] { display: none; }
 .zt-danger svg { stroke: var(--rose); }
 .zt-danger:hover { background: rgba(244,63,94,.08); border-color: var(--rose); color: var(--rose); }
 
+/* ── Contrôles flottants de zone ── */
+#zone-controls {
+  display: none;
+  position: absolute; z-index: 950;
+  flex-direction: column; gap: 3px;
+  background: rgba(7,9,15,.93); border: 1px solid var(--b2);
+  border-radius: 10px; padding: 5px;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  pointer-events: auto;
+}
+#zone-controls.visible { display: flex; }
+
+.zc-btn {
+  width: 30px; height: 30px; border-radius: 7px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--dim); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all .13s; flex-shrink: 0;
+}
+.zc-btn svg { width: 15px; height: 15px; }
+.zc-btn:hover { background: rgba(0,216,255,.1); border-color: var(--b2); color: var(--txt); }
+.zc-btn.active { background: rgba(0,216,255,.15); border-color: var(--cyan); color: var(--cyan); }
+.zc-btn.active svg { stroke: var(--cyan); }
+.zc-btn.zc-danger:hover { background: rgba(244,63,94,.12); border-color: var(--rose); color: var(--rose); }
+.zc-sep { height: 1px; background: var(--b1); margin: 2px 0; }
+
 /* ── GPX badge ── */
 #gpx-badge {
   display: none; padding: 4px 6px;
