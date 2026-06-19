@@ -421,7 +421,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer cp-layer-nav" data-layer="water" data-type="land_cover">
+            <div class="cp-layer cp-layer-nav" data-layer="water" data-type="water">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="5" style="background:#4a88c0">5</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 10 Q4 7 6 10 Q8 13 10 10 Q12 7 14 10"/></svg>
