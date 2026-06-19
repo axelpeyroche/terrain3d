@@ -237,7 +237,7 @@
           <input type="number" id="dp-exag" value="1" step="0.5" min="0.1" max="10" class="dp-input">
           <label class="dp-lbl">Épaisseur du fond (mm) <span class="dp-info-icon" title="Socle plein sous le terrain">ℹ</span></label>
           <div class="dp-row-hint">
-            <input type="number" id="dp-base" value="5" step="1" min="1" max="30" class="dp-input">
+            <input type="number" id="dp-base" value="2" step="1" min="1" max="30" class="dp-input">
             <span class="dp-hint" id="dp-layers-hint">25 couches</span>
           </div>
         </div>
