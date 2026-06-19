@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -759,37 +759,93 @@ function buildMarkersHTML(): string {
         <span class="ldp-unit" id="ldp-offset-mm">( 0.40 mm )</span>
       </div>
     </div>
+  </div>
+  <div class="ldp-sec">
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Marqueurs placés</span></div>
+    <div id="ldp-marker-list" class="ldp-marker-list"><div class="ldp-empty">Aucun marqueur placé</div></div>
   </div>`;
 }
 
+const LINE_GROUPS: Array<{ label: string; cats: Array<{ key: string; label: string }> }> = [
+  { label: 'Itinéraires de randonnée', cats: [
+    { key: 'hiking_iwn', label: 'International' },
+    { key: 'hiking_nwn', label: 'National' },
+    { key: 'hiking_rwn', label: 'Régional' },
+    { key: 'hiking_lwn', label: 'Local' },
+  ]},
+  { label: 'Itinéraires cyclables', cats: [
+    { key: 'cycling_icn', label: 'International' },
+    { key: 'cycling_ncn', label: 'National' },
+    { key: 'cycling_rcn', label: 'Régional' },
+    { key: 'cycling_lcn', label: 'Local' },
+  ]},
+  { label: 'Parcours de VTT', cats: [
+    { key: 'mtb_0', label: 'International' },
+    { key: 'mtb_1', label: 'National' },
+    { key: 'mtb_2', label: 'Régional' },
+    { key: 'mtb_local', label: 'Local' },
+  ]},
+  { label: 'Itinéraires équestres', cats: [
+    { key: 'equestrian_iwn', label: 'International' },
+    { key: 'equestrian_nwn', label: 'National' },
+    { key: 'equestrian_rwn', label: 'Régional' },
+    { key: 'equestrian_lwn', label: 'Local' },
+  ]},
+  { label: 'Sports d\'hiver', cats: [
+    { key: 'piste_easy',         label: 'Facile' },
+    { key: 'piste_novice',       label: 'Novice' },
+    { key: 'piste_intermediate', label: 'Intermédiaire' },
+    { key: 'piste_advanced',     label: 'Avancé' },
+    { key: 'piste_expert',       label: 'Expert' },
+    { key: 'piste_freeride',     label: 'Freeride' },
+    { key: 'piste_other',        label: 'Autre difficulté' },
+    { key: 'piste_none',         label: 'Sans difficulté' },
+  ]},
+  { label: 'Routes', cats: [
+    { key: 'road_motorway',    label: 'Autoroute' },
+    { key: 'road_trunk',       label: 'Voie express' },
+    { key: 'road_primary',     label: 'Route nationale' },
+    { key: 'road_secondary',   label: 'Route départementale' },
+    { key: 'road_tertiary',    label: 'Voie tertiaire' },
+    { key: 'road_unclassified',label: 'Non classifiée' },
+  ]},
+  { label: 'Rues', cats: [
+    { key: 'street_living',      label: 'Zone de rencontre' },
+    { key: 'street_residential', label: 'Rue résidentielle' },
+  ]},
+  { label: 'Rails', cats: [
+    { key: 'rail_narrow',    label: 'Voie étroite' },
+    { key: 'rail_standard',  label: 'Voie standard' },
+    { key: 'rail_unknown',   label: 'Inconnue' },
+    { key: 'rail_funicular', label: 'Funiculaire' },
+    { key: 'rail_light',     label: 'Tramway rapide' },
+    { key: 'rail_monorail',  label: 'Monorail' },
+    { key: 'rail_tram',      label: 'Tramway' },
+    { key: 'rail_subway',    label: 'Métro' },
+  ]},
+];
+
 function buildLinesHTML(): string {
-  const lineTypes = [
-    { key: 'hiking',    label: 'Itinéraires de randonnée', chevron: true },
-    { key: 'cycling',   label: 'Itinéraires cyclables',    chevron: true },
-    { key: 'mtb',       label: 'Parcours de VTT',          chevron: true },
-    { key: 'horse',     label: 'Itinéraires équestres',    chevron: true },
-    { key: 'winter',    label: 'Sports d\'hiver',          chevron: true },
-    { key: 'motor',     label: 'Sports mécaniques',        chevron: false },
-    { key: 'roads',     label: 'Routes',                   chevron: true },
-    { key: 'streets',   label: 'Rues',                     chevron: true },
-    { key: 'rails',     label: 'Rails',                    chevron: true },
-    { key: 'paths',     label: 'Sentiers',                 chevron: false },
-    { key: 'cycleways', label: 'Pistes cyclables',         chevron: false },
-    { key: 'bridleway', label: 'Chemins de bride',         chevron: false },
-    { key: 'trackways', label: 'Chemins ruraux',           chevron: false },
-    { key: 'water',     label: 'Transport fluvial',        chevron: false },
-  ];
-  const checks = lineTypes.map(t => `
-    <div class="ldp-check-item">
-      <label><input type="checkbox" data-linetype="${t.key}"> ${t.label}</label>
-      ${t.chevron ? `<span class="ldp-chevron"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 2l3 3-3 3"/></svg></span>` : ''}
-    </div>`).join('');
+  const chevSvg = `<svg class="ldp-chev-ico" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 2l3 3-3 3"/></svg>`;
+  const groups = LINE_GROUPS.map(g => {
+    const allEnabled = g.cats.every(c => lineLayerEnabled[c.key] !== false);
+    const subs = g.cats.map(c => {
+      const on = lineLayerEnabled[c.key] !== false;
+      return `<label class="ldp-sub-row"><input type="checkbox" class="ldp-line-sub" data-linecat="${c.key}"${on ? ' checked' : ''}> ${c.label}</label>`;
+    }).join('');
+    return `
+    <div class="ldp-line-group">
+      <div class="ldp-line-group-header">
+        <label><input type="checkbox" class="ldp-line-group-chk" data-group="${g.label}"${allEnabled ? ' checked' : ''}> <span>${g.label}</span></label>
+        <button class="ldp-chev-btn" title="Afficher sous-catégories">${chevSvg}</button>
+      </div>
+      <div class="ldp-line-subs">${subs}</div>
+    </div>`;
+  }).join('');
+
   return `
   <div class="ldp-sec">
-    <div class="ldp-sec-header">
-      <span class="ldp-sec-title">Paramètres</span>
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
-    </div>
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Paramètres</span></div>
     <div class="ldp-field">
       <div class="ldp-field-row">
         <span class="ldp-field-label">Largeur (nombre de murs)</span>
@@ -813,11 +869,9 @@ function buildLinesHTML(): string {
     </div>
   </div>
   <div class="ldp-sec">
-    <div class="ldp-sec-header">
-      <span class="ldp-sec-title">Caractéristiques</span>
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
-    </div>
-    <div class="ldp-checkboxes">${checks}</div>
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Caractéristiques</span></div>
+    <div id="ldp-line-groups">${groups}</div>
+    <div id="ldp-line-status" class="ldp-line-status"></div>
   </div>`;
 }
 
@@ -892,6 +946,9 @@ function wireDetailInputs(type: string): void {
     off?.addEventListener('input', updateOffMm);
     updateSzMm(); updateOffMm();
 
+    // Populate marker list on open
+    refreshMarkerList();
+
     // Shape picker — selecting a shape enters placement mode
     document.querySelectorAll<HTMLElement>('.ldp-shape-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -920,6 +977,51 @@ function wireDetailInputs(type: string): void {
     lw?.addEventListener('input', () => { if (lwN) lwN.value = Number(lw.value).toFixed(1); applyLineParams(); });
     lwN?.addEventListener('input', () => { if (lw) lw.value = lwN.value; applyLineParams(); });
     lwOff?.addEventListener('input', applyLineParams);
+
+    // Sub-category chevron expansion
+    document.querySelectorAll<HTMLElement>('.ldp-chev-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const grp = btn.closest<HTMLElement>('.ldp-line-group');
+        grp?.classList.toggle('open');
+      });
+    });
+
+    // Per-sub-category checkbox
+    document.querySelectorAll<HTMLInputElement>('.ldp-line-sub').forEach(cb => {
+      cb.addEventListener('change', () => {
+        setLineCategoryEnabled(cb.dataset.linecat!, cb.checked);
+        // sync group checkbox
+        const grp = cb.closest<HTMLElement>('.ldp-line-group');
+        const gChk = grp?.querySelector<HTMLInputElement>('.ldp-line-group-chk');
+        if (gChk) {
+          const subs = grp!.querySelectorAll<HTMLInputElement>('.ldp-line-sub');
+          gChk.checked = Array.from(subs).every(s => s.checked);
+          gChk.indeterminate = !gChk.checked && Array.from(subs).some(s => s.checked);
+        }
+      });
+    });
+
+    // Group checkbox — toggles all sub-categories
+    document.querySelectorAll<HTMLInputElement>('.ldp-line-group-chk').forEach(gChk => {
+      gChk.addEventListener('change', () => {
+        const grp = gChk.closest<HTMLElement>('.ldp-line-group');
+        grp?.querySelectorAll<HTMLInputElement>('.ldp-line-sub').forEach(cb => {
+          cb.checked = gChk.checked;
+          setLineCategoryEnabled(cb.dataset.linecat!, gChk.checked);
+        });
+      });
+    });
+
+    // Fetch OSM data if we have a bounding box
+    if (state.bounds) {
+      const statusEl = document.getElementById('ldp-line-status');
+      if (statusEl) statusEl.textContent = 'Chargement des données…';
+      fetchAndStoreLineFeatures(state.bounds).then(() => {
+        if (statusEl) statusEl.textContent = '';
+      }).catch(() => {
+        if (statusEl) statusEl.textContent = 'Erreur de chargement des données.';
+      });
+    }
   }
 }
 
@@ -993,10 +1095,18 @@ function showPlacementHint(visible: boolean): void {
   hint.style.display = visible ? 'block' : 'none';
 }
 
+// Drag detection: only place marker on genuine click (< 5 px movement)
+let _pdX = 0, _pdY = 0;
+document.getElementById('dims-canvas')?.addEventListener('pointerdown', (e) => { _pdX = e.clientX; _pdY = e.clientY; });
 document.getElementById('dims-canvas')?.addEventListener('click', (e) => {
-  if (isPlacementActive()) {
-    handleCanvasClick(e.clientX, e.clientY);
-    showPlacementHint(false);
+  if (!isPlacementActive()) return;
+  const dx = e.clientX - _pdX, dy = e.clientY - _pdY;
+  if (dx*dx + dy*dy < 25) { // genuine click, not drag
+    const placedId = handleCanvasClick(e.clientX, e.clientY);
+    if (placedId >= 0) {
+      showPlacementHint(false);
+      refreshMarkerList();
+    }
   }
 });
 
@@ -1005,4 +1115,62 @@ document.addEventListener('keydown', (e) => {
     cancelMarkerPlacement();
     showPlacementHint(false);
   }
+});
+
+/* ── Marker list ───────────────────────────────────── */
+const SHAPE_LABELS: Record<string, string> = {
+  circle:'Rond', square:'Carré', diamond:'Losange', triangle:'Triangle',
+  cross:'Croix', heart:'Cœur', star:'Étoile',
+};
+const SHAPE_SVGS: Record<string, string> = {
+  circle:   '<circle cx="8" cy="8" r="5.5" fill="currentColor"/>',
+  square:   '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor"/>',
+  diamond:  '<path d="M8 1.5l6.5 6.5-6.5 6.5L1.5 8z" fill="currentColor"/>',
+  triangle: '<path d="M8 2l6.5 11.5H1.5z" fill="currentColor"/>',
+  cross:    '<path d="M5.5 2h5v3.5H14v5h-3.5V14h-5v-3.5H2v-5h3.5z" fill="currentColor"/>',
+  heart:    '<path d="M8 13.5S1.5 9 1.5 5a3.25 3.25 0 016.5 0 3.25 3.25 0 016.5 0c0 4-6.5 8.5-6.5 8.5z" fill="currentColor"/>',
+  star:     '<path d="M8 1.5l1.6 3.3 3.6.5-2.6 2.6.6 3.6L8 9.7l-3.2 1.8.6-3.6L2.8 5.3l3.6-.5z" fill="currentColor"/>',
+};
+const eyeSvg  = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="8" cy="8" rx="6" ry="4"/><circle cx="8" cy="8" r="2"/></svg>`;
+const trashSvg = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,4 14,4"/><path d="M5 4V2h6v2"/><rect x="3" y="4" width="10" height="10" rx="1"/></svg>`;
+
+function refreshMarkerList(): void {
+  const container = document.getElementById('ldp-marker-list');
+  if (!container) return;
+  const markers = getPlacedMarkers();
+  if (!markers.length) { container.innerHTML = '<div class="ldp-empty">Aucun marqueur placé</div>'; return; }
+  container.innerHTML = markers.map(m => `
+    <div class="ldp-marker-row" data-marker-id="${m.id}">
+      <svg class="ldp-marker-ico" viewBox="0 0 16 16">${SHAPE_SVGS[m.shape] ?? SHAPE_SVGS.circle}</svg>
+      <span class="ldp-marker-lbl">${SHAPE_LABELS[m.shape] ?? m.shape}</span>
+      <button class="cp-eye ldp-m-eye${m.visible ? ' active' : ''}" data-mid="${m.id}" title="Visibilité">${eyeSvg}</button>
+      <button class="cp-del ldp-m-del" data-mid="${m.id}" title="Supprimer">${trashSvg}</button>
+    </div>`).join('');
+
+  container.querySelectorAll<HTMLButtonElement>('.ldp-m-eye').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = Number(btn.dataset.mid);
+      const on = !btn.classList.contains('active');
+      setMarkerVisible(id, on);
+      btn.classList.toggle('active', on);
+    });
+  });
+  container.querySelectorAll<HTMLButtonElement>('.ldp-m-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      deleteMarker(Number(btn.dataset.mid));
+      refreshMarkerList();
+    });
+  });
+}
+
+/* ── Layer delete (poubelle) ───────────────────────────── */
+document.querySelectorAll<HTMLElement>('.cp-del:not(.ldp-m-del)').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const row = btn.closest<HTMLElement>('.cp-layer');
+    if (!row) return;
+    const layerId = row.dataset.layer;
+    if (layerId) setLayerVisible(layerId, false);
+    row.remove();
+  });
 });

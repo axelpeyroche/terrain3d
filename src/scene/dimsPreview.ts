@@ -44,7 +44,8 @@ export let gpxLineThickness   = 1.0; // multiples of wall width (0.42 mm)
 export let gpxLineHeightOffset = 1;  // multiples of layer height (0.20 mm)
 
 // User-placed markers (persist across rebuildScene)
-const placedMarkersData: Array<{ latFrac: number; lonFrac: number; shape: string }> = [];
+let markerNextId = 0;
+const placedMarkersData: Array<{ id: number; latFrac: number; lonFrac: number; shape: string; visible: boolean }> = [];
 let markerMeshRefs: THREE.Object3D[] = [];
 
 // Placement mode
@@ -53,6 +54,12 @@ let pendingShape    = '';
 
 // Last scene dims (needed to re-project markers after rebuild)
 let lastW = 200, lastD = 200, lastBaseH = 2, lastElevScale = 1;
+
+// Line layer OSM data (roads, rails, routes)
+const lineLayerData: Record<string, GeoPoint[][]> = {};
+export const lineLayerEnabled: Record<string, boolean> = {};
+let lineMeshGroup: THREE.Object3D | null = null;
+let cachedLineBoundsKey = '';
 
 // Mesh references for live color updates
 let terrainMeshRef: THREE.Mesh | null = null;
@@ -244,45 +251,67 @@ export function setGpxLineParams(thickness: number, heightOffset: number): void 
   gpxLineHeightOffset = heightOffset;
 }
 
-/** Marker placement mode — call startMarkerPlacement, then handleCanvasClick when user clicks */
+/** Marker placement mode — controls stay enabled so the user can still pan/rotate; placement fires on genuine click (no drag) */
 export function startMarkerPlacement(shape: string): void {
   placementActive = true;
   pendingShape    = shape;
-  if (controls) controls.enabled = false;
   if (dimsCanvas) dimsCanvas.style.cursor = 'crosshair';
 }
 export function cancelMarkerPlacement(): void {
   placementActive = false;
   pendingShape    = '';
-  if (controls) controls.enabled = true;
   if (dimsCanvas) dimsCanvas.style.cursor = '';
 }
 export function isPlacementActive(): boolean { return placementActive; }
 
-/** Raycast canvas click → place marker on terrain surface */
-export function handleCanvasClick(clientX: number, clientY: number): boolean {
-  if (!placementActive || !scene || !camera || !terrainMeshRef || !dimsCanvas) return false;
+/** Raycast canvas click → place marker on terrain surface; returns placed marker id or -1 */
+export function handleCanvasClick(clientX: number, clientY: number): number {
+  if (!placementActive || !scene || !camera || !terrainMeshRef || !dimsCanvas) return -1;
   const rect = dimsCanvas.getBoundingClientRect();
   const ndcX =  ((clientX - rect.left) / rect.width)  * 2 - 1;
   const ndcY = -((clientY - rect.top)  / rect.height) * 2 + 1;
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
   const hits = raycaster.intersectObject(terrainMeshRef);
+  let placedId = -1;
   if (hits.length > 0) {
     const pt = hits[0].point;
     const latFrac = 0.5 - pt.z / lastD;
     const lonFrac = 0.5 + pt.x / lastW;
-    placedMarkersData.push({ latFrac, lonFrac, shape: pendingShape });
+    const id = markerNextId++;
+    placedMarkersData.push({ id, latFrac, lonFrac, shape: pendingShape, visible: true });
     spawnMarkerMesh(latFrac, lonFrac, pendingShape);
+    placedId = id;
   }
   cancelMarkerPlacement();
-  return true;
+  return placedId;
+}
+export function getPlacedMarkers(): Array<{ id: number; shape: string; visible: boolean }> {
+  return placedMarkersData.map(m => ({ id: m.id, shape: m.shape, visible: m.visible }));
+}
+export function setMarkerVisible(id: number, visible: boolean): void {
+  const idx = placedMarkersData.findIndex(m => m.id === id);
+  if (idx < 0) return;
+  placedMarkersData[idx].visible = visible;
+  if (markerMeshRefs[idx]) markerMeshRefs[idx].visible = visible;
+}
+export function deleteMarker(id: number): void {
+  const idx = placedMarkersData.findIndex(m => m.id === id);
+  if (idx < 0) return;
+  placedMarkersData.splice(idx, 1);
+  const mesh = markerMeshRefs.splice(idx, 1)[0];
+  if (mesh) {
+    scene?.remove(mesh);
+    const si = sceneObjs.indexOf(mesh);
+    if (si >= 0) sceneObjs.splice(si, 1);
+  }
 }
 export function clearUserMarkers(): void {
   placedMarkersData.length = 0;
   for (const g of markerMeshRefs) {
     scene?.remove(g);
-    sceneObjs.splice(sceneObjs.indexOf(g), 1);
+    const si = sceneObjs.indexOf(g);
+    if (si >= 0) sceneObjs.splice(si, 1);
   }
   markerMeshRefs = [];
 }
@@ -374,6 +403,7 @@ export function rebuildScene(s: DimSettings): void {
   baseMeshRef = null;
   facadeMeshRefs = [];
   gpxLineMeshRef = null;
+  lineMeshGroup = null;
   markerMeshRefs = [];
 
   // ── Terrain ───────────────────────────────────────────
@@ -454,7 +484,15 @@ export function rebuildScene(s: DimSettings): void {
 
   // ── Placed markers ────────────────────────────────────
   lastW = wMm; lastD = dMm; lastBaseH = baseH; lastElevScale = elevScaleMm;
-  for (const md of placedMarkersData) spawnMarkerMesh(md.latFrac, md.lonFrac, md.shape);
+  for (const md of placedMarkersData) {
+    spawnMarkerMesh(md.latFrac, md.lonFrac, md.shape);
+    // restore individual visibility state
+    const mesh = markerMeshRefs[markerMeshRefs.length - 1];
+    if (mesh) mesh.visible = md.visible;
+  }
+
+  // ── Line features overlay ─────────────────────────────
+  rebuildLineMeshes();
 
   // ── Camera ────────────────────────────────────────────
   const diag = Math.sqrt(wMm * wMm + dMm * dMm);
@@ -873,6 +911,169 @@ function buildEdgeWall(
 /* ══════════════════════════════════════════════
    GPX TRACE
 ══════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════
+   LINE LAYER (roads, rails, routes)
+══════════════════════════════════════════════ */
+export async function fetchAndStoreLineFeatures(bounds: LatLonBounds): Promise<void> {
+  const key = `${bounds.minLat}|${bounds.maxLat}|${bounds.minLon}|${bounds.maxLon}`;
+  if (key === cachedLineBoundsKey) return;
+
+  const bb = `${bounds.minLat},${bounds.minLon},${bounds.maxLat},${bounds.maxLon}`;
+  const query = `[out:json][timeout:55];(
+    way["highway"~"motorway|trunk|primary|secondary|tertiary|unclassified|living_street|residential"](${bb});
+    way["railway"~"rail|narrow_gauge|light_rail|funicular|monorail|tram|subway"](${bb});
+    way["piste:type"](${bb});
+    relation["route"~"hiking|foot|bicycle|mtb|horse"](${bb});
+  );out geom;`;
+
+  const resp = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: query });
+  const data: { elements: Array<{ type: string; tags?: Record<string,string>; geometry?: GeoPoint[]; members?: OSMMember[] }> } = await resp.json();
+
+  // Clear previous data
+  for (const k of Object.keys(lineLayerData)) delete lineLayerData[k];
+
+  const push = (cat: string, coords: GeoPoint[]) => {
+    if (!lineLayerData[cat]) lineLayerData[cat] = [];
+    lineLayerData[cat].push(coords);
+  };
+
+  for (const el of data.elements) {
+    if (el.type === 'way') {
+      const tags = el.tags ?? {};
+      const geom = el.geometry ?? [];
+      if (geom.length < 2) continue;
+
+      if (tags.highway) {
+        const hw: Record<string,string> = {
+          motorway:'road_motorway', motorway_link:'road_motorway',
+          trunk:'road_trunk', trunk_link:'road_trunk',
+          primary:'road_primary', primary_link:'road_primary',
+          secondary:'road_secondary', secondary_link:'road_secondary',
+          tertiary:'road_tertiary', tertiary_link:'road_tertiary',
+          unclassified:'road_unclassified',
+          living_street:'street_living',
+          residential:'street_residential',
+        };
+        const cat = hw[tags.highway];
+        if (cat) push(cat, geom);
+      }
+      if (tags.railway) {
+        const rw: Record<string,string> = {
+          narrow_gauge:'rail_narrow', rail:'rail_standard',
+          light_rail:'rail_light', funicular:'rail_funicular',
+          monorail:'rail_monorail', tram:'rail_tram', subway:'rail_subway',
+        };
+        push(rw[tags.railway] ?? 'rail_unknown', geom);
+      }
+      if (tags['piste:type']) {
+        const dm: Record<string,string> = {
+          easy:'piste_easy', novice:'piste_novice', intermediate:'piste_intermediate',
+          advanced:'piste_advanced', expert:'piste_expert', freeride:'piste_freeride',
+        };
+        push(dm[tags['piste:difficulty'] ?? ''] ?? 'piste_other', geom);
+      }
+    } else if (el.type === 'relation') {
+      const tags = el.tags ?? {};
+      const route = tags.route ?? '';
+      const net   = tags.network ?? '';
+      const segs  = (el.members ?? []).filter(m => m.type === 'way' && (m.geometry?.length ?? 0) >= 2).map(m => m.geometry!);
+      if (!segs.length) continue;
+
+      const routeNetMap: Record<string, Record<string,string>> = {
+        hiking: { iwn:'hiking_iwn', nwn:'hiking_nwn', rwn:'hiking_rwn', lwn:'hiking_lwn' },
+        foot:   { iwn:'hiking_iwn', nwn:'hiking_nwn', rwn:'hiking_rwn', lwn:'hiking_lwn' },
+        bicycle:{ icn:'cycling_icn', ncn:'cycling_ncn', rcn:'cycling_rcn', lcn:'cycling_lcn' },
+        mtb:    { '':'mtb_local' },
+        horse:  { ihwn:'equestrian_iwn', nhwn:'equestrian_nwn', rhwn:'equestrian_rwn', lhwn:'equestrian_lwn' },
+      };
+      const netMap = routeNetMap[route];
+      if (!netMap) continue;
+
+      let cat: string;
+      if (route === 'mtb') {
+        const scale = tags['mtb:scale'] ?? '';
+        cat = scale ? `mtb_${scale}` : 'mtb_local';
+      } else {
+        cat = netMap[net] ?? Object.values(netMap).at(-1)!;
+      }
+      for (const seg of segs) push(cat, seg);
+    }
+  }
+
+  cachedLineBoundsKey = key;
+  rebuildLineMeshes();
+}
+
+export function setLineCategoryEnabled(cat: string, enabled: boolean): void {
+  lineLayerEnabled[cat] = enabled;
+  rebuildLineMeshes();
+}
+
+function rebuildLineMeshes(): void {
+  if (lineMeshGroup) {
+    scene?.remove(lineMeshGroup);
+    const si = sceneObjs.indexOf(lineMeshGroup);
+    if (si >= 0) sceneObjs.splice(si, 1);
+    lineMeshGroup = null;
+  }
+  if (!cachedElev || !scene) return;
+
+  const { grid, minE, elevRange, bounds } = cachedElev;
+  const G = PREVIEW_GRID;
+  const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
+
+  const group = new THREE.Group();
+
+  for (const [cat, segments] of Object.entries(lineLayerData)) {
+    if (lineLayerEnabled[cat] === false) continue;
+    const col = lineCatColor(cat);
+    const mat = new THREE.LineBasicMaterial({ color: col });
+
+    for (const geom of segments) {
+      const verts: THREE.Vector3[] = [];
+      for (const pt of geom) {
+        const u = (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon);
+        const v = (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat);
+        if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+        const x = (u - 0.5) * wMm, z = (0.5 - v) * dMm;
+        const gx = u*(G-1), gv = (1-v)*(G-1);
+        const gi = Math.min(G-2, Math.floor(gx)), gj = Math.min(G-2, Math.floor(gv));
+        const fx = gx-gi, fy = gv-gj;
+        const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
+                + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
+        verts.push(new THREE.Vector3(x, baseH + ((e - minE) / elevRange) * elevScaleMm + 0.6, z));
+      }
+      if (verts.length >= 2) {
+        group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(verts), mat));
+      }
+    }
+  }
+
+  if (group.children.length > 0) {
+    scene.add(group); sceneObjs.push(group); lineMeshGroup = group;
+  }
+}
+
+function lineCatColor(cat: string): number {
+  if (cat.startsWith('road_motorway'))  return 0xe2231a;
+  if (cat.startsWith('road_trunk'))     return 0xe5821e;
+  if (cat.startsWith('road_primary'))   return 0xf5d327;
+  if (cat.startsWith('road_secondary')) return 0xd4e228;
+  if (cat.startsWith('road_tertiary'))  return 0xaaaaaa;
+  if (cat.startsWith('road_'))          return 0xcccccc;
+  if (cat.startsWith('street_'))        return 0xdddddd;
+  if (cat.startsWith('rail_'))          return 0x555577;
+  if (cat.startsWith('hiking_'))        return 0xff6600;
+  if (cat.startsWith('cycling_'))       return 0x0066cc;
+  if (cat.startsWith('mtb_'))           return 0x884400;
+  if (cat.startsWith('equestrian_'))    return 0x996633;
+  if (cat.startsWith('piste_easy'))     return 0x00aaff;
+  if (cat.startsWith('piste_novice'))   return 0x00cc44;
+  if (cat.startsWith('piste_intermediate')) return 0xcc2222;
+  if (cat.startsWith('piste_'))         return 0x222222;
+  return 0x888888;
+}
+
 /** Build a 3D marker mesh at fractional lat/lon position on current terrain */
 function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void {
   if (!cachedElev || !scene) return;
