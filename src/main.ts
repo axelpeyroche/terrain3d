@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -696,6 +696,21 @@ document.getElementById('cp-add-layer-btn')?.addEventListener('click', () => {
   wireNewLayerInputs();
 });
 
+function buildBuildingsHTML(): string {
+  const layH = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+  const floors = Math.round(buildingFloorHeightMm / layH) || 1;
+  return `
+  <div class="ldp-section">
+    <div class="ldp-row">
+      <label class="ldp-label">Hauteur par étage</label>
+      <div class="ldp-row-right">
+        <input type="range" id="ldp-bld-floors" min="1" max="10" step="1" value="${floors}" style="width:100px">
+        <span id="ldp-bld-floors-val">${floors} étage(s) — ${(floors * layH).toFixed(2)} mm</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* ── Layer detail HTML builders ── */
 function buildLayerDetailHTML(type: string): string {
   if (type === 'markers')    return buildMarkersHTML();
@@ -703,6 +718,7 @@ function buildLayerDetailHTML(type: string): string {
   if (type === 'water')      return buildWaterHTML();
   if (type === 'waterways')  return buildWaterwaysHTML();
   if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc', 'barren_lc'].includes(type)) return buildLandCoverHTML(type);
+  if (type === 'buildings') return buildBuildingsHTML();
   return '';
 }
 
@@ -1220,6 +1236,19 @@ function wireDetailInputs(type: string): void {
         const s = getDimSettings();
         if (s) rebuildScene(s);
       });
+    });
+  }
+
+  if (type === 'buildings') {
+    const slider = document.getElementById('ldp-bld-floors') as HTMLInputElement;
+    const label  = document.getElementById('ldp-bld-floors-val');
+    slider?.addEventListener('input', () => {
+      const floors = Number(slider.value) || 1;
+      const h = floors * layH;
+      if (label) label.textContent = `${floors} étage(s) — ${h.toFixed(2)} mm`;
+      setBuildingFloorHeight(h);
+      const s = getDimSettings();
+      if (s) rebuildScene(s);
     });
   }
 

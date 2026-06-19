@@ -19,7 +19,7 @@ let cachedZoneKey = '';
 let cachedFeatures: OSMEl[] = [];
 let cachedFeaturesKey = '';
 
-// Color slots 1-6 (Bambu-style filament colors)
+// Color slots 1-7 (Bambu-style filament colors)
 export const colorSlots: Record<number, string> = {
   1: '#c0af88',  // Terrain nu + Façade
   2: '#e4eee8',  // Neige et glace
@@ -27,6 +27,7 @@ export const colorSlots: Record<number, string> = {
   4: '#3a6828',  // Végétation dense
   5: '#4a88c0',  // Plans d'eau + Voies navigables
   6: '#ff4500',  // Marqueurs / GPX
+  7: '#888888',  // Bâtiments
 };
 
 // Layer visibility
@@ -35,6 +36,7 @@ export const layerVisible: Record<string, boolean> = {
   snow: true, water: true, waterways: true,
   gpx: true, gpx_line: true,
   river_polygons: true, barren: true,
+  buildings: true,
 };
 
 // Per-layer slot assignment overrides (layerId → slot number)
@@ -98,6 +100,12 @@ export const layerLCFeatures: Record<string, Record<string, boolean>> = {
 export const layerLCHeightOffset: Record<string, number> = {
   veg_dense: 0, veg_low: 0, wetland_lc: 0, snow_lc: 0, barren_lc: 0,
 };
+
+// Buildings state
+export let buildingFloorHeightMm = 0.20;
+let cachedBuildings: OSMEl[] = [];
+let cachedBuildingsKey = '';
+export function setBuildingFloorHeight(h: number): void { buildingFloorHeightMm = h; }
 export function setLCFeatureEnabled(layerId: string, key: string, enabled: boolean): void {
   if (!layerLCFeatures[layerId]) return;
   layerLCFeatures[layerId][key] = enabled;
@@ -458,6 +466,15 @@ export async function buildDimsPreview(
     }
   }
 
+  if (key !== cachedBuildingsKey) {
+    onProgress(60, 'Chargement des bâtiments…');
+    const buildings = await fetchBuildingFeatures(bounds);
+    if (buildings.length > 0 || cachedBuildingsKey === '') {
+      cachedBuildingsKey = key;
+      cachedBuildings = buildings;
+    }
+  }
+
   if (!cachedTexture && cachedElev) {
     onProgress(70, 'Génération de la texture…');
     cachedTexture = buildMapTexture(
@@ -605,6 +622,13 @@ export function rebuildScene(s: DimSettings): void {
   // ── Line features overlay ─────────────────────────────
   rebuildLineMeshes();
 
+  // ── Buildings ─────────────────────────────────────────
+  if ((layerVisible['buildings'] ?? true) && cachedBuildings.length > 0) {
+    for (const m of buildBuildingMeshes(
+      cachedBuildings, rb, grid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+    )) add(m);
+  }
+
   // ── Camera ────────────────────────────────────────────
   const diag = Math.sqrt(wMm * wMm + dMm * dMm);
   if (controls.target.lengthSq() < 0.1) {
@@ -668,6 +692,87 @@ out geom;`;
     clearTimeout(t);
     return [];
   }
+}
+
+/* ══════════════════════════════════════════════
+   BUILDING FEATURES (Overpass)
+══════════════════════════════════════════════ */
+async function fetchBuildingFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
+  const { minLat, minLon, maxLat, maxLon } = bounds;
+  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
+  const query = `[out:json][timeout:28];
+(
+  way["building"]${bb};
+  relation["building"]["type"="multipolygon"]${bb};
+);
+out geom;`;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 22000);
+  try {
+    const res = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    return ((await res.json()).elements ?? []) as OSMEl[];
+  } catch {
+    clearTimeout(t);
+    return [];
+  }
+}
+
+function buildBuildingMeshes(
+  buildings: OSMEl[],
+  bounds: LatLonBounds,
+  grid: Float32Array, G: number,
+  minE: number, elevRange: number,
+  wMm: number, dMm: number,
+  baseH: number, elevScaleMm: number,
+): THREE.Mesh[] {
+  const { minLat, maxLat, minLon, maxLon } = bounds;
+  const color = new THREE.Color(colorSlots[7] ?? '#888888');
+  const mat = new THREE.MeshLambertMaterial({ color });
+  const meshes: THREE.Mesh[] = [];
+
+  for (const el of buildings) {
+    const polys = getOsmPolygons(el);
+    if (!polys.length) continue;
+    const outer = polys[0];
+    if (outer.length < 3) continue;
+
+    const levels = parseFloat(el.tags?.['building:levels'] ?? '2') || 2;
+    const heightMm = levels * buildingFloorHeightMm;
+
+    const shape = new THREE.Shape();
+    for (let i = 0; i < outer.length; i++) {
+      const lonFrac = (outer[i].lon - minLon) / (maxLon - minLon);
+      const latFrac = (outer[i].lat - minLat) / (maxLat - minLat);
+      const sx = lonFrac * wMm - wMm / 2;
+      const sy = latFrac * dMm - dMm / 2;
+      if (i === 0) shape.moveTo(sx, sy); else shape.lineTo(sx, sy);
+    }
+    shape.closePath();
+
+    // Sample elevation at footprint centroid
+    let sumLon = 0, sumLat = 0;
+    for (const p of outer) { sumLon += p.lon; sumLat += p.lat; }
+    const cLonFrac = (sumLon / outer.length - minLon) / (maxLon - minLon);
+    const cLatFrac = (sumLat / outer.length - minLat) / (maxLat - minLat);
+    const elev = sampleElev(grid, G, cLonFrac, 1 - cLatFrac);
+    const yBase = baseH + ((elev - minE) / elevRange) * elevScaleMm;
+
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: heightMm,
+      bevelEnabled: false,
+    });
+    geo.rotateX(-Math.PI / 2);
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = yBase;
+    meshes.push(mesh);
+  }
+  return meshes;
 }
 
 /* ══════════════════════════════════════════════
