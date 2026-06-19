@@ -753,30 +753,16 @@ function hexToRgb(hex: string): RGB {
 }
 
 function hypso(t: number): RGB {
-  // Fixed naturalistic stops (variation visible même sans données OSM)
-  // tinted 40% toward slot 1 (Terrain nu) so the user's color choice has an effect
-  const [sr, sg, sb] = hexToRgb(colorSlots[1]);
-  const base: [number, RGB][] = [
-    [0.00, [0x78, 0x8c, 0x5c]],  // bas: vert sombre
-    [0.18, [0x9a, 0x98, 0x68]],  // plaine: olive
-    [0.38, [0xb0, 0xa0, 0x72]],  // transition: beige-vert
-    [0.58, [0xb8, 0xa8, 0x78]],  // mi-hauteur: beige
-    [0.74, [0xaa, 0x96, 0x70]],  // rocheux: brun
-    [0.88, [0xb4, 0xa8, 0x90]],  // haute altitude: gris-beige
-    [1.00, [0xd8, 0xd0, 0xc0]],  // sommets: quasi blanc
+  // Base = slot 1 (Terrain nu), with subtle elevation-based lightness variation.
+  // Keeps slot 1 as the primary visible color so it matches what the user edits in Menu 3.
+  const [r, g, b] = hexToRgb(colorSlots[1]);
+  // Dark in valleys (×0.78), neutral at mid (×1.0), lighter at peaks (×1.22)
+  const light = 0.78 + t * 0.44;
+  return [
+    Math.min(255, Math.round(r * light)),
+    Math.min(255, Math.round(g * light)),
+    Math.min(255, Math.round(b * light)),
   ];
-  // Blend 60% natural + 40% slot 1 tint
-  const stops: [number, RGB][] = base.map(([pos, [r, g, b]]) => [
-    pos,
-    [Math.round(r*0.6 + sr*0.4), Math.round(g*0.6 + sg*0.4), Math.round(b*0.6 + sb*0.4)] as RGB,
-  ]);
-  for (let i = 1; i < stops.length; i++) {
-    if (t <= stops[i][0]) {
-      const f = (t-stops[i-1][0]) / (stops[i][0]-stops[i-1][0]);
-      return lerp3(stops[i-1][1], stops[i][1], f);
-    }
-  }
-  return stops[stops.length-1][1];
 }
 
 /* ══════════════════════════════════════════════
