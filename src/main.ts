@@ -575,6 +575,11 @@ document.getElementById('cp-col-minus')?.addEventListener('click', () => {
   last.remove();
 });
 
+// Feature size filter slider → rebuild texture on change
+document.getElementById('cp-filter')?.addEventListener('input', () => {
+  updateColorSlots({});
+});
+
 // Layer visibility toggle
 document.querySelectorAll<HTMLButtonElement>('.cp-eye').forEach(btn => {
   const layerId = btn.dataset.layer;

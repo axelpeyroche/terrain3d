@@ -320,7 +320,12 @@ export function rebuildScene(s: DimSettings): void {
   const baseColor = new THREE.Color(colorSlots[baseSlot] ?? colorSlots[1]);
   const bm = new THREE.Mesh(
     buildBaseGeo(modelPts, zoneType, wMm, dMm, baseH, facadeW),
-    new THREE.MeshLambertMaterial({ color: baseColor }),
+    new THREE.MeshLambertMaterial({
+      color: baseColor,
+      polygonOffset: true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits: 1,
+    }),
   );
   baseMeshRef = bm;
   add(bm);
@@ -451,6 +456,24 @@ const ZONE_LAYERS: Array<{
   { id: 'waterways', match: t => !!t.waterway && t.waterway !== 'riverbank',          slot: 5, fill: false },
 ];
 
+function computeFeatureAreaM2(el: OSMEl, lonScale: number): number {
+  const shoelace = (pts: GeoPoint[]) => {
+    if (pts.length < 3) return 0;
+    let area = 0;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      area += (pts[j].lon + pts[i].lon) * (pts[j].lat - pts[i].lat);
+    }
+    return Math.abs(area) / 2 * (lonScale * 111320) * 111320;
+  };
+  if (el.type === 'way' && el.geometry) return shoelace(el.geometry);
+  if (el.type === 'relation' && el.members) {
+    return el.members
+      .filter(m => m.role === 'outer' && m.geometry)
+      .reduce((s, m) => s + shoelace(m.geometry!), 0);
+  }
+  return 0;
+}
+
 function buildMapTexture(
   bounds: LatLonBounds,
   grid: Float32Array, G: number,
@@ -482,10 +505,22 @@ function buildMapTexture(
   }
   ctx.putImageData(id, 0, 0);
 
-  // Step 2 — draw each OSM layer in order
+  // Step 2 — draw each OSM layer in order, filtered by size slider
+  const filterSlider = document.getElementById('cp-filter') as HTMLInputElement | null;
+  const filterVal = filterSlider ? Number(filterSlider.value) : 100; // 0=strict, 100=all
+  const lonScale = Math.cos((bounds.minLat + bounds.maxLat) / 2 * Math.PI / 180);
+  const boundsAreaM2 = (bounds.maxLon - bounds.minLon) * lonScale * 111320
+                     * (bounds.maxLat - bounds.minLat) * 111320;
+  // At slider=0: keep only features ≥ 2% of bounds area. At slider=100: keep all.
+  const minAreaM2 = Math.pow(1 - filterVal / 100, 2) * 0.02 * boundsAreaM2;
+
   for (const layer of ZONE_LAYERS) {
     if (!layerVisible[layer.id]) continue;
-    const layerEls = features.filter(el => el.tags && layer.match(el.tags));
+    const layerEls = features.filter(el => {
+      if (!el.tags || !layer.match(el.tags)) return false;
+      if (!layer.fill || minAreaM2 <= 0) return true; // don't filter lines by area
+      return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
+    });
     if (!layerEls.length) continue;
 
     const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
