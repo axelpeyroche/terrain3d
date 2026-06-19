@@ -574,6 +574,28 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
 .cp-layer .cp-sw-mini { cursor: pointer; }
 .cp-layer .cp-sw-mini:hover { filter: brightness(1.25); outline: 2px solid var(--cyan); outline-offset: 1px; }
 
+/* Slot picker popup */
+.cp-slot-picker-pop {
+  position: fixed; z-index: 9000;
+  background: var(--p2); border: 1px solid var(--b2); border-radius: 8px;
+  padding: 5px; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.6);
+  min-width: 90px;
+}
+.cp-slot-pick-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 8px; border-radius: 5px; cursor: pointer;
+  font-size: 12px; color: var(--txt);
+  transition: background .12s;
+}
+.cp-slot-pick-item:hover { background: var(--b1); }
+.cp-slot-pick-item.active { background: var(--b2); color: var(--cyan); }
+.cp-spi-dot {
+  flex: 0 0 16px; height: 16px; border-radius: 3px;
+  background: var(--sw); border: 1px solid rgba(255,255,255,.12);
+}
+.cp-spi-num { font-variant-numeric: tabular-nums; }
+
 /* Formulaire d'ajout de slot de couleur */
 .cp-add-slot-form {
   display: flex; align-items: center; gap: 7px;

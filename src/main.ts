@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, colorSlots, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -466,24 +466,62 @@ function syncSlotColor(slot: number, col: string): void {
   }
 }
 
-/** Open a floating color picker for a given slot (used by layer mini swatches) */
-function openSlotColorPicker(slot: number): void {
-  const tmp = document.createElement('input');
-  tmp.type = 'color';
-  tmp.value = colorSlots[slot] ?? '#888888';
-  tmp.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none';
-  document.body.appendChild(tmp);
-  tmp.addEventListener('input', () => syncSlotColor(slot, tmp.value));
-  tmp.addEventListener('change', () => document.body.removeChild(tmp));
-  tmp.click();
+let activeSlotPop: HTMLElement | null = null;
+
+/** Show a popup listing color slots so the user can reassign a layer's slot */
+function openSlotPicker(layerId: string, anchorEl: HTMLElement): void {
+  // Close any existing popup
+  if (activeSlotPop) { activeSlotPop.remove(); activeSlotPop = null; }
+
+  const pop = document.createElement('div');
+  pop.className = 'cp-slot-picker-pop';
+
+  const slotNums = Object.keys(colorSlots).map(Number).sort((a, b) => a - b);
+  const currentSlot = layerSlotOverrides[layerId] ?? Number(anchorEl.dataset.slot) ?? 1;
+
+  slotNums.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'cp-slot-pick-item' + (s === currentSlot ? ' active' : '');
+    item.style.setProperty('--sw', colorSlots[s] ?? '#888');
+    item.innerHTML = `<span class="cp-spi-dot"></span><span class="cp-spi-num">${s}</span>`;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setLayerSlot(layerId, s);
+      // Update this mini swatch to show new slot number and color
+      anchorEl.dataset.slot = String(s);
+      anchorEl.textContent = String(s);
+      anchorEl.style.background = colorSlots[s] ?? '#888';
+      pop.remove(); activeSlotPop = null;
+    });
+    pop.appendChild(item);
+  });
+
+  document.body.appendChild(pop);
+  activeSlotPop = pop;
+
+  // Position below the anchor
+  const rect = anchorEl.getBoundingClientRect();
+  pop.style.left = `${rect.left}px`;
+  pop.style.top  = `${rect.bottom + 4}px`;
+
+  // Close on outside click
+  const onOutside = (e: MouseEvent) => {
+    if (!pop.contains(e.target as Node)) {
+      pop.remove(); activeSlotPop = null;
+      document.removeEventListener('click', onOutside, true);
+    }
+  };
+  // Defer so the current click doesn't immediately close it
+  setTimeout(() => document.addEventListener('click', onOutside, true), 0);
 }
 
-// Mini swatches in layer rows → open color picker on click
+// Mini swatches in layer rows → open slot picker on click
 document.querySelectorAll<HTMLElement>('.cp-layer .cp-sw-mini').forEach(el => {
   el.addEventListener('click', (e) => {
     e.stopPropagation();
-    const slot = Number(el.dataset.slot);
-    if (slot) openSlotColorPicker(slot);
+    const row = el.closest<HTMLElement>('.cp-layer');
+    const layerId = row?.dataset.layer ?? '';
+    if (layerId) openSlotPicker(layerId, el);
   });
 });
 

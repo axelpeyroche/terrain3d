@@ -35,8 +35,12 @@ export const layerVisible: Record<string, boolean> = {
   snow: true, water: true, waterways: true,
 };
 
+// Per-layer slot assignment overrides (layerId → slot number)
+export const layerSlotOverrides: Record<string, number> = {};
+
 // Mesh references for live color updates
 let terrainMeshRef: THREE.Mesh | null = null;
+let baseMeshRef: THREE.Mesh | null = null;
 let facadeMeshRefs: THREE.Mesh[] = [];
 let dimsCanvas: HTMLCanvasElement | null = null;
 let dimsTargetEl: HTMLElement | null = null;
@@ -168,11 +172,22 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
       mat.needsUpdate = true;
     }
   }
-  // Update facade/base color from slot 1
-  const fColor = new THREE.Color(colorSlots[1]);
-  for (const m of facadeMeshRefs) {
-    (m.material as THREE.MeshLambertMaterial).color.set(fColor);
+  // Update base and facade colors via their respective slot overrides
+  const baseSlot = layerSlotOverrides['base'] ?? 1;
+  if (baseMeshRef) {
+    (baseMeshRef.material as THREE.MeshLambertMaterial).color.set(colorSlots[baseSlot] ?? colorSlots[1]);
   }
+  const facadeSlot = layerSlotOverrides['facade'] ?? 1;
+  const facadeColor = new THREE.Color(colorSlots[facadeSlot] ?? colorSlots[1]);
+  for (const m of facadeMeshRefs) {
+    (m.material as THREE.MeshLambertMaterial).color.set(facadeColor);
+  }
+}
+
+/** Assign a layer to a different color slot and immediately refresh the 3D preview */
+export function setLayerSlot(layerId: string, slot: number): void {
+  layerSlotOverrides[layerId] = slot;
+  updateColorSlots({});
 }
 
 /** Toggle visibility of an OSM layer and rebuild texture */
@@ -265,6 +280,7 @@ export function rebuildScene(s: DimSettings): void {
   const facadeW = Math.max(1, facadeWidthMm);
 
   terrainMeshRef = null;
+  baseMeshRef = null;
   facadeMeshRefs = [];
 
   // ── Terrain ───────────────────────────────────────────
@@ -287,16 +303,19 @@ export function rebuildScene(s: DimSettings): void {
   }
 
   // ── Base ──────────────────────────────────────────────
-  const baseColor = new THREE.Color(colorSlots[1]);
-  const baseMesh = new THREE.Mesh(
+  const baseSlot = layerSlotOverrides['base'] ?? 1;
+  const baseColor = new THREE.Color(colorSlots[baseSlot] ?? colorSlots[1]);
+  const bm = new THREE.Mesh(
     buildBaseGeo(modelPts, zoneType, wMm, dMm, baseH, facadeW),
     new THREE.MeshLambertMaterial({ color: baseColor }),
   );
-  facadeMeshRefs.push(baseMesh);
-  add(baseMesh);
+  baseMeshRef = bm;
+  add(bm);
 
   // ── Facades ───────────────────────────────────────────
-  const facadeMat = new THREE.MeshLambertMaterial({ color: baseColor, side: THREE.DoubleSide });
+  const facadeSlot = layerSlotOverrides['facade'] ?? 1;
+  const facadeColor = new THREE.Color(colorSlots[facadeSlot] ?? colorSlots[1]);
+  const facadeMat = new THREE.MeshLambertMaterial({ color: facadeColor, side: THREE.DoubleSide });
   for (const m of buildFacades(modelPts, zoneType, wMm, dMm, facadeW, flatFacade, totalH, grid, G, minE, elevRange, baseH, elevScaleMm)) {
     m.material = facadeMat;
     facadeMeshRefs.push(m);
@@ -452,7 +471,8 @@ function buildMapTexture(
     const layerEls = features.filter(el => el.tags && layer.match(el.tags));
     if (!layerEls.length) continue;
 
-    const col = colorSlots[layer.slot] ?? '#888';
+    const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
+    const col = colorSlots[effectiveSlot] ?? '#888';
 
     if (layer.fill) {
       ctx.beginPath();
