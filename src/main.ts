@@ -401,18 +401,23 @@ document.querySelectorAll('#params-col input, #params-col select').forEach(el =>
    ═══════════════════════════════════════════ */
 function onColorsTabOpen(): void {
   if (!state.bounds) return;
-  // rAF ensures panel is visible and sized before moving canvas
-  requestAnimationFrame(() => {
+  // Sync dims in case user skipped tab 2
+  syncDimsInputsFromState();
+  // Double-rAF: first ensures panel is flex/sized, second ensures layout is fully computed
+  requestAnimationFrame(() => requestAnimationFrame(() => {
     const area = document.getElementById('colors-3d-area')!;
     if (!dimsRendererReady) {
+      // First time: create renderer here, then fetch + build
       dimsRendererReady = true;
       initDimsRenderer(area);
       triggerDimsBuild();
     } else {
-      initDimsRenderer(area);  // moves canvas here and resizes
+      // Renderer exists: move canvas to this container, then redraw from cache
+      initDimsRenderer(area);
+      rebuildScene(getDimSettings());  // instant — uses cached elevation + texture
     }
     syncSwatchUI();
-  });
+  }));
 }
 
 function syncSwatchUI(): void {
