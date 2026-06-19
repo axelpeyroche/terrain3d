@@ -528,18 +528,6 @@ export function injectUI(): void {
 
       </div><!-- /#cp-main -->
 
-      <!-- ── Panneau détail couche (navigation interne) ── -->
-      <div id="cp-detail" style="display:none">
-        <div class="ldp-header">
-          <button class="ldp-back-btn" id="ldp-back" title="Retour">
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3l-6 5 6 5"/></svg>
-          </button>
-          <svg id="ldp-icon" class="ldp-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"></svg>
-          <span id="ldp-title">Couche</span>
-        </div>
-        <div id="ldp-content" class="ldp-content"></div>
-      </div>
-
       <!-- Navigation (toujours visible) -->
       <div class="dp-nav cp-nav-fixed">
         <button class="btn-back" id="btn-back-dims">
@@ -553,6 +541,18 @@ export function injectUI(): void {
       </div>
 
       </div><!-- /#colors-panel -->
+
+      <!-- ── Panneau détail couche (colonne droite, glisse depuis le panneau) ── -->
+      <div id="cp-layer-detail">
+        <div class="ldp-header">
+          <button class="ldp-back-btn" id="ldp-back" title="Fermer">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 3l-6 5 6 5"/></svg>
+          </button>
+          <svg id="ldp-icon" class="ldp-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"></svg>
+          <span id="ldp-title">Couche</span>
+        </div>
+        <div id="ldp-content" class="ldp-content"></div>
+      </div>
 
       <!-- ── Vue 3D (canvas partagé avec tab 2) ─────── -->
       <div id="colors-3d-area">

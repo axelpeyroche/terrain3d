@@ -656,28 +656,25 @@ function applyPresetToUI(preset: Record<number, string>): void {
   });
 }
 
-/* ── Layer detail navigation ── */
-const cpMain   = document.getElementById('cp-main')!;
-const cpDetail = document.getElementById('cp-detail')!;
-const ldpTitle = document.getElementById('ldp-title')!;
-const ldpIcon  = document.getElementById('ldp-icon')!;
-const ldpContent = document.getElementById('ldp-content')!;
+/* ── Layer detail panel (right column) ── */
+const cpLayerDetail = document.getElementById('cp-layer-detail')!;
+const ldpTitle      = document.getElementById('ldp-title')!;
+const ldpIcon       = document.getElementById('ldp-icon')!;
+const ldpContent    = document.getElementById('ldp-content')!;
 
-function showLayerDetail(layerId: string, layerType: string, layerName: string, iconSvgInner: string): void {
+function showLayerDetail(layerType: string, layerName: string, iconSvgInner: string): void {
   ldpTitle.textContent = layerName;
   ldpIcon.innerHTML = iconSvgInner;
   ldpContent.innerHTML = buildLayerDetailHTML(layerType);
-  cpMain.style.display = 'none';
-  cpDetail.style.display = 'flex';
+  cpLayerDetail.classList.add('open');
   wireDetailInputs(layerType);
 }
 
-function showLayerMain(): void {
-  cpDetail.style.display = 'none';
-  cpMain.style.display = 'flex';
+function closeLayerDetail(): void {
+  cpLayerDetail.classList.remove('open');
 }
 
-document.getElementById('ldp-back')?.addEventListener('click', showLayerMain);
+document.getElementById('ldp-back')?.addEventListener('click', closeLayerDetail);
 
 // Layer row clicks
 document.querySelectorAll<HTMLElement>('.cp-layer-nav').forEach(row => {
@@ -686,7 +683,7 @@ document.querySelectorAll<HTMLElement>('.cp-layer-nav').forEach(row => {
     const layerType = row.dataset.type ?? 'land_cover';
     const layerName = row.querySelector('.cp-layer-name')?.textContent ?? 'Couche';
     const iconSvg = row.querySelector('.cp-layer-ico')?.innerHTML ?? '';
-    showLayerDetail(row.dataset.layer ?? '', layerType, layerName, iconSvg);
+    showLayerDetail(layerType, layerName, iconSvg);
   });
 });
 
@@ -695,8 +692,7 @@ document.getElementById('cp-add-layer-btn')?.addEventListener('click', () => {
   ldpTitle.textContent = 'Nouvelle couche';
   ldpIcon.innerHTML = '<path d="M8 2v12M2 8h12" stroke-linecap="round"/>';
   ldpContent.innerHTML = buildNewLayerHTML();
-  cpMain.style.display = 'none';
-  cpDetail.style.display = 'flex';
+  cpLayerDetail.classList.add('open');
   wireNewLayerInputs();
 });
 
@@ -708,27 +704,35 @@ function buildLayerDetailHTML(type: string): string {
 }
 
 function buildMarkersHTML(): string {
+  const SHAPES = [
+    { id: 'circle',   label: 'Rond',     svg: '<circle cx="8" cy="8" r="5.5" fill="currentColor"/>' },
+    { id: 'square',   label: 'Carré',    svg: '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="currentColor"/>' },
+    { id: 'diamond',  label: 'Losange',  svg: '<path d="M8 1.5l6.5 6.5-6.5 6.5L1.5 8z" fill="currentColor"/>' },
+    { id: 'triangle', label: 'Triangle', svg: '<path d="M8 2l6.5 11.5H1.5z" fill="currentColor"/>' },
+    { id: 'cross',    label: 'Croix',    svg: '<path d="M5.5 2h5v3.5H14v5h-3.5V14h-5v-3.5H2v-5h3.5z" fill="currentColor"/>' },
+    { id: 'heart',    label: 'Cœur',     svg: '<path d="M8 13.5S1.5 9 1.5 5a3.25 3.25 0 016.5 0 3.25 3.25 0 016.5 0c0 4-6.5 8.5-6.5 8.5z" fill="currentColor"/>' },
+    { id: 'star',     label: 'Étoile',   svg: '<path d="M8 1.5l1.6 3.3 3.6.5-2.6 2.6.6 3.6L8 9.7l-3.2 1.8.6-3.6L2.8 5.3l3.6-.5z" fill="currentColor"/>' },
+  ];
+  const shapeBtns = SHAPES.map((s, i) =>
+    `<button class="ldp-shape-btn${i === 4 ? ' active' : ''}" data-shape="${s.id}" title="${s.label}"><svg viewBox="0 0 16 16">${s.svg}</svg></button>`
+  ).join('');
+
   return `
   <div class="ldp-sec">
-    <div class="ldp-sec-header">
-      <span class="ldp-sec-title">Paramètres</span>
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
-    </div>
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Paramètres</span></div>
     <div class="ldp-field">
       <div class="ldp-field-label">Forme</div>
-      <button class="ldp-form-btn">
-        ✕ <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
-      </button>
+      <div class="ldp-shape-grid">${shapeBtns}</div>
     </div>
     <div class="ldp-field">
       <div class="ldp-field-row">
-        <span class="ldp-field-label">Taille (nombre de murs)</span>
-        <button class="cp-icon-btn cp-info-btn" title="Taille du marqueur en nombre de lignes de mur">i</button>
+        <span class="ldp-field-label">Diamètre (nb. de murs)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Diamètre du marqueur comme multiple de la largeur de ligne de mur">i</button>
       </div>
       <div class="ldp-range-row">
         <input type="range" id="ldp-marker-size" class="cp-slider" min="1" max="20" value="10">
         <input type="number" class="ldp-num" id="ldp-marker-size-n" value="10.0" step="0.5">
-        <span class="ldp-unit">( 4.20 mm )</span>
+        <span class="ldp-unit" id="ldp-marker-mm">( 4.20 mm )</span>
       </div>
     </div>
     <div class="ldp-field">
@@ -741,19 +745,18 @@ function buildMarkersHTML(): string {
     <div class="ldp-field">
       <label class="ldp-check-row">
         <input type="checkbox" id="ldp-marker-flat" checked>
-        Plateau plat
-        <button class="ldp-edit-btn" title="Modifier"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 2l3 3-9 9H2v-3L11 2z"/></svg></button>
-        <button class="cp-icon-btn cp-info-btn" title="Aplatir le sommet du marqueur">i</button>
+        <span>Plateau plat</span>
+        <button class="cp-icon-btn cp-info-btn" title="Surface plate au sommet au lieu de suivre le terrain">i</button>
       </label>
     </div>
     <div class="ldp-field">
       <div class="ldp-field-row">
-        <span class="ldp-field-label">Décalage de hauteur<br>(nombre de calques)</span>
-        <button class="cp-icon-btn cp-info-btn" title="Décalage vertical en nombre de couches d'impression">i</button>
+        <span class="ldp-field-label">Décalage de hauteur<br>(nb. de couches)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Valeur positive = élève au-dessus de la surface">i</button>
       </div>
       <div class="ldp-range-row">
         <input type="number" class="ldp-num" id="ldp-marker-offset" value="2" step="1" min="0">
-        <span class="ldp-unit">( 0,40 mm )</span>
+        <span class="ldp-unit" id="ldp-offset-mm">( 0.40 mm )</span>
       </div>
     </div>
   </div>`;
@@ -868,23 +871,41 @@ function wireDetailInputs(type: string): void {
   const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
 
   if (type === 'markers') {
-    const sz  = document.getElementById('ldp-marker-size')  as HTMLInputElement;
-    const szN = document.getElementById('ldp-marker-size-n') as HTMLInputElement;
-    const rt  = document.getElementById('ldp-marker-rot')   as HTMLInputElement;
-    const rtN = document.getElementById('ldp-marker-rot-n') as HTMLInputElement;
-    const off = document.getElementById('ldp-marker-offset') as HTMLInputElement;
-    const syncSz = () => { const v=Number(sz.value); szN.value=v.toFixed(1); off.nextElementSibling && (off.nextElementSibling.textContent=`( ${(off.value==='') ? '0.00' : (Number(off.value)*layH).toFixed(2)} mm )`); };
-    sz?.addEventListener('input', () => { szN.value = sz.value; syncSz(); });
-    szN?.addEventListener('input', () => { if(sz) sz.value = szN.value; });
-    rt?.addEventListener('input', () => { if(rtN) rtN.value = rt.value; });
-    rtN?.addEventListener('input', () => { if(rt) rt.value = rtN.value; });
+    const sz    = document.getElementById('ldp-marker-size')   as HTMLInputElement;
+    const szN   = document.getElementById('ldp-marker-size-n') as HTMLInputElement;
+    const szMm  = document.getElementById('ldp-marker-mm');
+    const rt    = document.getElementById('ldp-marker-rot')    as HTMLInputElement;
+    const rtN   = document.getElementById('ldp-marker-rot-n')  as HTMLInputElement;
+    const off   = document.getElementById('ldp-marker-offset') as HTMLInputElement;
+    const offMm = document.getElementById('ldp-offset-mm');
+
+    const updateSzMm = () => {
+      if (szMm) szMm.textContent = `( ${(Number(sz.value) * wallW).toFixed(2)} mm )`;
+    };
+    const updateOffMm = () => {
+      if (offMm) offMm.textContent = `( ${(Number(off.value || 0) * layH).toFixed(2)} mm )`;
+    };
+    sz?.addEventListener('input', () => { szN.value = Number(sz.value).toFixed(1); updateSzMm(); });
+    szN?.addEventListener('input', () => { if (sz) sz.value = szN.value; updateSzMm(); });
+    rt?.addEventListener('input', () => { if (rtN) rtN.value = rt.value; });
+    rtN?.addEventListener('input', () => { if (rt) rt.value = rtN.value; });
+    off?.addEventListener('input', updateOffMm);
+    updateSzMm(); updateOffMm();
+
+    // Shape picker
+    document.querySelectorAll<HTMLElement>('.ldp-shape-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.ldp-shape-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
   }
 
   if (type === 'lines') {
     const lw  = document.getElementById('ldp-line-w')   as HTMLInputElement;
     const lwN = document.getElementById('ldp-line-w-n') as HTMLInputElement;
-    lw?.addEventListener('input', () => { if(lwN) lwN.value = lw.value; });
-    lwN?.addEventListener('input', () => { if(lw) lw.value = lwN.value; });
+    lw?.addEventListener('input', () => { if (lwN) lwN.value = lw.value; });
+    lwN?.addEventListener('input', () => { if (lw) lw.value = lwN.value; });
   }
 }
 
@@ -898,7 +919,7 @@ function wireNewLayerInputs(): void {
     };
     if (nameInput) nameInput.placeholder = labels[t] ?? t;
   });
-  document.getElementById('ldp-confirm-add')?.addEventListener('click', showLayerMain);
+  document.getElementById('ldp-confirm-add')?.addEventListener('click', closeLayerDetail);
   document.getElementById('ldp-new-color')?.addEventListener('click', () => {
     const slots = [1,2,3,4,5,6];
     const current = Number((document.getElementById('ldp-new-color') as HTMLElement).dataset.slot ?? 1);
