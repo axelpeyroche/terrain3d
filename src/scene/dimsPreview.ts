@@ -34,6 +34,7 @@ export const layerVisible: Record<string, boolean> = {
   veg_low: true, veg_dense: true, wetland: true,
   snow: true, water: true, waterways: true,
   gpx: true, gpx_line: true,
+  river_polygons: true, barren: true,
 };
 
 // Per-layer slot assignment overrides (layerId → slot number)
@@ -45,8 +46,15 @@ export let gpxLineHeightOffset = 1;  // multiples of layer height (0.20 mm)
 
 // User-placed markers (persist across rebuildScene)
 let markerNextId = 0;
-const placedMarkersData: Array<{ id: number; latFrac: number; lonFrac: number; shape: string; visible: boolean }> = [];
+interface MarkerData {
+  id: number; latFrac: number; lonFrac: number;
+  shape: string; visible: boolean;
+  diameterMult: number; rotDeg: number; flatTop: boolean; heightOffMult: number;
+}
+const placedMarkersData: MarkerData[] = [];
 let markerMeshRefs: THREE.Object3D[] = [];
+const markerMeshToId = new Map<THREE.Object3D, number>();
+let selectedMarkerId = -1;
 
 // Placement mode
 let placementActive = false;
@@ -54,6 +62,50 @@ let pendingShape    = '';
 
 // Last scene dims (needed to re-project markers after rebuild)
 let lastW = 200, lastD = 200, lastBaseH = 2, lastElevScale = 1;
+
+// Water body params
+export let waterHeightOffset = -1;   // layers (negative = sinks below surface)
+export let waterHydroFlatten = false;
+export const waterFeaturesEnabled: Record<string, boolean> = {
+  water_ocean: true, water_lake: true, water_pond: true,
+  water_reservoir: true, water_wastewater: true, water_human: true, water_other: true,
+};
+
+// Waterway line params
+export let waterwayLineWidth    = 1.0;   // multiplier on base stroke width
+export let waterwayHeightOffset = -1;    // layers
+export const waterwayFeaturesEnabled: Record<string, boolean> = {
+  rivers: true, streams_named: true, streams_unnamed: false,
+  river_polygons: true, canals: true, canal_polygons: true,
+};
+
+// Per-layer land cover feature states (each layer has independent feature toggles)
+const LC_ALL_FALSE: Record<string, boolean> = {
+  lc_forest: false, lc_forest_detailed: false,
+  lc_scrub: false, lc_shrub: false,
+  lc_grass: false, lc_grass_detailed: false, lc_crop: false, lc_moss: false,
+  lc_wetland: false, lc_wetland_detailed: false, lc_mangrove: false,
+  lc_barren: false, lc_desert: false, lc_sand: false, lc_rock: false,
+  lc_snow: false, lc_glacier: false, lc_urban: false,
+};
+export const layerLCFeatures: Record<string, Record<string, boolean>> = {
+  veg_dense:  { ...LC_ALL_FALSE, lc_forest_detailed: true, lc_shrub: true, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
+  veg_low:    { ...LC_ALL_FALSE, lc_grass: true, lc_grass_detailed: true, lc_crop: true, lc_moss: true },
+  wetland_lc: { ...LC_ALL_FALSE, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
+  snow_lc:    { ...LC_ALL_FALSE, lc_snow: true, lc_glacier: true },
+  barren_lc:  { ...LC_ALL_FALSE, lc_rock: true, lc_barren: true, lc_sand: true, lc_desert: true },
+};
+export const layerLCHeightOffset: Record<string, number> = {
+  veg_dense: 0, veg_low: 0, wetland_lc: 0, snow_lc: 0, barren_lc: 0,
+};
+export function setLCFeatureEnabled(layerId: string, key: string, enabled: boolean): void {
+  if (!layerLCFeatures[layerId]) return;
+  layerLCFeatures[layerId][key] = enabled;
+  if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+}
+export function setLCHeightOffset(layerId: string, offset: number): void {
+  layerLCHeightOffset[layerId] = offset;
+}
 
 // Line layer OSM data (roads, rails, routes)
 const lineLayerData: Record<string, GeoPoint[][]> = {};
@@ -279,21 +331,61 @@ export function handleCanvasClick(clientX: number, clientY: number): number {
     const latFrac = 0.5 - pt.z / lastD;
     const lonFrac = 0.5 + pt.x / lastW;
     const id = markerNextId++;
-    placedMarkersData.push({ id, latFrac, lonFrac, shape: pendingShape, visible: true });
-    spawnMarkerMesh(latFrac, lonFrac, pendingShape);
+    const md: MarkerData = { id, latFrac, lonFrac, shape: pendingShape, visible: true, diameterMult: 10, rotDeg: 0, flatTop: true, heightOffMult: 0 };
+    placedMarkersData.push(md);
+    spawnMarkerMeshFrom(md, placedMarkersData.length - 1);
     placedId = id;
   }
   cancelMarkerPlacement();
   return placedId;
 }
-export function getPlacedMarkers(): Array<{ id: number; shape: string; visible: boolean }> {
-  return placedMarkersData.map(m => ({ id: m.id, shape: m.shape, visible: m.visible }));
+export function getPlacedMarkers(): Array<{ id: number; shape: string; visible: boolean; diameterMult: number; rotDeg: number; flatTop: boolean; heightOffMult: number }> {
+  return placedMarkersData.map(m => ({ id: m.id, shape: m.shape, visible: m.visible, diameterMult: m.diameterMult, rotDeg: m.rotDeg, flatTop: m.flatTop, heightOffMult: m.heightOffMult }));
 }
-export function setMarkerVisible(id: number, visible: boolean): void {
+export function getSelectedMarkerId(): number { return selectedMarkerId; }
+export function selectMarker(id: number): void { selectedMarkerId = id; }
+export function deselectMarker(): void { selectedMarkerId = -1; }
+
+/** Raycast to pick a placed marker; returns its id or -1 */
+export function pickMarkerAtCanvas(clientX: number, clientY: number): number {
+  if (!scene || !camera || !dimsCanvas || markerMeshRefs.length === 0) return -1;
+  const rect = dimsCanvas.getBoundingClientRect();
+  const ndcX =  ((clientX - rect.left) / rect.width)  * 2 - 1;
+  const ndcY = -((clientY - rect.top)  / rect.height) * 2 + 1;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const hits = raycaster.intersectObjects(markerMeshRefs, true);
+  if (!hits.length) return -1;
+  // walk up to find the root mesh in markerMeshRefs
+  let obj: THREE.Object3D | null = hits[0].object;
+  while (obj) {
+    const id = markerMeshToId.get(obj);
+    if (id !== undefined) return id;
+    obj = obj.parent;
+  }
+  return -1;
+}
+
+export function updateMarker(id: number, params: Partial<Pick<MarkerData, 'shape' | 'diameterMult' | 'rotDeg' | 'flatTop' | 'heightOffMult' | 'visible'>>): void {
   const idx = placedMarkersData.findIndex(m => m.id === id);
   if (idx < 0) return;
-  placedMarkersData[idx].visible = visible;
-  if (markerMeshRefs[idx]) markerMeshRefs[idx].visible = visible;
+  Object.assign(placedMarkersData[idx], params);
+  // Rebuild the mesh
+  const oldMesh = markerMeshRefs[idx];
+  if (oldMesh) {
+    markerMeshToId.delete(oldMesh);
+    scene?.remove(oldMesh);
+    const si = sceneObjs.indexOf(oldMesh);
+    if (si >= 0) sceneObjs.splice(si, 1);
+    markerMeshRefs.splice(idx, 1);
+  }
+  // Re-insert at same position
+  const md = placedMarkersData[idx];
+  spawnMarkerMeshFrom(md, idx);
+}
+
+export function setMarkerVisible(id: number, visible: boolean): void {
+  updateMarker(id, { visible });
 }
 export function deleteMarker(id: number): void {
   const idx = placedMarkersData.findIndex(m => m.id === id);
@@ -301,19 +393,23 @@ export function deleteMarker(id: number): void {
   placedMarkersData.splice(idx, 1);
   const mesh = markerMeshRefs.splice(idx, 1)[0];
   if (mesh) {
+    markerMeshToId.delete(mesh);
     scene?.remove(mesh);
     const si = sceneObjs.indexOf(mesh);
     if (si >= 0) sceneObjs.splice(si, 1);
   }
+  if (selectedMarkerId === id) selectedMarkerId = -1;
 }
 export function clearUserMarkers(): void {
   placedMarkersData.length = 0;
   for (const g of markerMeshRefs) {
+    markerMeshToId.delete(g);
     scene?.remove(g);
     const si = sceneObjs.indexOf(g);
     if (si >= 0) sceneObjs.splice(si, 1);
   }
   markerMeshRefs = [];
+  selectedMarkerId = -1;
 }
 
 /* ══════════════════════════════════════════════
@@ -348,19 +444,27 @@ export async function buildDimsPreview(
 
     onProgress(5, 'Téléchargement des altitudes…');
     cachedElev = await loadElevation(bounds);
+  }
 
+  // Feature fetch is independent of elevation cache: retry until we get real data
+  if (key !== cachedFeaturesKey) {
     onProgress(35, 'Chargement des données géographiques…');
-    if (key !== cachedFeaturesKey) {
+    const features = await fetchTerrainFeatures(bounds);
+    if (features.length > 0) {
       cachedFeaturesKey = key;
-      cachedFeatures = await fetchTerrainFeatures(bounds);
+      cachedFeatures = features;
+      // Invalidate texture so it gets rebuilt with real zone colors
+      if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
     }
+  }
 
+  if (!cachedTexture && cachedElev) {
     onProgress(70, 'Génération de la texture…');
     cachedTexture = buildMapTexture(
       bounds, cachedElev.grid, PREVIEW_GRID,
       cachedElev.minE, cachedElev.elevRange, cachedFeatures,
     );
-  } else {
+  } else if (!needFetch) {
     onProgress(50, 'Reconstruction…');
   }
 
@@ -380,12 +484,17 @@ export async function buildDimsPreview(
    REBUILD SCENE
 ══════════════════════════════════════════════ */
 export function rebuildScene(s: DimSettings): void {
-  if (!scene || !camera || !controls || !cachedElev || !cachedTexture) return;
+  if (!scene || !camera || !controls || !cachedElev) return;
   clearScene();
 
   const { wMm, dMm, baseH, exag, flatFacade, facadeWidthMm, gpxPoints, zoneType, zonePts, bounds } = s;
   const { grid, minE, elevRange } = cachedElev;
   const rb = bounds ?? cachedElev.bounds;
+
+  // Rebuild texture if invalidated (water feature toggle, color change, etc.)
+  if (!cachedTexture) {
+    cachedTexture = buildMapTexture(rb, grid, PREVIEW_GRID, minE, elevRange, cachedFeatures);
+  }
 
   const cLat = (rb.minLat + rb.maxLat) / 2;
   const realW = (rb.maxLon - rb.minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
@@ -406,13 +515,17 @@ export function rebuildScene(s: DimSettings): void {
   lineMeshGroup = null;
   markerMeshRefs = [];
 
+  // Apply water height offset + hydro-flatten to the elevation grid
+  const layH = 0.20;
+  const workGrid = applyWaterToGrid(grid, G, rb, cachedFeatures, elevRange, elevScaleMm, layH);
+
   // ── Terrain ───────────────────────────────────────────
   {
     const geo = new THREE.PlaneGeometry(wMm, dMm, G - 1, G - 1);
     geo.rotateX(-Math.PI / 2);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
-      pos.setY(i, baseH + ((grid[i] - minE) / elevRange) * elevScaleMm);
+      pos.setY(i, baseH + ((workGrid[i] - minE) / elevRange) * elevScaleMm);
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
@@ -484,11 +597,9 @@ export function rebuildScene(s: DimSettings): void {
 
   // ── Placed markers ────────────────────────────────────
   lastW = wMm; lastD = dMm; lastBaseH = baseH; lastElevScale = elevScaleMm;
-  for (const md of placedMarkersData) {
-    spawnMarkerMesh(md.latFrac, md.lonFrac, md.shape);
-    // restore individual visibility state
-    const mesh = markerMeshRefs[markerMeshRefs.length - 1];
-    if (mesh) mesh.visible = md.visible;
+  markerMeshToId.clear();
+  for (let i = 0; i < placedMarkersData.length; i++) {
+    spawnMarkerMeshFrom(placedMarkersData[i], i);
   }
 
   // ── Line features overlay ─────────────────────────────
@@ -560,8 +671,138 @@ out geom;`;
 }
 
 /* ══════════════════════════════════════════════
+   WATER BODY HELPERS
+══════════════════════════════════════════════ */
+
+export function setWaterParams(heightOffset: number, hydroFlatten: boolean): void {
+  waterHeightOffset = heightOffset;
+  waterHydroFlatten = hydroFlatten;
+}
+export function setWaterFeatureEnabled(key: string, enabled: boolean): void {
+  waterFeaturesEnabled[key] = enabled;
+  if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+}
+export function setWaterwayParams(lineWidth: number, heightOffset: number): void {
+  waterwayLineWidth    = lineWidth;
+  waterwayHeightOffset = heightOffset;
+  if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+}
+export function setWaterwayFeatureEnabled(key: string, enabled: boolean): void {
+  waterwayFeaturesEnabled[key] = enabled;
+  if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+}
+
+function classifyWaterFeature(tags: Record<string, string>): string {
+  const w = tags.water ?? '';
+  if (['ocean', 'sea', 'bay', 'strait'].includes(w)) return 'water_ocean';
+  if (w === 'canal') return 'water_canal'; // controlled from waterways panel
+  if (w === 'lake' || (!w && tags.natural === 'water')) return 'water_lake';
+  if (w === 'pond') return 'water_pond';
+  if (w === 'reservoir' || tags.landuse === 'reservoir') return 'water_reservoir';
+  if (w === 'wastewater') return 'water_wastewater';
+  if (['basin', 'dock', 'reflecting_pool', 'swimming_pool', 'moat'].includes(w)) return 'water_human';
+  return 'water_other';
+}
+
+function isWaterwayEnabled(t: Record<string, string>): boolean {
+  const ww = t.waterway ?? '';
+  if (ww === 'river') return waterwayFeaturesEnabled['rivers'] !== false;
+  if (ww === 'canal') return waterwayFeaturesEnabled['canals'] !== false;
+  if (ww === 'stream' || ww === 'ditch') {
+    return (t.name ? waterwayFeaturesEnabled['streams_named'] : waterwayFeaturesEnabled['streams_unnamed']) !== false;
+  }
+  return true;
+}
+
+function pointInPoly(lat: number, lon: number, poly: GeoPoint[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const yi = poly[i].lat, xi = poly[i].lon;
+    const yj = poly[j].lat, xj = poly[j].lon;
+    if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+}
+
+function getOsmPolygons(el: OSMEl): GeoPoint[][] {
+  if (el.type === 'way' && el.geometry) return [el.geometry];
+  if (el.type === 'relation' && el.members)
+    return el.members.filter(m => m.role === 'outer' && m.geometry).map(m => m.geometry!);
+  return [];
+}
+
+function applyWaterToGrid(
+  rawGrid: Float32Array, G: number, bounds: LatLonBounds,
+  features: OSMEl[], elevRange: number, elevScaleMm: number, layH: number,
+): Float32Array {
+  if (!waterHydroFlatten && waterHeightOffset === 0) return rawGrid;
+  const grid = new Float32Array(rawGrid);
+  const latRange = bounds.maxLat - bounds.minLat;
+  const lonRange = bounds.maxLon - bounds.minLon;
+  const elevPerLayer = elevRange > 0 && elevScaleMm > 0 ? (layH / elevScaleMm) * elevRange : 0;
+
+  for (const feat of features) {
+    if (!feat.tags) continue;
+    const isWater = feat.tags.natural === 'water' || feat.tags.waterway === 'riverbank';
+    if (!isWater) continue;
+    if (waterFeaturesEnabled[classifyWaterFeature(feat.tags)] === false) continue;
+
+    for (const poly of getOsmPolygons(feat)) {
+      if (poly.length < 3) continue;
+      let bbMinLat = Infinity, bbMaxLat = -Infinity, bbMinLon = Infinity, bbMaxLon = -Infinity;
+      for (const pt of poly) {
+        if (pt.lat < bbMinLat) bbMinLat = pt.lat; if (pt.lat > bbMaxLat) bbMaxLat = pt.lat;
+        if (pt.lon < bbMinLon) bbMinLon = pt.lon; if (pt.lon > bbMaxLon) bbMaxLon = pt.lon;
+      }
+      const jMin = Math.max(0, Math.floor((bounds.maxLat - bbMaxLat) / latRange * (G - 1)));
+      const jMax = Math.min(G - 1, Math.ceil((bounds.maxLat - bbMinLat) / latRange * (G - 1)));
+      const iMin = Math.max(0, Math.floor((bbMinLon - bounds.minLon) / lonRange * (G - 1)));
+      const iMax = Math.min(G - 1, Math.ceil((bbMaxLon - bounds.minLon) / lonRange * (G - 1)));
+
+      const cells: number[] = [];
+      let minElev = Infinity;
+      for (let j = jMin; j <= jMax; j++) {
+        const lat = bounds.maxLat - (j / (G - 1)) * latRange;
+        for (let i = iMin; i <= iMax; i++) {
+          if (pointInPoly(lat, bounds.minLon + (i / (G - 1)) * lonRange, poly)) {
+            const idx = j * G + i;
+            cells.push(idx);
+            if (grid[idx] < minElev) minElev = grid[idx];
+          }
+        }
+      }
+      for (const idx of cells) {
+        if (waterHydroFlatten) grid[idx] = minElev;
+        grid[idx] += waterHeightOffset * elevPerLayer;
+      }
+    }
+  }
+  return grid;
+}
+
+/* ══════════════════════════════════════════════
    MAP TEXTURE: layered OSM terrain zones
 ══════════════════════════════════════════════ */
+
+function matchLCFeature(t: Record<string, string>, f: Record<string, boolean>): boolean {
+  if (t.natural === 'wood')           return f['lc_forest_detailed'] === true;
+  if (t.landuse === 'forest')         return f['lc_forest'] === true;
+  if (t.natural === 'grassland' || t.landuse === 'grass') return f['lc_grass'] === true;
+  if (t.landuse === 'meadow')         return f['lc_grass_detailed'] === true;
+  if (t.landuse === 'farmland')       return f['lc_crop'] === true;
+  if (t.natural === 'fell' || t.natural === 'moor') return f['lc_moss'] === true;
+  if (t.natural === 'heath')          return f['lc_shrub'] === true;
+  if (t.natural === 'scrub')          return f['lc_scrub'] === true;
+  if (t.natural === 'wetland')        return t.wetland === 'mangrove' ? f['lc_mangrove'] === true : f['lc_wetland'] === true;
+  if (t.natural === 'mud')            return f['lc_wetland_detailed'] === true;
+  if (t.natural === 'glacier')        return f['lc_glacier'] === true;
+  if (t.natural === 'snow')           return f['lc_snow'] === true;
+  if (t.natural === 'bare_rock')      return f['lc_rock'] === true;
+  if (t.natural === 'scree')          return f['lc_barren'] === true;
+  if (t.natural === 'sand')           return f['lc_sand'] === true || f['lc_desert'] === true;
+  return false;
+}
 
 // Zone definitions: drawn bottom-to-top. Colors driven by colorSlots.
 const ZONE_LAYERS: Array<{
@@ -570,12 +811,14 @@ const ZONE_LAYERS: Array<{
   slot: number;
   fill: boolean;
 }> = [
-  { id: 'veg_low',   match: t => t.natural === 'grassland' || t.landuse === 'meadow' || t.landuse === 'grass' || t.landuse === 'farmland' || t.natural === 'fell' || t.natural === 'moor' || t.natural === 'heath' || t.natural === 'scrub', slot: 3, fill: true },
-  { id: 'veg_dense', match: t => t.natural === 'wood' || t.landuse === 'forest', slot: 4, fill: true },
-  { id: 'wetland',   match: t => t.natural === 'wetland' || t.natural === 'mud',  slot: 3, fill: true },
-  { id: 'snow',      match: t => t.natural === 'glacier' || t.natural === 'snow', slot: 2, fill: true },
-  { id: 'water',     match: t => t.natural === 'water' || t.waterway === 'riverbank', slot: 5, fill: true },
-  { id: 'waterways', match: t => !!t.waterway && t.waterway !== 'riverbank',          slot: 5, fill: false },
+  { id: 'veg_low',   match: t => matchLCFeature(t, layerLCFeatures['veg_low']   ?? {}), slot: 3, fill: true },
+  { id: 'veg_dense', match: t => matchLCFeature(t, layerLCFeatures['veg_dense']  ?? {}), slot: 4, fill: true },
+  { id: 'wetland',   match: t => matchLCFeature(t, layerLCFeatures['wetland_lc'] ?? {}), slot: 3, fill: true },
+  { id: 'snow',      match: t => matchLCFeature(t, layerLCFeatures['snow_lc']    ?? {}), slot: 2, fill: true },
+  { id: 'barren',    match: t => matchLCFeature(t, layerLCFeatures['barren_lc']  ?? {}), slot: 1, fill: true },
+  { id: 'water',          match: t => t.natural === 'water' && (() => { const c = classifyWaterFeature(t); return c === 'water_canal' ? waterwayFeaturesEnabled['canal_polygons'] !== false : waterFeaturesEnabled[c] !== false; })(), slot: 5, fill: true },
+  { id: 'river_polygons', match: t => t.waterway === 'riverbank' && waterwayFeaturesEnabled['river_polygons'] !== false, slot: 5, fill: true },
+  { id: 'waterways',      match: t => !!t.waterway && t.waterway !== 'riverbank' && isWaterwayEnabled(t), slot: 5, fill: false },
 ];
 
 function computeFeatureAreaM2(el: OSMEl, lonScale: number): number {
@@ -658,7 +901,7 @@ function buildMapTexture(
       for (const el of layerEls) {
         if (!el.tags) continue;
         const ww = el.tags.waterway ?? '';
-        const lw = ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5;
+        const lw = (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth;
         ctx.beginPath();
         traceGeometry(ctx, el, bounds, S);
         ctx.strokeStyle = col;
@@ -1137,38 +1380,82 @@ function buildMarkerShape(shape: string, r: number): THREE.Shape {
   return s;
 }
 
-function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void {
+/** Sample terrain elevation at (u,v) with bilinear interpolation */
+function sampleElev(grid: Float32Array, G: number, u: number, v: number): number {
+  const gx = Math.max(0, Math.min(G-2, u * (G-1)));
+  const gv = Math.max(0, Math.min(G-2, v * (G-1)));
+  const gi = Math.floor(gx), gj = Math.floor(gv);
+  const fx = gx-gi, fy = gv-gj;
+  return grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
+       + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
+}
+
+function spawnMarkerMeshFrom(md: MarkerData, insertIdx: number): void {
   if (!cachedElev || !scene) return;
   const { grid, minE, elevRange } = cachedElev;
   const G = PREVIEW_GRID;
   const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
 
-  const u = lonFrac, v = 1 - latFrac;
-  const x = (u - 0.5) * wMm, z = (0.5 - (1 - v)) * dMm;
-  const gx = Math.max(0, Math.min(G-2, u * (G - 1)));
-  const gv2 = Math.max(0, Math.min(G-2, v * (G - 1)));
-  const gi = Math.floor(gx), gj = Math.floor(gv2);
-  const fx = gx - gi, fy = gv2 - gj;
-  const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
-          + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-  const yBase = baseH + ((e - minE) / elevRange) * elevScaleMm;
+  const wallW = 0.42; // default wall width mm
+  const layH  = 0.20; // default layer height mm
+  const r = (md.diameterMult * wallW) / 2;
+  const depth = 0.5;
+  const heightOff = md.heightOffMult * layH;
 
-  const r = 4.5; // radius in mm — lies flat on terrain
+  const u = md.lonFrac, v = 1 - md.latFrac;
+  const x = (u - 0.5) * wMm, z = (0.5 - (1 - v)) * dMm;
+
+  // When flatTop, find max elevation in the marker footprint so it sits above terrain
+  let yBase: number;
+  if (md.flatTop) {
+    let maxE = -Infinity;
+    const steps = 8;
+    for (let si = 0; si <= steps; si++) {
+      for (let sj = 0; sj <= steps; sj++) {
+        const ru = si / steps, rv = sj / steps;
+        const pu = u + (ru - 0.5) * (r * 2) / wMm;
+        const pv = v + (rv - 0.5) * (r * 2) / dMm;
+        const eu = Math.max(0, Math.min(1, pu)), ev = Math.max(0, Math.min(1, pv));
+        const e = sampleElev(grid, G, eu, ev);
+        if (e > maxE) maxE = e;
+      }
+    }
+    yBase = baseH + ((maxE - minE) / elevRange) * elevScaleMm;
+  } else {
+    const e = sampleElev(grid, G, u, v);
+    yBase = baseH + ((e - minE) / elevRange) * elevScaleMm;
+  }
+
   const markerSlot = layerSlotOverrides['gpx'] ?? 6;
   const col = colorSlots[markerSlot] ?? '#ff4500';
   const mat = new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide });
 
-  const shapeObj = buildMarkerShape(shape, r);
-  const geo = new THREE.ExtrudeGeometry(shapeObj, { depth: 0.5, bevelEnabled: false });
-  // ExtrudeGeometry extrudes along Z; rotate so it lies flat on the XZ terrain plane
+  const shapeObj = buildMarkerShape(md.shape, r);
+  const geo = new THREE.ExtrudeGeometry(shapeObj, { depth, bevelEnabled: false });
   geo.rotateX(-Math.PI / 2);
+  if (md.rotDeg !== 0) geo.rotateY(md.rotDeg * Math.PI / 180);
 
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(x, yBase + 0.25, z);
-  mesh.visible = layerVisible['gpx'] ?? true;
+  mesh.position.set(x, yBase + heightOff, z);
+  mesh.visible = md.visible && (layerVisible['gpx'] ?? true);
 
-  add(mesh);
-  markerMeshRefs.push(mesh);
+  markerMeshToId.set(mesh, md.id);
+
+  // Insert at the correct position in the arrays
+  if (insertIdx >= markerMeshRefs.length) {
+    add(mesh);
+    markerMeshRefs.push(mesh);
+  } else {
+    scene!.add(mesh); sceneObjs.push(mesh);
+    markerMeshRefs.splice(insertIdx, 0, mesh);
+  }
+}
+
+// Keep old name as alias used in re-spawn loop
+function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void {
+  // Called from re-spawn loop in rebuildScene — data already in placedMarkersData
+  // Nothing to do here; spawnMarkerMeshFrom is called directly
+  void latFrac; void lonFrac; void shape;
 }
 
 function buildGpxLine(
@@ -1201,9 +1488,14 @@ function buildGpxLine(
   const tubRadius = gpxLineThickness * 0.21;
 
   if (tubRadius >= 0.1) {
-    const curve = new THREE.CatmullRomCurve3(verts, false, 'centripetal');
-    const segments = Math.min(1200, verts.length * 8);
-    const geo = new THREE.TubeGeometry(curve, segments, tubRadius, 8, false);
+    // Use arc-length spaced points to ensure uniform tube width throughout the path
+    const rawCurve = new THREE.CatmullRomCurve3(verts, false, 'centripetal');
+    const numUniform = Math.min(2000, Math.max(80, verts.length * 5));
+    const uniformPts = rawCurve.getSpacedPoints(numUniform);
+    const geo = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(uniformPts, false, 'catmullrom'),
+      numUniform, tubRadius, 8, false,
+    );
     return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col }));
   }
 

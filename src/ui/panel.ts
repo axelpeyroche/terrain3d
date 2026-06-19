@@ -447,7 +447,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer cp-layer-nav" data-layer="veg_dense" data-type="land_cover">
+            <div class="cp-layer cp-layer-nav" data-layer="veg_dense" data-type="veg_dense">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="4" style="background:#3a6828">4</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="8,2 14,10 2,10"/><line x1="8" y1="10" x2="8" y2="14"/></svg>
@@ -460,7 +460,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer cp-layer-nav" data-layer="veg_low" data-type="land_cover">
+            <div class="cp-layer cp-layer-nav" data-layer="veg_low" data-type="veg_low">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="3" style="background:#8ab858">3</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="8,3 13,11 3,11"/><line x1="8" y1="11" x2="8" y2="14"/></svg>
@@ -473,7 +473,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer cp-layer-nav" data-layer="snow" data-type="land_cover">
+            <div class="cp-layer cp-layer-nav" data-layer="snow" data-type="snow_lc">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="2" style="background:#e4eee8; border:1px solid #aaa; color:#555">2</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="8,2 10,7 15,7 11,10 13,15 8,12 3,15 5,10 1,7 6,7"/></svg>

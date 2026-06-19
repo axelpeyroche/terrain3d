@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -698,9 +698,109 @@ document.getElementById('cp-add-layer-btn')?.addEventListener('click', () => {
 
 /* ── Layer detail HTML builders ── */
 function buildLayerDetailHTML(type: string): string {
-  if (type === 'markers') return buildMarkersHTML();
-  if (type === 'lines')   return buildLinesHTML();
-  return buildLandCoverHTML();
+  if (type === 'markers')    return buildMarkersHTML();
+  if (type === 'lines')      return buildLinesHTML();
+  if (type === 'water')      return buildWaterHTML();
+  if (type === 'waterways')  return buildWaterwaysHTML();
+  if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc'].includes(type)) return buildLandCoverHTML(type);
+  return '';
+}
+
+function buildWaterwaysHTML(): string {
+  const wallW = Number((document.getElementById('ps-wall-w') as HTMLInputElement)?.value ?? 0.42) || 0.42;
+  const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+  const wMm   = (waterwayLineWidth * wallW).toFixed(2);
+  const offMm = (waterwayHeightOffset * layH).toFixed(2);
+  const f = waterwayFeaturesEnabled;
+  return `
+  <div class="ldp-sec">
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Paramètres</span></div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Largeur (nb. de murs)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Épaisseur des lignes comme multiple de la largeur de mur">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="range" id="ldp-ww-width" class="cp-slider" min="1" max="10" step="0.5" value="${waterwayLineWidth}">
+        <input type="number" class="ldp-num" id="ldp-ww-width-n" value="${waterwayLineWidth}" step="0.5">
+        <span class="ldp-unit" id="ldp-ww-width-mm">( ${wMm} mm )</span>
+      </div>
+    </div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Décalage de hauteur<br>(nb. de couches)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Positif = élève au-dessus de la surface, négatif = enfonce en dessous">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="number" class="ldp-num" id="ldp-ww-offset" value="${waterwayHeightOffset}" step="1">
+        <span class="ldp-unit" id="ldp-ww-offset-mm">( ${offMm} mm )</span>
+      </div>
+    </div>
+  </div>
+  <div class="ldp-sec">
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Caractéristiques</span></div>
+    <label class="ldp-check-row"><input type="checkbox" class="ldp-ww-feat" data-key="rivers"${f['rivers'] !== false ? ' checked' : ''}> Rivières</label>
+    <div class="ldp-ww-stream-group">
+      <label class="ldp-check-row"><input type="checkbox" id="ldp-ww-streams" class="ldp-ww-feat" data-key="streams"${(f['streams_named'] !== false || f['streams_unnamed'] !== false) ? ' checked' : ''}> Ruisseaux</label>
+      <div class="ldp-ww-stream-subs" style="padding-left:18px">
+        <label class="ldp-check-row"><input type="checkbox" class="ldp-ww-feat" data-key="streams_named"${f['streams_named'] !== false ? ' checked' : ''}> Nommés</label>
+        <label class="ldp-check-row"><input type="checkbox" class="ldp-ww-feat" data-key="streams_unnamed"${f['streams_unnamed'] !== false ? ' checked' : ''}> Sans nom</label>
+      </div>
+    </div>
+    <label class="ldp-check-row">
+      <input type="checkbox" class="ldp-ww-feat" data-key="river_polygons"${f['river_polygons'] !== false ? ' checked' : ''}>
+      Polygones rivières (expérimental)
+      <button class="cp-icon-btn cp-info-btn" title="Peut donner des résultats étranges pour le décalage de hauteur en zone montagneuse">i</button>
+    </label>
+    <label class="ldp-check-row"><input type="checkbox" class="ldp-ww-feat" data-key="canals"${f['canals'] !== false ? ' checked' : ''}> Canaux</label>
+    <label class="ldp-check-row">
+      <input type="checkbox" class="ldp-ww-feat" data-key="canal_polygons"${f['canal_polygons'] !== false ? ' checked' : ''}>
+      Polygones canaux (expérimental)
+      <button class="cp-icon-btn cp-info-btn" title="Peut donner des résultats étranges pour le décalage de hauteur en zone montagneuse">i</button>
+    </label>
+  </div>`;
+}
+
+function buildWaterHTML(): string {
+  const layH = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+  const offsetMm = (waterHeightOffset * layH).toFixed(2);
+  const waterSubs = [
+    { key: 'water_ocean',      label: 'Océans' },
+    { key: 'water_lake',       label: 'Lacs' },
+    { key: 'water_pond',       label: 'Étangs' },
+    { key: 'water_reservoir',  label: 'Réservoirs' },
+    { key: 'water_wastewater', label: 'Eaux usées' },
+    { key: 'water_human',      label: 'Artificiel' },
+    { key: 'water_other',      label: 'Autre' },
+  ];
+  const subRows = waterSubs.map(s =>
+    `<label class="ldp-check-row"><input type="checkbox" class="ldp-water-feat" data-key="${s.key}"${waterFeaturesEnabled[s.key] !== false ? ' checked' : ''}> ${s.label}</label>`
+  ).join('');
+  return `
+  <div class="ldp-sec">
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Paramètres</span></div>
+    <div class="ldp-field">
+      <div class="ldp-field-row">
+        <span class="ldp-field-label">Décalage de hauteur<br>(nb. de couches)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Positif = élève au-dessus de la surface, négatif = enfonce en dessous">i</button>
+      </div>
+      <div class="ldp-range-row">
+        <input type="number" class="ldp-num" id="ldp-water-offset" value="${waterHeightOffset}" step="1">
+        <span class="ldp-unit" id="ldp-water-offset-mm">( ${offsetMm} mm )</span>
+      </div>
+    </div>
+    <div class="ldp-field">
+      <label class="ldp-check-row">
+        <input type="checkbox" id="ldp-water-hydro"${waterHydroFlatten ? ' checked' : ''}>
+        <span>Hydro-Flatten</span>
+        <button class="cp-icon-btn cp-info-btn" title="Force une élévation plate pour toutes les étendues d'eau">i</button>
+      </label>
+    </div>
+  </div>
+  <div class="ldp-sec">
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Caractéristiques</span></div>
+    ${subRows}
+  </div>`;
 }
 
 function buildMarkersHTML(): string {
@@ -755,8 +855,8 @@ function buildMarkersHTML(): string {
         <button class="cp-icon-btn cp-info-btn" title="Valeur positive = élève au-dessus de la surface">i</button>
       </div>
       <div class="ldp-range-row">
-        <input type="number" class="ldp-num" id="ldp-marker-offset" value="2" step="1" min="0">
-        <span class="ldp-unit" id="ldp-offset-mm">( 0.40 mm )</span>
+        <input type="number" class="ldp-num" id="ldp-marker-offset" value="0" step="1" min="-20">
+        <span class="ldp-unit" id="ldp-offset-mm">( 0.00 mm )</span>
       </div>
     </div>
   </div>
@@ -836,7 +936,8 @@ function buildLinesHTML(): string {
     return `
     <div class="ldp-line-group">
       <div class="ldp-line-group-header">
-        <label><input type="checkbox" class="ldp-line-group-chk" data-group="${g.label}"${allEnabled ? ' checked' : ''}> <span>${g.label}</span></label>
+        <input type="checkbox" class="ldp-line-group-chk" data-group="${g.label}"${allEnabled ? ' checked' : ''}>
+        <span class="ldp-group-label">${g.label}</span>
         <button class="ldp-chev-btn" title="Afficher sous-catégories">${chevSvg}</button>
       </div>
       <div class="ldp-line-subs">${subs}</div>
@@ -875,23 +976,67 @@ function buildLinesHTML(): string {
   </div>`;
 }
 
-function buildLandCoverHTML(): string {
+function buildLandCoverHTML(layerId: string): string {
+  const layH   = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+  const offset = layerLCHeightOffset[layerId] ?? 0;
+  const offMm  = (offset * layH).toFixed(2);
+  const f      = layerLCFeatures[layerId] ?? {};
+
+  const mkGroup = (parentKey: string, parentLabel: string, subs: Array<{ key: string; label: string }>) => {
+    const subChecked = subs.filter(s => f[s.key] === true).length;
+    const allOn  = subChecked === subs.length;
+    const someOn = subChecked > 0;
+    const subRows = subs.map(s =>
+      `<label class="ldp-check-row ldp-lc-sub"><input type="checkbox" class="ldp-lc-feat" data-key="${s.key}"${f[s.key] === true ? ' checked' : ''}> ${s.label}</label>`
+    ).join('');
+    return `
+    <div class="ldp-lc-group">
+      <div class="ldp-lc-group-header">
+        <input type="checkbox" class="ldp-lc-group-chk" data-group="${parentKey}"${allOn ? ' checked' : someOn ? ' data-indeterminate="1"' : ''}>
+        <span class="ldp-group-label">${parentLabel}</span>
+        <button class="ldp-chev-btn" title="Afficher sous-catégories"><svg class="ldp-chev-ico" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 2l3 3-3 3"/></svg></button>
+      </div>
+      <div class="ldp-line-subs">${subRows}</div>
+    </div>`;
+  };
+
+  const groupsByLayer: Record<string, ReturnType<typeof mkGroup>[]> = {
+    veg_dense: [
+      mkGroup('forests',  'Forêts',        [{ key: 'lc_forest', label: 'Forêt' }, { key: 'lc_forest_detailed', label: 'Forêt (Détaillée)' }]),
+      mkGroup('shrubs',   'Arbustes',      [{ key: 'lc_scrub', label: 'Lande' }, { key: 'lc_shrub', label: 'Buisson' }]),
+      mkGroup('wetlands', 'Zones humides', [{ key: 'lc_wetland', label: 'Zone humide' }, { key: 'lc_wetland_detailed', label: 'Zone humide (Détaillée)' }, { key: 'lc_mangrove', label: 'Mangrove' }]),
+    ],
+    veg_low: [
+      mkGroup('fields',   'Champs',        [{ key: 'lc_grass', label: 'Prairie' }, { key: 'lc_grass_detailed', label: 'Prairie (Détaillée)' }, { key: 'lc_crop', label: 'Culture' }, { key: 'lc_moss', label: 'Mousse' }]),
+      mkGroup('shrubs',   'Arbustes',      [{ key: 'lc_scrub', label: 'Lande' }, { key: 'lc_shrub', label: 'Buisson' }]),
+    ],
+    wetland_lc: [
+      mkGroup('wetlands', 'Zones humides', [{ key: 'lc_wetland', label: 'Zone humide' }, { key: 'lc_wetland_detailed', label: 'Zone humide (Détaillée)' }, { key: 'lc_mangrove', label: 'Mangrove' }]),
+    ],
+    snow_lc: [
+      mkGroup('ice',      'Glace',         [{ key: 'lc_snow', label: 'Glace & Neige' }, { key: 'lc_glacier', label: 'Glacier' }]),
+    ],
+  };
+
+  const groups = (groupsByLayer[layerId] ?? []).join('');
+
   return `
   <div class="ldp-sec">
-    <div class="ldp-sec-header">
-      <span class="ldp-sec-title">Paramètres</span>
-      <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 4l4 4 4-4"/></svg>
-    </div>
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Paramètres</span></div>
     <div class="ldp-field">
       <div class="ldp-field-row">
-        <span class="ldp-field-label">Décalage de hauteur<br>(nombre de calques)</span>
-        <button class="cp-icon-btn cp-info-btn" title="Décalage vertical en nombre de couches">i</button>
+        <span class="ldp-field-label">Décalage de hauteur<br>(nb. de couches)</span>
+        <button class="cp-icon-btn cp-info-btn" title="Positif = élève au-dessus de la surface, négatif = enfonce en dessous">i</button>
       </div>
       <div class="ldp-range-row">
-        <input type="number" class="ldp-num" id="ldp-lc-offset" value="0" step="1" min="0">
-        <span class="ldp-unit">( 0,00 mm )</span>
+        <input type="number" class="ldp-num" id="ldp-lc-offset" value="${offset}" step="1">
+        <span class="ldp-unit" id="ldp-lc-offset-mm">( ${offMm} mm )</span>
       </div>
     </div>
+  </div>
+  <div class="ldp-sec">
+    <div class="ldp-sec-header"><span class="ldp-sec-title">Caractéristiques</span></div>
+    ${groups}
   </div>`;
 }
 
@@ -939,24 +1084,41 @@ function wireDetailInputs(type: string): void {
     const updateOffMm = () => {
       if (offMm) offMm.textContent = `( ${(Number(off.value || 0) * layH).toFixed(2)} mm )`;
     };
-    sz?.addEventListener('input', () => { szN.value = Number(sz.value).toFixed(1); updateSzMm(); });
-    szN?.addEventListener('input', () => { if (sz) sz.value = szN.value; updateSzMm(); });
-    rt?.addEventListener('input', () => { if (rtN) rtN.value = rt.value; });
-    rtN?.addEventListener('input', () => { if (rt) rt.value = rtN.value; });
-    off?.addEventListener('input', updateOffMm);
+    const applyToSelected = () => {
+      const selId = getSelectedMarkerId();
+      if (selId < 0) return;
+      updateMarker(selId, {
+        diameterMult:  Number(sz?.value ?? 10) || 10,
+        rotDeg:        Number(rt?.value ?? 0),
+        flatTop:       (document.getElementById('ldp-marker-flat') as HTMLInputElement)?.checked ?? true,
+        heightOffMult: Number(off?.value ?? 0),
+      });
+    };
+
+    sz?.addEventListener('input', () => { if (szN) szN.value = Number(sz.value).toFixed(1); updateSzMm(); applyToSelected(); });
+    szN?.addEventListener('input', () => { if (sz) sz.value = szN.value; updateSzMm(); applyToSelected(); });
+    rt?.addEventListener('input', () => { if (rtN) rtN.value = rt.value; applyToSelected(); });
+    rtN?.addEventListener('input', () => { if (rt) rt.value = rtN.value; applyToSelected(); });
+    off?.addEventListener('input', () => { updateOffMm(); applyToSelected(); });
+    document.getElementById('ldp-marker-flat')?.addEventListener('change', applyToSelected);
     updateSzMm(); updateOffMm();
 
     // Populate marker list on open
     refreshMarkerList();
 
-    // Shape picker — selecting a shape enters placement mode
+    // Shape picker — if a marker is selected, update its shape; otherwise enter placement mode
     document.querySelectorAll<HTMLElement>('.ldp-shape-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.ldp-shape-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const shape = btn.dataset.shape ?? 'circle';
-        startMarkerPlacement(shape);
-        showPlacementHint(true);
+        const selId = getSelectedMarkerId();
+        if (selId >= 0) {
+          updateMarker(selId, { shape });
+        } else {
+          startMarkerPlacement(shape);
+          showPlacementHint(true);
+        }
       });
     });
   }
@@ -978,13 +1140,10 @@ function wireDetailInputs(type: string): void {
     lwN?.addEventListener('input', () => { if (lw) lw.value = lwN.value; applyLineParams(); });
     lwOff?.addEventListener('input', applyLineParams);
 
-    // Sub-category chevron expansion
-    document.querySelectorAll<HTMLElement>('.ldp-chev-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const grp = btn.closest<HTMLElement>('.ldp-line-group');
-        grp?.classList.toggle('open');
-      });
-    });
+    // Clicking label text OR chevron button expands sub-categories (does NOT toggle checkbox)
+    const toggleGrp = (el: HTMLElement) => el.closest<HTMLElement>('.ldp-line-group')?.classList.toggle('open');
+    document.querySelectorAll<HTMLElement>('.ldp-chev-btn').forEach(btn => btn.addEventListener('click', () => toggleGrp(btn)));
+    document.querySelectorAll<HTMLElement>('.ldp-group-label').forEach(lbl => lbl.addEventListener('click', () => toggleGrp(lbl)));
 
     // Fetch helper — called once the user checks anything; idempotent (cached after first call)
     const triggerFetch = () => {
@@ -1023,6 +1182,133 @@ function wireDetailInputs(type: string): void {
           setLineCategoryEnabled(cb.dataset.linecat!, gChk.checked);
         });
         if (gChk.checked) triggerFetch();
+      });
+    });
+  }
+
+  if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc'].includes(type)) {
+    const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+    const off   = document.getElementById('ldp-lc-offset') as HTMLInputElement;
+    const offMm = document.getElementById('ldp-lc-offset-mm');
+
+    off?.addEventListener('input', () => {
+      const v = Number(off.value ?? 0);
+      if (offMm) offMm.textContent = `( ${(v * layH).toFixed(2)} mm )`;
+      setLCHeightOffset(type, v);
+    });
+
+    // Group parent checkbox → toggle all sub-children
+    document.querySelectorAll<HTMLInputElement>('.ldp-lc-group-chk').forEach(gChk => {
+      if (gChk.dataset.indeterminate) gChk.indeterminate = true;
+      gChk.addEventListener('change', () => {
+        const grp = gChk.closest<HTMLElement>('.ldp-lc-group');
+        grp?.querySelectorAll<HTMLInputElement>('.ldp-lc-feat').forEach(cb => {
+          cb.checked = gChk.checked;
+          setLCFeatureEnabled(type, cb.dataset.key!, gChk.checked);
+        });
+        const s = getDimSettings();
+        if (s) rebuildScene(s);
+      });
+    });
+
+    // Chevron expands sub-list
+    const toggleLcGrp = (el: HTMLElement) => el.closest<HTMLElement>('.ldp-lc-group')?.classList.toggle('open');
+    document.querySelectorAll<HTMLElement>('.ldp-lc-group .ldp-chev-btn').forEach(btn => btn.addEventListener('click', () => toggleLcGrp(btn)));
+    document.querySelectorAll<HTMLElement>('.ldp-lc-group .ldp-group-label').forEach(lbl => lbl.addEventListener('click', () => toggleLcGrp(lbl)));
+
+    // Individual feature checkbox
+    document.querySelectorAll<HTMLInputElement>('.ldp-lc-feat').forEach(cb => {
+      cb.addEventListener('change', () => {
+        setLCFeatureEnabled(type, cb.dataset.key!, cb.checked);
+        const grp = cb.closest<HTMLElement>('.ldp-lc-group');
+        const gChk = grp?.querySelector<HTMLInputElement>('.ldp-lc-group-chk');
+        if (gChk) {
+          const subs = Array.from(grp!.querySelectorAll<HTMLInputElement>('.ldp-lc-feat'));
+          gChk.checked = subs.every(s => s.checked);
+          gChk.indeterminate = !gChk.checked && subs.some(s => s.checked);
+        }
+        const s = getDimSettings();
+        if (s) rebuildScene(s);
+      });
+    });
+  }
+
+  if (type === 'water') {
+    const layH = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+    const off   = document.getElementById('ldp-water-offset') as HTMLInputElement;
+    const offMm = document.getElementById('ldp-water-offset-mm');
+    const hydro = document.getElementById('ldp-water-hydro') as HTMLInputElement;
+
+    const applyWater = () => {
+      const offset = Number(off?.value ?? -1);
+      const flatten = hydro?.checked ?? false;
+      if (offMm) offMm.textContent = `( ${(offset * layH).toFixed(2)} mm )`;
+      setWaterParams(offset, flatten);
+      const s = getDimSettings();
+      if (s) rebuildScene(s);
+    };
+
+    off?.addEventListener('input', applyWater);
+    hydro?.addEventListener('change', applyWater);
+
+    document.querySelectorAll<HTMLInputElement>('.ldp-water-feat').forEach(cb => {
+      cb.addEventListener('change', () => {
+        setWaterFeatureEnabled(cb.dataset.key!, cb.checked);
+        const s = getDimSettings();
+        if (s) rebuildScene(s);
+      });
+    });
+  }
+
+  if (type === 'waterways') {
+    const wallW = Number((document.getElementById('ps-wall-w') as HTMLInputElement)?.value ?? 0.42) || 0.42;
+    const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+    const wSlider = document.getElementById('ldp-ww-width')   as HTMLInputElement;
+    const wNum    = document.getElementById('ldp-ww-width-n') as HTMLInputElement;
+    const wMmEl   = document.getElementById('ldp-ww-width-mm');
+    const offEl   = document.getElementById('ldp-ww-offset')    as HTMLInputElement;
+    const offMmEl = document.getElementById('ldp-ww-offset-mm');
+
+    const applyWW = () => {
+      const w   = Math.max(0.1, Number(wNum?.value ?? 1) || 1);
+      const off = Number(offEl?.value ?? -1);
+      if (wMmEl)   wMmEl.textContent   = `( ${(w * wallW).toFixed(2)} mm )`;
+      if (offMmEl) offMmEl.textContent = `( ${(off * layH).toFixed(2)} mm )`;
+      setWaterwayParams(w, off);
+      const s = getDimSettings();
+      if (s) rebuildScene(s);
+    };
+
+    wSlider?.addEventListener('input', () => { if (wNum) wNum.value = Number(wSlider.value).toFixed(1); applyWW(); });
+    wNum?.addEventListener('input',    () => { if (wSlider) wSlider.value = wNum.value; applyWW(); });
+    offEl?.addEventListener('input', applyWW);
+
+    // Streams parent checkbox syncs named/unnamed
+    const streamsChk = document.getElementById('ldp-ww-streams') as HTMLInputElement | null;
+    streamsChk?.addEventListener('change', () => {
+      document.querySelectorAll<HTMLInputElement>('.ldp-ww-feat[data-key="streams_named"], .ldp-ww-feat[data-key="streams_unnamed"]').forEach(cb => {
+        cb.checked = streamsChk.checked;
+        setWaterwayFeatureEnabled(cb.dataset.key!, streamsChk.checked);
+      });
+      const s = getDimSettings();
+      if (s) rebuildScene(s);
+    });
+
+    document.querySelectorAll<HTMLInputElement>('.ldp-ww-feat').forEach(cb => {
+      if (cb.id === 'ldp-ww-streams') return; // handled above
+      cb.addEventListener('change', () => {
+        setWaterwayFeatureEnabled(cb.dataset.key!, cb.checked);
+        // sync streams parent if named/unnamed changed
+        if (cb.dataset.key === 'streams_named' || cb.dataset.key === 'streams_unnamed') {
+          if (streamsChk) {
+            const named   = (document.querySelector<HTMLInputElement>('.ldp-ww-feat[data-key="streams_named"]'))?.checked ?? false;
+            const unnamed = (document.querySelector<HTMLInputElement>('.ldp-ww-feat[data-key="streams_unnamed"]'))?.checked ?? false;
+            streamsChk.checked = named || unnamed;
+            streamsChk.indeterminate = named !== unnamed;
+          }
+        }
+        const s = getDimSettings();
+        if (s) rebuildScene(s);
       });
     });
   }
@@ -1102,13 +1388,27 @@ function showPlacementHint(visible: boolean): void {
 let _pdX = 0, _pdY = 0;
 document.getElementById('dims-canvas')?.addEventListener('pointerdown', (e) => { _pdX = e.clientX; _pdY = e.clientY; });
 document.getElementById('dims-canvas')?.addEventListener('click', (e) => {
-  if (!isPlacementActive()) return;
   const dx = e.clientX - _pdX, dy = e.clientY - _pdY;
-  if (dx*dx + dy*dy < 25) { // genuine click, not drag
+  if (dx*dx + dy*dy >= 25) return; // drag — ignore
+
+  if (isPlacementActive()) {
     const placedId = handleCanvasClick(e.clientX, e.clientY);
     if (placedId >= 0) {
       showPlacementHint(false);
       refreshMarkerList();
+    }
+  } else {
+    // Try to pick a placed marker
+    const pickedId = pickMarkerAtCanvas(e.clientX, e.clientY);
+    if (pickedId >= 0) {
+      selectMarker(pickedId);
+      refreshMarkerList(); // refreshes with selection highlighted
+      // Populate controls from marker data
+      const markers = getPlacedMarkers();
+      const md = markers.find(m => m.id === pickedId);
+      if (md) applyMarkerDataToControls(md);
+    } else {
+      deselectMarker();
     }
   }
 });
@@ -1141,29 +1441,71 @@ function refreshMarkerList(): void {
   const container = document.getElementById('ldp-marker-list');
   if (!container) return;
   const markers = getPlacedMarkers();
+  const selId = getSelectedMarkerId();
   if (!markers.length) { container.innerHTML = '<div class="ldp-empty">Aucun marqueur placé</div>'; return; }
   container.innerHTML = markers.map(m => `
-    <div class="ldp-marker-row" data-marker-id="${m.id}">
+    <div class="ldp-marker-row${m.id === selId ? ' selected' : ''}" data-marker-id="${m.id}">
       <svg class="ldp-marker-ico" viewBox="0 0 16 16">${SHAPE_SVGS[m.shape] ?? SHAPE_SVGS.circle}</svg>
       <span class="ldp-marker-lbl">${SHAPE_LABELS[m.shape] ?? m.shape}</span>
       <button class="cp-eye ldp-m-eye${m.visible ? ' active' : ''}" data-mid="${m.id}" title="Visibilité">${eyeSvg}</button>
       <button class="cp-del ldp-m-del" data-mid="${m.id}" title="Supprimer">${trashSvg}</button>
     </div>`).join('');
 
+  container.querySelectorAll<HTMLElement>('.ldp-marker-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.cp-eye, .cp-del')) return;
+      const id = Number(row.dataset.markerId);
+      selectMarker(id);
+      refreshMarkerList();
+      const md = getPlacedMarkers().find(m => m.id === id);
+      if (md) applyMarkerDataToControls(md);
+    });
+  });
   container.querySelectorAll<HTMLButtonElement>('.ldp-m-eye').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const id = Number(btn.dataset.mid);
       const on = !btn.classList.contains('active');
       setMarkerVisible(id, on);
-      btn.classList.toggle('active', on);
+      refreshMarkerList();
     });
   });
   container.querySelectorAll<HTMLButtonElement>('.ldp-m-del').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       deleteMarker(Number(btn.dataset.mid));
       refreshMarkerList();
     });
   });
+}
+
+function applyMarkerDataToControls(md: ReturnType<typeof getPlacedMarkers>[number]): void {
+  // Shape
+  document.querySelectorAll('.ldp-shape-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector<HTMLElement>(`.ldp-shape-btn[data-shape="${md.shape}"]`)?.classList.add('active');
+  // Diameter
+  const sz = document.getElementById('ldp-marker-size') as HTMLInputElement;
+  const szN = document.getElementById('ldp-marker-size-n') as HTMLInputElement;
+  if (sz) sz.value = String(md.diameterMult);
+  if (szN) szN.value = String(md.diameterMult);
+  // Rotation
+  const rt = document.getElementById('ldp-marker-rot') as HTMLInputElement;
+  const rtN = document.getElementById('ldp-marker-rot-n') as HTMLInputElement;
+  if (rt) rt.value = String(md.rotDeg);
+  if (rtN) rtN.value = String(md.rotDeg);
+  // Flat top
+  const flat = document.getElementById('ldp-marker-flat') as HTMLInputElement;
+  if (flat) flat.checked = md.flatTop;
+  // Height offset
+  const off = document.getElementById('ldp-marker-offset') as HTMLInputElement;
+  if (off) off.value = String(md.heightOffMult);
+  // Refresh mm displays
+  const wallW = Number((document.getElementById('ps-wall-w') as HTMLInputElement)?.value ?? 0.42) || 0.42;
+  const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
+  const szMm = document.getElementById('ldp-marker-mm');
+  const offMm = document.getElementById('ldp-offset-mm');
+  if (szMm) szMm.textContent = `( ${(md.diameterMult * wallW).toFixed(2)} mm )`;
+  if (offMm) offMm.textContent = `( ${(md.heightOffMult * layH).toFixed(2)} mm )`;
 }
 
 /* ── Layer delete (poubelle) ───────────────────────────── */
