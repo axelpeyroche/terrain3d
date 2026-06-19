@@ -486,7 +486,7 @@ export function injectUI(): void {
               </button>
             </div>
 
-            <div class="cp-layer cp-layer-nav" data-layer="terrain" data-type="land_cover">
+            <div class="cp-layer cp-layer-nav" data-layer="terrain" data-type="barren_lc">
               <span class="cp-drag">⠿</span>
               <div class="cp-sw-mini" data-slot="1" style="background:#c0af88">1</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="1,13 6,5 10,9 13,4 15,13"/></svg>

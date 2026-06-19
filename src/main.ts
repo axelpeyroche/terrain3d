@@ -702,7 +702,7 @@ function buildLayerDetailHTML(type: string): string {
   if (type === 'lines')      return buildLinesHTML();
   if (type === 'water')      return buildWaterHTML();
   if (type === 'waterways')  return buildWaterwaysHTML();
-  if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc'].includes(type)) return buildLandCoverHTML(type);
+  if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc', 'barren_lc'].includes(type)) return buildLandCoverHTML(type);
   return '';
 }
 
@@ -1176,7 +1176,7 @@ function wireDetailInputs(type: string): void {
     });
   }
 
-  if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc'].includes(type)) {
+  if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc', 'barren_lc'].includes(type)) {
     const layH  = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20) || 0.20;
     const off   = document.getElementById('ldp-lc-offset') as HTMLInputElement;
     const offMm = document.getElementById('ldp-lc-offset-mm');
