@@ -828,9 +828,9 @@ const LINE_GROUPS: Array<{ label: string; cats: Array<{ key: string; label: stri
 function buildLinesHTML(): string {
   const chevSvg = `<svg class="ldp-chev-ico" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 2l3 3-3 3"/></svg>`;
   const groups = LINE_GROUPS.map(g => {
-    const allEnabled = g.cats.every(c => lineLayerEnabled[c.key] !== false);
+    const allEnabled = g.cats.every(c => lineLayerEnabled[c.key] === true);
     const subs = g.cats.map(c => {
-      const on = lineLayerEnabled[c.key] !== false;
+      const on = lineLayerEnabled[c.key] === true;
       return `<label class="ldp-sub-row"><input type="checkbox" class="ldp-line-sub" data-linecat="${c.key}"${on ? ' checked' : ''}> ${c.label}</label>`;
     }).join('');
     return `
@@ -986,10 +986,23 @@ function wireDetailInputs(type: string): void {
       });
     });
 
+    // Fetch helper — called once the user checks anything; idempotent (cached after first call)
+    const triggerFetch = () => {
+      if (!state.bounds) return;
+      const statusEl = document.getElementById('ldp-line-status');
+      if (statusEl) statusEl.textContent = 'Chargement des données…';
+      fetchAndStoreLineFeatures(state.bounds).then(() => {
+        if (statusEl) statusEl.textContent = '';
+      }).catch(() => {
+        if (statusEl) statusEl.textContent = 'Erreur de chargement.';
+      });
+    };
+
     // Per-sub-category checkbox
     document.querySelectorAll<HTMLInputElement>('.ldp-line-sub').forEach(cb => {
       cb.addEventListener('change', () => {
         setLineCategoryEnabled(cb.dataset.linecat!, cb.checked);
+        if (cb.checked) triggerFetch();
         // sync group checkbox
         const grp = cb.closest<HTMLElement>('.ldp-line-group');
         const gChk = grp?.querySelector<HTMLInputElement>('.ldp-line-group-chk');
@@ -1001,7 +1014,7 @@ function wireDetailInputs(type: string): void {
       });
     });
 
-    // Group checkbox — toggles all sub-categories
+    // Group checkbox — toggles all sub-categories at once
     document.querySelectorAll<HTMLInputElement>('.ldp-line-group-chk').forEach(gChk => {
       gChk.addEventListener('change', () => {
         const grp = gChk.closest<HTMLElement>('.ldp-line-group');
@@ -1009,19 +1022,9 @@ function wireDetailInputs(type: string): void {
           cb.checked = gChk.checked;
           setLineCategoryEnabled(cb.dataset.linecat!, gChk.checked);
         });
+        if (gChk.checked) triggerFetch();
       });
     });
-
-    // Fetch OSM data if we have a bounding box
-    if (state.bounds) {
-      const statusEl = document.getElementById('ldp-line-status');
-      if (statusEl) statusEl.textContent = 'Chargement des données…';
-      fetchAndStoreLineFeatures(state.bounds).then(() => {
-        if (statusEl) statusEl.textContent = '';
-      }).catch(() => {
-        if (statusEl) statusEl.textContent = 'Erreur de chargement des données.';
-      });
-    }
   }
 }
 

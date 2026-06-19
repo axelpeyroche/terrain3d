@@ -918,16 +918,30 @@ export async function fetchAndStoreLineFeatures(bounds: LatLonBounds): Promise<v
   const key = `${bounds.minLat}|${bounds.maxLat}|${bounds.minLon}|${bounds.maxLon}`;
   if (key === cachedLineBoundsKey) return;
 
-  const bb = `${bounds.minLat},${bounds.minLon},${bounds.maxLat},${bounds.maxLon}`;
-  const query = `[out:json][timeout:55];(
-    way["highway"~"motorway|trunk|primary|secondary|tertiary|unclassified|living_street|residential"](${bb});
-    way["railway"~"rail|narrow_gauge|light_rail|funicular|monorail|tram|subway"](${bb});
-    way["piste:type"](${bb});
-    relation["route"~"hiking|foot|bicycle|mtb|horse"](${bb});
-  );out geom;`;
+  const bb = `(${bounds.minLat},${bounds.minLon},${bounds.maxLat},${bounds.maxLon})`;
+  const query = `[out:json][timeout:50];
+(
+  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|living_street|residential)$"]${bb};
+  way["railway"~"^(rail|narrow_gauge|light_rail|funicular|monorail|tram|subway)$"]${bb};
+  way["piste:type"]${bb};
+  relation["route"~"^(hiking|foot|bicycle|mtb|horse)$"]${bb};
+);
+out geom;`;
 
-  const resp = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: query });
-  const data: { elements: Array<{ type: string; tags?: Record<string,string>; geometry?: GeoPoint[]; members?: OSMMember[] }> } = await resp.json();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45000);
+  let data: { elements: Array<{ type: string; tags?: Record<string,string>; geometry?: GeoPoint[]; members?: OSMMember[] }> };
+  try {
+    const res = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(timer);
+    data = await res.json();
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
 
   // Clear previous data
   for (const k of Object.keys(lineLayerData)) delete lineLayerData[k];
@@ -1075,6 +1089,54 @@ function lineCatColor(cat: string): number {
 }
 
 /** Build a 3D marker mesh at fractional lat/lon position on current terrain */
+function buildMarkerShape(shape: string, r: number): THREE.Shape {
+  const s = new THREE.Shape();
+  switch (shape) {
+    case 'square':
+      s.moveTo(-r, -r); s.lineTo(r, -r); s.lineTo(r, r); s.lineTo(-r, r); s.closePath();
+      break;
+    case 'diamond':
+      s.moveTo(0, -r); s.lineTo(r * 0.72, 0); s.lineTo(0, r); s.lineTo(-r * 0.72, 0); s.closePath();
+      break;
+    case 'triangle':
+      s.moveTo(0, r); s.lineTo(r * 0.866, -r * 0.5); s.lineTo(-r * 0.866, -r * 0.5); s.closePath();
+      break;
+    case 'cross': {
+      const w = r * 0.32;
+      s.moveTo(-w, -r); s.lineTo(w, -r); s.lineTo(w, -w);
+      s.lineTo(r, -w); s.lineTo(r, w); s.lineTo(w, w);
+      s.lineTo(w, r); s.lineTo(-w, r); s.lineTo(-w, w);
+      s.lineTo(-r, w); s.lineTo(-r, -w); s.lineTo(-w, -w);
+      s.closePath();
+      break;
+    }
+    case 'heart': {
+      s.moveTo(0, -r * 0.25);
+      s.bezierCurveTo(-r * 0.05, -r * 0.55, -r, -r * 0.55, -r, r * 0.1);
+      s.bezierCurveTo(-r, r * 0.65, -r * 0.45, r * 0.88, 0, r);
+      s.bezierCurveTo(r * 0.45, r * 0.88, r, r * 0.65, r, r * 0.1);
+      s.bezierCurveTo(r, -r * 0.55, r * 0.05, -r * 0.55, 0, -r * 0.25);
+      s.closePath();
+      break;
+    }
+    case 'star': {
+      const outer = r, inner = r * 0.42;
+      for (let i = 0; i < 10; i++) {
+        const a = (i * Math.PI / 5) - Math.PI / 2;
+        const rr = i % 2 === 0 ? outer : inner;
+        const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+        if (i === 0) s.moveTo(px, py); else s.lineTo(px, py);
+      }
+      s.closePath();
+      break;
+    }
+    default: // circle
+      s.absarc(0, 0, r, 0, Math.PI * 2, false);
+      break;
+  }
+  return s;
+}
+
 function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void {
   if (!cachedElev || !scene) return;
   const { grid, minE, elevRange } = cachedElev;
@@ -1083,39 +1145,27 @@ function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void 
 
   const u = lonFrac, v = 1 - latFrac;
   const x = (u - 0.5) * wMm, z = (0.5 - (1 - v)) * dMm;
-  const gx = u * (G - 1), gv = v * (G - 1);
-  const gi = Math.min(G - 2, Math.floor(gx)), gj = Math.min(G - 2, Math.floor(gv));
-  const fx = gx - gi, fy = gv - gj;
+  const gx = Math.max(0, Math.min(G-2, u * (G - 1)));
+  const gv2 = Math.max(0, Math.min(G-2, v * (G - 1)));
+  const gi = Math.floor(gx), gj = Math.floor(gv2);
+  const fx = gx - gi, fy = gv2 - gj;
   const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
           + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
   const yBase = baseH + ((e - minE) / elevRange) * elevScaleMm;
 
-  const r = 3; // radius in mm
+  const r = 4.5; // radius in mm — lies flat on terrain
   const markerSlot = layerSlotOverrides['gpx'] ?? 6;
   const col = colorSlots[markerSlot] ?? '#ff4500';
-  const mat = new THREE.MeshLambertMaterial({ color: col });
+  const mat = new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide });
 
-  let geo: THREE.BufferGeometry;
-  switch (shape) {
-    case 'square':   geo = new THREE.BoxGeometry(r*2, r*3, r*2); break;
-    case 'diamond':  geo = new THREE.OctahedronGeometry(r * 1.4); break;
-    case 'triangle': geo = new THREE.ConeGeometry(r, r * 3, 4); break;
-    case 'cross':    geo = new THREE.BoxGeometry(r*0.7, r*3, r*0.7); break;
-    case 'heart':
-    case 'star':
-    default:         geo = new THREE.CylinderGeometry(r * 0.5, r, r * 3, 16); break; // cone-like pin
-  }
+  const shapeObj = buildMarkerShape(shape, r);
+  const geo = new THREE.ExtrudeGeometry(shapeObj, { depth: 0.5, bevelEnabled: false });
+  // ExtrudeGeometry extrudes along Z; rotate so it lies flat on the XZ terrain plane
+  geo.rotateX(-Math.PI / 2);
 
   const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(x, yBase + r * 1.5, z);
+  mesh.position.set(x, yBase + 0.25, z);
   mesh.visible = layerVisible['gpx'] ?? true;
-
-  if (shape === 'cross') {
-    // Add horizontal bar for cross shape
-    const crossBar = new THREE.Mesh(new THREE.BoxGeometry(r*2.5, r*0.7, r*0.7), mat);
-    crossBar.position.y = r * 0.8;
-    mesh.add(crossBar);
-  }
 
   add(mesh);
   markerMeshRefs.push(mesh);
@@ -1129,33 +1179,34 @@ function buildGpxLine(
 ): THREE.Object3D | null {
   const verts: THREE.Vector3[] = [];
   for (const pt of pts) {
-    const u = (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon);
-    const v = (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat);
-    if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+    // Clamp to bounds instead of skipping — avoids gaps when GPX extends slightly outside
+    const u = Math.max(0.0005, Math.min(0.9995, (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)));
+    const v = Math.max(0.0005, Math.min(0.9995, (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)));
     const x = (u - 0.5) * wMm, z = (0.5 - v) * dMm;
     const gx = u*(G-1), gv = (1-v)*(G-1);
     const gi = Math.min(G-2, Math.floor(gx)), gj = Math.min(G-2, Math.floor(gv));
     const fx = gx-gi, fy = gv-gj;
     const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
             + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-    const yLift = gpxLineHeightOffset * 0.2; // 0.2 mm per unit
-    verts.push(new THREE.Vector3(x, baseH + ((e - minE) / elevRange) * elevScaleMm + yLift, z));
+    const yLift = gpxLineHeightOffset * 0.2;
+    const newPt = new THREE.Vector3(x, baseH + ((e - minE) / elevRange) * elevScaleMm + yLift, z);
+    // Deduplicate very close points — prevents degenerate CatmullRomCurve3 tangents
+    if (verts.length > 0 && newPt.distanceTo(verts[verts.length - 1]) < 0.08) continue;
+    verts.push(newPt);
   }
   if (verts.length < 2) return null;
 
   const gpxSlot = layerSlotOverrides['gpx_line'] ?? 6;
   const col = colorSlots[gpxSlot] ?? '#ff4500';
-  const tubRadius = gpxLineThickness * 0.21; // 0.42 mm / 2 per unit
+  const tubRadius = gpxLineThickness * 0.21;
 
   if (tubRadius >= 0.1) {
-    // Tube geometry for printable thickness
-    const curve = new THREE.CatmullRomCurve3(verts);
-    const segments = Math.min(600, verts.length * 6);
-    const geo = new THREE.TubeGeometry(curve, segments, tubRadius, 6, false);
+    const curve = new THREE.CatmullRomCurve3(verts, false, 'centripetal');
+    const segments = Math.min(1200, verts.length * 8);
+    const geo = new THREE.TubeGeometry(curve, segments, tubRadius, 8, false);
     return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col }));
   }
 
-  // Fallback: simple line
   return new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(verts),
     new THREE.LineBasicMaterial({ color: col }),
