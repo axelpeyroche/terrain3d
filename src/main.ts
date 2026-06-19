@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -892,20 +892,34 @@ function wireDetailInputs(type: string): void {
     off?.addEventListener('input', updateOffMm);
     updateSzMm(); updateOffMm();
 
-    // Shape picker
+    // Shape picker — selecting a shape enters placement mode
     document.querySelectorAll<HTMLElement>('.ldp-shape-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         document.querySelectorAll('.ldp-shape-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
+        const shape = btn.dataset.shape ?? 'circle';
+        startMarkerPlacement(shape);
+        showPlacementHint(true);
       });
     });
   }
 
   if (type === 'lines') {
-    const lw  = document.getElementById('ldp-line-w')   as HTMLInputElement;
-    const lwN = document.getElementById('ldp-line-w-n') as HTMLInputElement;
-    lw?.addEventListener('input', () => { if (lwN) lwN.value = lw.value; });
-    lwN?.addEventListener('input', () => { if (lw) lw.value = lwN.value; });
+    const lw    = document.getElementById('ldp-line-w')      as HTMLInputElement;
+    const lwN   = document.getElementById('ldp-line-w-n')    as HTMLInputElement;
+    const lwOff = document.getElementById('ldp-line-offset') as HTMLInputElement;
+
+    const applyLineParams = () => {
+      const thickness    = Math.max(0.1, Number(lw?.value ?? 1) || 1);
+      const heightOffset = Number(lwOff?.value ?? 1) || 1;
+      setGpxLineParams(thickness, heightOffset);
+      const s = getDimSettings();
+      if (s) rebuildScene(s);
+    };
+
+    lw?.addEventListener('input', () => { if (lwN) lwN.value = Number(lw.value).toFixed(1); applyLineParams(); });
+    lwN?.addEventListener('input', () => { if (lw) lw.value = lwN.value; applyLineParams(); });
+    lwOff?.addEventListener('input', applyLineParams);
   }
 }
 
@@ -965,4 +979,30 @@ document.getElementById('ps-reset')?.addEventListener('click', () => {
   if (psLayerH) { psLayerH.value = '0.20'; psLayerHVal.textContent = '0.20'; }
   if (psWallW)  { psWallW.value  = '0.42'; psWallWVal.textContent  = '0.42'; }
   updateDimsHints();
+});
+
+/* ── Marker placement ───────────────────────────────────── */
+function showPlacementHint(visible: boolean): void {
+  let hint = document.getElementById('placement-hint');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.id = 'placement-hint';
+    hint.textContent = 'Cliquez sur la carte 3D pour placer le marqueur  •  Échap pour annuler';
+    document.body.appendChild(hint);
+  }
+  hint.style.display = visible ? 'block' : 'none';
+}
+
+document.getElementById('dims-canvas')?.addEventListener('click', (e) => {
+  if (isPlacementActive()) {
+    handleCanvasClick(e.clientX, e.clientY);
+    showPlacementHint(false);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && isPlacementActive()) {
+    cancelMarkerPlacement();
+    showPlacementHint(false);
+  }
 });

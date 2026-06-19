@@ -39,11 +39,26 @@ export const layerVisible: Record<string, boolean> = {
 // Per-layer slot assignment overrides (layerId → slot number)
 export const layerSlotOverrides: Record<string, number> = {};
 
+// GPX line params (exposed for live updates)
+export let gpxLineThickness   = 1.0; // multiples of wall width (0.42 mm)
+export let gpxLineHeightOffset = 1;  // multiples of layer height (0.20 mm)
+
+// User-placed markers (persist across rebuildScene)
+const placedMarkersData: Array<{ latFrac: number; lonFrac: number; shape: string }> = [];
+let markerMeshRefs: THREE.Object3D[] = [];
+
+// Placement mode
+let placementActive = false;
+let pendingShape    = '';
+
+// Last scene dims (needed to re-project markers after rebuild)
+let lastW = 200, lastD = 200, lastBaseH = 2, lastElevScale = 1;
+
 // Mesh references for live color updates
 let terrainMeshRef: THREE.Mesh | null = null;
 let baseMeshRef: THREE.Mesh | null = null;
 let facadeMeshRefs: THREE.Mesh[] = [];
-let gpxLineMeshRef: THREE.Line | null = null;
+let gpxLineMeshRef: THREE.Object3D | null = null;
 let dimsCanvas: HTMLCanvasElement | null = null;
 let dimsTargetEl: HTMLElement | null = null;
 let dimsResizeObs: ResizeObserver | null = null;
@@ -187,8 +202,21 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
   // Update GPX line color and visibility
   if (gpxLineMeshRef) {
     const gpxSlot = layerSlotOverrides['gpx_line'] ?? 6;
-    (gpxLineMeshRef.material as THREE.LineBasicMaterial).color.set(colorSlots[gpxSlot] ?? '#ff4500');
+    const gpxCol = colorSlots[gpxSlot] ?? '#ff4500';
+    gpxLineMeshRef.traverse(child => {
+      const mat = (child as THREE.Mesh).material as any;
+      if (mat?.color) mat.color.set(gpxCol);
+    });
     gpxLineMeshRef.visible = layerVisible['gpx_line'] ?? true;
+  }
+  // Update user marker colors
+  const markerSlot = layerSlotOverrides['gpx'] ?? 6;
+  const markerCol = colorSlots[markerSlot] ?? '#ff4500';
+  for (const g of markerMeshRefs) {
+    g.traverse(child => {
+      const mat = (child as THREE.Mesh).material as any;
+      if (mat?.color) mat.color.set(markerCol);
+    });
   }
 }
 
@@ -198,14 +226,65 @@ export function setLayerSlot(layerId: string, slot: number): void {
   updateColorSlots({});
 }
 
-/** Toggle visibility of a layer; GPX layers update the mesh directly, OSM layers rebuild the texture */
+/** Toggle visibility of a layer; GPX layers update meshes directly, OSM layers rebuild the texture */
 export function setLayerVisible(id: string, visible: boolean): void {
   layerVisible[id] = visible;
-  if (id === 'gpx_line' || id === 'gpx') {
+  if (id === 'gpx_line') {
     if (gpxLineMeshRef) gpxLineMeshRef.visible = visible;
+  } else if (id === 'gpx') {
+    for (const g of markerMeshRefs) g.visible = visible;
   } else {
     updateColorSlots({});
   }
+}
+
+/** Set GPX line display params and mark for rebuild */
+export function setGpxLineParams(thickness: number, heightOffset: number): void {
+  gpxLineThickness    = thickness;
+  gpxLineHeightOffset = heightOffset;
+}
+
+/** Marker placement mode — call startMarkerPlacement, then handleCanvasClick when user clicks */
+export function startMarkerPlacement(shape: string): void {
+  placementActive = true;
+  pendingShape    = shape;
+  if (controls) controls.enabled = false;
+  if (dimsCanvas) dimsCanvas.style.cursor = 'crosshair';
+}
+export function cancelMarkerPlacement(): void {
+  placementActive = false;
+  pendingShape    = '';
+  if (controls) controls.enabled = true;
+  if (dimsCanvas) dimsCanvas.style.cursor = '';
+}
+export function isPlacementActive(): boolean { return placementActive; }
+
+/** Raycast canvas click → place marker on terrain surface */
+export function handleCanvasClick(clientX: number, clientY: number): boolean {
+  if (!placementActive || !scene || !camera || !terrainMeshRef || !dimsCanvas) return false;
+  const rect = dimsCanvas.getBoundingClientRect();
+  const ndcX =  ((clientX - rect.left) / rect.width)  * 2 - 1;
+  const ndcY = -((clientY - rect.top)  / rect.height) * 2 + 1;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const hits = raycaster.intersectObject(terrainMeshRef);
+  if (hits.length > 0) {
+    const pt = hits[0].point;
+    const latFrac = 0.5 - pt.z / lastD;
+    const lonFrac = 0.5 + pt.x / lastW;
+    placedMarkersData.push({ latFrac, lonFrac, shape: pendingShape });
+    spawnMarkerMesh(latFrac, lonFrac, pendingShape);
+  }
+  cancelMarkerPlacement();
+  return true;
+}
+export function clearUserMarkers(): void {
+  placedMarkersData.length = 0;
+  for (const g of markerMeshRefs) {
+    scene?.remove(g);
+    sceneObjs.splice(sceneObjs.indexOf(g), 1);
+  }
+  markerMeshRefs = [];
 }
 
 /* ══════════════════════════════════════════════
@@ -295,6 +374,7 @@ export function rebuildScene(s: DimSettings): void {
   baseMeshRef = null;
   facadeMeshRefs = [];
   gpxLineMeshRef = null;
+  markerMeshRefs = [];
 
   // ── Terrain ───────────────────────────────────────────
   {
@@ -371,6 +451,10 @@ export function rebuildScene(s: DimSettings): void {
   txt('dp-total-val',   `~${Math.round(totalH * 10) / 10}`);
   txt('dp-map-h',       `~${Math.round(elevScaleMm * 10) / 10}`);
   txt('dp-base-h-disp', `${baseH}`);
+
+  // ── Placed markers ────────────────────────────────────
+  lastW = wMm; lastD = dMm; lastBaseH = baseH; lastElevScale = elevScaleMm;
+  for (const md of placedMarkersData) spawnMarkerMesh(md.latFrac, md.lonFrac, md.shape);
 
   // ── Camera ────────────────────────────────────────────
   const diag = Math.sqrt(wMm * wMm + dMm * dMm);
@@ -789,30 +873,91 @@ function buildEdgeWall(
 /* ══════════════════════════════════════════════
    GPX TRACE
 ══════════════════════════════════════════════ */
+/** Build a 3D marker mesh at fractional lat/lon position on current terrain */
+function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void {
+  if (!cachedElev || !scene) return;
+  const { grid, minE, elevRange } = cachedElev;
+  const G = PREVIEW_GRID;
+  const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
+
+  const u = lonFrac, v = 1 - latFrac;
+  const x = (u - 0.5) * wMm, z = (0.5 - (1 - v)) * dMm;
+  const gx = u * (G - 1), gv = v * (G - 1);
+  const gi = Math.min(G - 2, Math.floor(gx)), gj = Math.min(G - 2, Math.floor(gv));
+  const fx = gx - gi, fy = gv - gj;
+  const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
+          + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
+  const yBase = baseH + ((e - minE) / elevRange) * elevScaleMm;
+
+  const r = 3; // radius in mm
+  const markerSlot = layerSlotOverrides['gpx'] ?? 6;
+  const col = colorSlots[markerSlot] ?? '#ff4500';
+  const mat = new THREE.MeshLambertMaterial({ color: col });
+
+  let geo: THREE.BufferGeometry;
+  switch (shape) {
+    case 'square':   geo = new THREE.BoxGeometry(r*2, r*3, r*2); break;
+    case 'diamond':  geo = new THREE.OctahedronGeometry(r * 1.4); break;
+    case 'triangle': geo = new THREE.ConeGeometry(r, r * 3, 4); break;
+    case 'cross':    geo = new THREE.BoxGeometry(r*0.7, r*3, r*0.7); break;
+    case 'heart':
+    case 'star':
+    default:         geo = new THREE.CylinderGeometry(r * 0.5, r, r * 3, 16); break; // cone-like pin
+  }
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, yBase + r * 1.5, z);
+  mesh.visible = layerVisible['gpx'] ?? true;
+
+  if (shape === 'cross') {
+    // Add horizontal bar for cross shape
+    const crossBar = new THREE.Mesh(new THREE.BoxGeometry(r*2.5, r*0.7, r*0.7), mat);
+    crossBar.position.y = r * 0.8;
+    mesh.add(crossBar);
+  }
+
+  add(mesh);
+  markerMeshRefs.push(mesh);
+}
+
 function buildGpxLine(
   pts: LatLon[], bounds: LatLonBounds,
   wMm: number, dMm: number,
   grid: Float32Array, G: number,
   minE: number, elevRange: number, baseH: number, elevScaleMm: number,
-): THREE.Line | null {
+): THREE.Object3D | null {
   const verts: THREE.Vector3[] = [];
   for (const pt of pts) {
     const u = (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon);
     const v = (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat);
     if (u < 0 || u > 1 || v < 0 || v > 1) continue;
-    const x = (u-0.5)*wMm, z = (0.5-v)*dMm;
+    const x = (u - 0.5) * wMm, z = (0.5 - v) * dMm;
     const gx = u*(G-1), gv = (1-v)*(G-1);
     const gi = Math.min(G-2, Math.floor(gx)), gj = Math.min(G-2, Math.floor(gv));
     const fx = gx-gi, fy = gv-gj;
     const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
             + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-    verts.push(new THREE.Vector3(x, baseH+((e-minE)/elevRange)*elevScaleMm+1, z));
+    const yLift = gpxLineHeightOffset * 0.2; // 0.2 mm per unit
+    verts.push(new THREE.Vector3(x, baseH + ((e - minE) / elevRange) * elevScaleMm + yLift, z));
   }
   if (verts.length < 2) return null;
+
   const gpxSlot = layerSlotOverrides['gpx_line'] ?? 6;
+  const col = colorSlots[gpxSlot] ?? '#ff4500';
+  const tubRadius = gpxLineThickness * 0.21; // 0.42 mm / 2 per unit
+
+  if (tubRadius >= 0.1) {
+    // Tube geometry for printable thickness
+    const curve = new THREE.CatmullRomCurve3(verts);
+    const segments = Math.min(600, verts.length * 6);
+    const geo = new THREE.TubeGeometry(curve, segments, tubRadius, 6, false);
+    return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col }));
+  }
+
+  // Fallback: simple line
   return new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(verts),
-    new THREE.LineBasicMaterial({ color: colorSlots[gpxSlot] ?? '#ff4500' }),
+    new THREE.LineBasicMaterial({ color: col }),
   );
 }
 

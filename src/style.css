@@ -790,3 +790,21 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
 .ps-ref { font-size: 10px; color: var(--dim); white-space: nowrap; }
 .ps-footer { padding: 12px 16px 16px; border-top: 1px solid var(--b1); }
 .ps-footer .btn-gen-f { width: 100%; }
+
+
+/* ── Placement hint overlay ── */
+#placement-hint {
+  display: none;
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  pointer-events: none;
+  z-index: 9999;
+  white-space: nowrap;
+}
