@@ -89,7 +89,7 @@ const LC_ALL_FALSE: Record<string, boolean> = {
   lc_snow: false, lc_glacier: false, lc_urban: false,
 };
 export const layerLCFeatures: Record<string, Record<string, boolean>> = {
-  veg_dense:  { ...LC_ALL_FALSE, lc_forest_detailed: true, lc_shrub: true, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
+  veg_dense:  { ...LC_ALL_FALSE, lc_forest: true, lc_forest_detailed: true, lc_scrub: true, lc_shrub: true, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
   veg_low:    { ...LC_ALL_FALSE, lc_grass: true, lc_grass_detailed: true, lc_crop: true, lc_moss: true },
   wetland_lc: { ...LC_ALL_FALSE, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
   snow_lc:    { ...LC_ALL_FALSE, lc_snow: true, lc_glacier: true },

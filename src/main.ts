@@ -1000,25 +1000,15 @@ function buildLandCoverHTML(layerId: string): string {
     </div>`;
   };
 
-  const groupsByLayer: Record<string, ReturnType<typeof mkGroup>[]> = {
-    veg_dense: [
-      mkGroup('forests',  'Forêts',        [{ key: 'lc_forest', label: 'Forêt' }, { key: 'lc_forest_detailed', label: 'Forêt (Détaillée)' }]),
-      mkGroup('shrubs',   'Arbustes',      [{ key: 'lc_scrub', label: 'Lande' }, { key: 'lc_shrub', label: 'Buisson' }]),
-      mkGroup('wetlands', 'Zones humides', [{ key: 'lc_wetland', label: 'Zone humide' }, { key: 'lc_wetland_detailed', label: 'Zone humide (Détaillée)' }, { key: 'lc_mangrove', label: 'Mangrove' }]),
-    ],
-    veg_low: [
-      mkGroup('fields',   'Champs',        [{ key: 'lc_grass', label: 'Prairie' }, { key: 'lc_grass_detailed', label: 'Prairie (Détaillée)' }, { key: 'lc_crop', label: 'Culture' }, { key: 'lc_moss', label: 'Mousse' }]),
-      mkGroup('shrubs',   'Arbustes',      [{ key: 'lc_scrub', label: 'Lande' }, { key: 'lc_shrub', label: 'Buisson' }]),
-    ],
-    wetland_lc: [
-      mkGroup('wetlands', 'Zones humides', [{ key: 'lc_wetland', label: 'Zone humide' }, { key: 'lc_wetland_detailed', label: 'Zone humide (Détaillée)' }, { key: 'lc_mangrove', label: 'Mangrove' }]),
-    ],
-    snow_lc: [
-      mkGroup('ice',      'Glace',         [{ key: 'lc_snow', label: 'Glace & Neige' }, { key: 'lc_glacier', label: 'Glacier' }]),
-    ],
-  };
-
-  const groups = (groupsByLayer[layerId] ?? []).join('');
+  const groups = [
+    mkGroup('forests',  'Forêts',        [{ key: 'lc_forest', label: 'Forêt' }, { key: 'lc_forest_detailed', label: 'Forêt (Détaillée)' }]),
+    mkGroup('shrubs',   'Arbustes',      [{ key: 'lc_scrub', label: 'Lande' }, { key: 'lc_shrub', label: 'Buisson' }]),
+    mkGroup('fields',   'Champs',        [{ key: 'lc_grass', label: 'Prairie' }, { key: 'lc_grass_detailed', label: 'Prairie (Détaillée)' }, { key: 'lc_crop', label: 'Culture' }, { key: 'lc_moss', label: 'Mousse' }]),
+    mkGroup('wetlands', 'Zones humides', [{ key: 'lc_wetland', label: 'Zone humide' }, { key: 'lc_wetland_detailed', label: 'Zone humide (Détaillée)' }, { key: 'lc_mangrove', label: 'Mangrove' }]),
+    mkGroup('barren',   'Terrain nu',    [{ key: 'lc_barren', label: 'Terrain nu' }, { key: 'lc_desert', label: 'Désert' }, { key: 'lc_sand', label: 'Sable' }, { key: 'lc_rock', label: 'Roche' }]),
+    mkGroup('ice',      'Glace',         [{ key: 'lc_snow', label: 'Glace & Neige' }, { key: 'lc_glacier', label: 'Glacier' }]),
+    `<label class="ldp-check-row"><input type="checkbox" class="ldp-lc-feat" data-key="lc_urban"${f['lc_urban'] === true ? ' checked' : ''}> Urbain</label>`,
+  ].join('');
 
   return `
   <div class="ldp-sec">
