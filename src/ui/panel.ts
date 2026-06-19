@@ -187,7 +187,6 @@ export function injectUI(): void {
 
     <!-- 3D canvas area -->
     <div id="dims-view">
-      <canvas id="dims-canvas"></canvas>
 
       <!-- HTML labels projected from 3D -->
       <div id="dims-labels">
@@ -262,7 +261,7 @@ export function injectUI(): void {
           </label>
           <label class="dp-lbl">Largeur de la façade (nombre de murs) <span class="dp-info-icon" title="Épaisseur des parois latérales">ℹ</span></label>
           <div class="dp-row-hint">
-            <input type="number" id="dp-walls" value="2" step="1" min="0" max="10" class="dp-input">
+            <input type="number" id="dp-walls" value="1" step="1" min="0" max="10" class="dp-input">
             <span class="dp-hint" id="dp-wall-mm">0.84 mm</span>
           </div>
         </div>
@@ -665,6 +664,9 @@ export function injectUI(): void {
   </section>
 
 </main>
+
+<!-- Shared 3D canvas — positioned via JS (position:fixed) over the active 3D area -->
+<canvas id="dims-canvas"></canvas>
 
 <!-- MODAL -->
 <div id="modal">

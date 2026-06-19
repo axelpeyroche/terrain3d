@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, reattachDimsCanvas, updateColorSlots, setLayerVisible, colorSlots, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, colorSlots, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -304,7 +304,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (!tab || (btn as HTMLButtonElement).disabled) return;
     switchTab(tab);
     if (tab === 'params') onDimsTabOpen();
-    if (tab === 'colors') onColorsTabOpen();
+    else if (tab === 'colors') onColorsTabOpen();
+    else detachDimsCanvas(); // zone or render tab — hide the 3D preview canvas
     if (tab === 'render') {
       const canvas = document.getElementById('c3d') as HTMLCanvasElement;
       if (canvas) ensureThree(canvas);
@@ -329,9 +330,9 @@ document.getElementById('btn-next-render')?.addEventListener('click', () => {
 });
 
 /* ── Boutons retour ── */
-document.getElementById('btn-back-zone')?.addEventListener('click', () => switchTab('zone'));
+document.getElementById('btn-back-zone')?.addEventListener('click', () => { detachDimsCanvas(); switchTab('zone'); });
 document.getElementById('btn-back-dims')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
-document.getElementById('btn-back-params')?.addEventListener('click', () => switchTab('params'));
+document.getElementById('btn-back-params')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
 
 /* ── Generate (onglet 3 manuel) ── */
 document.getElementById('btn-gen')?.addEventListener('click', generate);
@@ -403,21 +404,20 @@ function onColorsTabOpen(): void {
   if (!state.bounds) return;
   // Sync dims in case user skipped tab 2
   syncDimsInputsFromState();
-  // Double-rAF: first ensures panel is flex/sized, second ensures layout is fully computed
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+  // rAF: wait one frame so the panel has flex layout computed
+  requestAnimationFrame(() => {
     const area = document.getElementById('colors-3d-area')!;
     if (!dimsRendererReady) {
-      // First time: create renderer here, then fetch + build
       dimsRendererReady = true;
       initDimsRenderer(area);
       triggerDimsBuild();
     } else {
-      // Renderer exists: move canvas to this container, then redraw from cache
+      // Reposition canvas over colors-3d-area, rebuild scene from cache (instant)
       initDimsRenderer(area);
-      rebuildScene(getDimSettings());  // instant — uses cached elevation + texture
+      rebuildScene(getDimSettings());
     }
     syncSwatchUI();
-  }));
+  });
 }
 
 function syncSwatchUI(): void {

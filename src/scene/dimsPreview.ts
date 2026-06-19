@@ -39,9 +39,11 @@ export const layerVisible: Record<string, boolean> = {
 let terrainMeshRef: THREE.Mesh | null = null;
 let facadeMeshRefs: THREE.Mesh[] = [];
 let dimsCanvas: HTMLCanvasElement | null = null;
+let dimsTargetEl: HTMLElement | null = null;
+let dimsResizeObs: ResizeObserver | null = null;
 
-const PREVIEW_GRID = 128;
-const TEX_SIZE = 1024; // high-res for precise zone boundaries
+const PREVIEW_GRID = 256;
+const TEX_SIZE = 2048; // high-res for precise zone boundaries
 
 interface OSMEl {
   type: 'way' | 'relation' | string;
@@ -61,26 +63,47 @@ const lblAnchors: { id: string; v: THREE.Vector3 }[] = [];
 
 /* ══════════════════════════════════════════════
    RENDERER INIT
+   Canvas stays fixed in the DOM; JS positions it over the target element.
 ══════════════════════════════════════════════ */
+
+function applyCanvasRect(): void {
+  if (!dimsCanvas || !dimsTargetEl) return;
+  const rect = dimsTargetEl.getBoundingClientRect();
+  if (!rect.width || !rect.height) return;
+  dimsCanvas.style.left   = `${rect.left}px`;
+  dimsCanvas.style.top    = `${rect.top}px`;
+  dimsCanvas.style.width  = `${rect.width}px`;
+  dimsCanvas.style.height = `${rect.height}px`;
+  if (renderer) {
+    renderer.setSize(rect.width, rect.height, false);
+    camera!.aspect = rect.width / rect.height;
+    camera!.updateProjectionMatrix();
+  }
+}
+
 export function initDimsRenderer(viewEl: HTMLElement): void {
-  // Find canvas once (it might have been moved between tabs)
   if (!dimsCanvas) {
     dimsCanvas = document.getElementById('dims-canvas') as HTMLCanvasElement;
   }
-  // Move canvas to this container if needed
-  if (dimsCanvas && !viewEl.contains(dimsCanvas)) {
-    viewEl.appendChild(dimsCanvas);
+
+  // Swap ResizeObserver to track the new target element
+  if (dimsTargetEl !== viewEl) {
+    if (dimsResizeObs && dimsTargetEl) dimsResizeObs.unobserve(dimsTargetEl);
+    dimsTargetEl = viewEl;
+    if (!dimsResizeObs) {
+      dimsResizeObs = new ResizeObserver(applyCanvasRect);
+      window.addEventListener('resize', applyCanvasRect);
+    }
+    dimsResizeObs.observe(viewEl);
   }
 
-  const W = viewEl.clientWidth || 800;
-  const H = viewEl.clientHeight || 600;
+  applyCanvasRect();
+  if (dimsCanvas) dimsCanvas.style.display = 'block';
 
-  if (renderer) {
-    renderer.setSize(W, H, false);
-    camera!.aspect = W / H;
-    camera!.updateProjectionMatrix();
-    return;
-  }
+  if (renderer) return;  // already initialised — position was already applied above
+
+  const rect = viewEl.getBoundingClientRect();
+  const W = rect.width || 800, H = rect.height || 600;
 
   renderer = new THREE.WebGLRenderer({ canvas: dimsCanvas!, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -106,30 +129,15 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
     tickLabels();
   };
   loop();
-
-  // Resize based on canvas parent (works after canvas moves)
-  new ResizeObserver(() => {
-    const parent = dimsCanvas!.parentElement;
-    if (!parent) return;
-    const W2 = parent.clientWidth, H2 = parent.clientHeight;
-    if (!W2 || !H2) return;
-    camera!.aspect = W2 / H2;
-    camera!.updateProjectionMatrix();
-    renderer!.setSize(W2, H2, false);
-  }).observe(dimsCanvas!);
 }
 
-/** Move the 3D canvas to another container (tab switch) */
-export function reattachDimsCanvas(viewEl: HTMLElement): void {
-  if (!dimsCanvas) return;
-  if (!viewEl.contains(dimsCanvas)) viewEl.appendChild(dimsCanvas);
-  if (!renderer || !camera) return;
-  const W = viewEl.clientWidth || 800;
-  const H = viewEl.clientHeight || 600;
-  renderer.setSize(W, H, false);
-  camera.aspect = W / H;
-  camera.updateProjectionMatrix();
+/** Hide the shared canvas (call when switching away from a 3D tab) */
+export function detachDimsCanvas(): void {
+  if (dimsCanvas) dimsCanvas.style.display = 'none';
 }
+
+/** @deprecated use initDimsRenderer — kept to avoid breaking any lingering calls */
+export function reattachDimsCanvas(viewEl: HTMLElement): void { initDimsRenderer(viewEl); }
 
 /** Update one or more color slots and live-refresh the 3D preview */
 export function updateColorSlots(slots: Partial<Record<number, string>>): void {
