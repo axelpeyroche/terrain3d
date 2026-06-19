@@ -33,6 +33,7 @@ export const colorSlots: Record<number, string> = {
 export const layerVisible: Record<string, boolean> = {
   veg_low: true, veg_dense: true, wetland: true,
   snow: true, water: true, waterways: true,
+  gpx: true, gpx_line: true,
 };
 
 // Per-layer slot assignment overrides (layerId → slot number)
@@ -42,6 +43,7 @@ export const layerSlotOverrides: Record<string, number> = {};
 let terrainMeshRef: THREE.Mesh | null = null;
 let baseMeshRef: THREE.Mesh | null = null;
 let facadeMeshRefs: THREE.Mesh[] = [];
+let gpxLineMeshRef: THREE.Line | null = null;
 let dimsCanvas: HTMLCanvasElement | null = null;
 let dimsTargetEl: HTMLElement | null = null;
 let dimsResizeObs: ResizeObserver | null = null;
@@ -182,6 +184,12 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
   for (const m of facadeMeshRefs) {
     (m.material as THREE.MeshLambertMaterial).color.set(facadeColor);
   }
+  // Update GPX line color and visibility
+  if (gpxLineMeshRef) {
+    const gpxSlot = layerSlotOverrides['gpx_line'] ?? 6;
+    (gpxLineMeshRef.material as THREE.LineBasicMaterial).color.set(colorSlots[gpxSlot] ?? '#ff4500');
+    gpxLineMeshRef.visible = layerVisible['gpx_line'] ?? true;
+  }
 }
 
 /** Assign a layer to a different color slot and immediately refresh the 3D preview */
@@ -190,10 +198,14 @@ export function setLayerSlot(layerId: string, slot: number): void {
   updateColorSlots({});
 }
 
-/** Toggle visibility of an OSM layer and rebuild texture */
+/** Toggle visibility of a layer; GPX layers update the mesh directly, OSM layers rebuild the texture */
 export function setLayerVisible(id: string, visible: boolean): void {
   layerVisible[id] = visible;
-  updateColorSlots({});  // trigger texture rebuild
+  if (id === 'gpx_line' || id === 'gpx') {
+    if (gpxLineMeshRef) gpxLineMeshRef.visible = visible;
+  } else {
+    updateColorSlots({});
+  }
 }
 
 /* ══════════════════════════════════════════════
@@ -282,6 +294,7 @@ export function rebuildScene(s: DimSettings): void {
   terrainMeshRef = null;
   baseMeshRef = null;
   facadeMeshRefs = [];
+  gpxLineMeshRef = null;
 
   // ── Terrain ───────────────────────────────────────────
   {
@@ -325,7 +338,11 @@ export function rebuildScene(s: DimSettings): void {
   // ── GPX ───────────────────────────────────────────────
   if (gpxPoints.length >= 2) {
     const ln = buildGpxLine(gpxPoints, rb, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm);
-    if (ln) add(ln);
+    if (ln) {
+      ln.visible = layerVisible['gpx_line'] ?? true;
+      gpxLineMeshRef = ln;
+      add(ln);
+    }
   }
 
   // ── Bounding box ─────────────────────────────────────
@@ -645,25 +662,28 @@ function buildProfileRectFacades(
 ): THREE.Mesh[] {
   const h = (ix: number, iy: number) =>
     baseH + ((grid[iy*G + ix] - minE) / elevRange) * elevScaleMm;
-  // Corner heights
+  // Subsample to at most 64 segments to avoid "comb" artifact from 256 thin panels
+  const SEG = Math.min(G - 1, 64);
+  const si = (k: number) => Math.round(k / SEG * (G - 1)); // sample index in [0,G-1]
+
   const hSW = h(0, G-1), hSE = h(G-1, G-1);
   const hNW = h(0, 0),   hNE = h(G-1, 0);
-  // South/north walls extended by facadeW on each side to fill corners
+
   const southPts: [number,number,number][] = [
     [-wMm/2 - facadeW, dMm/2, hSW],
-    ...Array.from({length:G}, (_,i) => [-wMm/2+i/(G-1)*wMm, dMm/2, h(i,G-1)] as [number,number,number]),
+    ...Array.from({length: SEG + 1}, (_, k) => { const i = si(k); return [-wMm/2+i/(G-1)*wMm, dMm/2, h(i, G-1)] as [number,number,number]; }),
     [ wMm/2 + facadeW, dMm/2, hSE],
   ];
   const northPts: [number,number,number][] = [
     [ wMm/2 + facadeW, -dMm/2, hNE],
-    ...Array.from({length:G}, (_,i) => [wMm/2-i/(G-1)*wMm, -dMm/2, h(G-1-i, 0)] as [number,number,number]),
+    ...Array.from({length: SEG + 1}, (_, k) => { const i = si(k); return [wMm/2-i/(G-1)*wMm, -dMm/2, h(G-1-i, 0)] as [number,number,number]; }),
     [-wMm/2 - facadeW, -dMm/2, hNW],
   ];
   return [
     buildEdgeWall(southPts, [0,0,1], facadeW),
     buildEdgeWall(northPts, [0,0,-1], facadeW),
-    buildEdgeWall(Array.from({length:G},(_,j)=>[ wMm/2, dMm/2-j/(G-1)*dMm, h(G-1,G-1-j)] as [number,number,number]), [1,0,0],  facadeW),
-    buildEdgeWall(Array.from({length:G},(_,j)=>[-wMm/2,-dMm/2+j/(G-1)*dMm, h(0,j)] as [number,number,number]),       [-1,0,0], facadeW),
+    buildEdgeWall(Array.from({length: SEG + 1}, (_, k) => { const j = si(k); return [ wMm/2, dMm/2-j/(G-1)*dMm, h(G-1, G-1-j)] as [number,number,number]; }), [1,0,0],  facadeW),
+    buildEdgeWall(Array.from({length: SEG + 1}, (_, k) => { const j = si(k); return [-wMm/2,-dMm/2+j/(G-1)*dMm, h(0, j)] as [number,number,number]; }),         [-1,0,0], facadeW),
   ];
 }
 
@@ -754,9 +774,10 @@ function buildGpxLine(
     verts.push(new THREE.Vector3(x, baseH+((e-minE)/elevRange)*elevScaleMm+1, z));
   }
   if (verts.length < 2) return null;
+  const gpxSlot = layerSlotOverrides['gpx_line'] ?? 6;
   return new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(verts),
-    new THREE.LineBasicMaterial({ color: 0xff4500 }),
+    new THREE.LineBasicMaterial({ color: colorSlots[gpxSlot] ?? '#ff4500' }),
   );
 }
 
@@ -773,9 +794,8 @@ function hexToRgb(hex: string): RGB {
 }
 
 function hypso(t: number): RGB {
-  // Base = slot 1 (Terrain nu), with subtle elevation-based lightness variation.
-  // Keeps slot 1 as the primary visible color so it matches what the user edits in Menu 3.
-  const [r, g, b] = hexToRgb(colorSlots[1]);
+  const terrainSlot = layerSlotOverrides['terrain'] ?? 1;
+  const [r, g, b] = hexToRgb(colorSlots[terrainSlot] ?? colorSlots[1]);
   // Dark in valleys (×0.78), neutral at mid (×1.0), lighter at peaks (×1.22)
   const light = 0.78 + t * 0.44;
   return [
