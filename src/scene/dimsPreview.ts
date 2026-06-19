@@ -41,6 +41,7 @@ let facadeMeshRefs: THREE.Mesh[] = [];
 let dimsCanvas: HTMLCanvasElement | null = null;
 let dimsTargetEl: HTMLElement | null = null;
 let dimsResizeObs: ResizeObserver | null = null;
+let dimsWantsVisible = false; // true when a 3D tab is active and canvas should be shown
 
 const PREVIEW_GRID = 256;
 const TEX_SIZE = 2048; // high-res for precise zone boundaries
@@ -66,10 +67,11 @@ const lblAnchors: { id: string; v: THREE.Vector3 }[] = [];
    Canvas stays fixed in the DOM; JS positions it over the target element.
 ══════════════════════════════════════════════ */
 
-function applyCanvasRect(): void {
-  if (!dimsCanvas || !dimsTargetEl) return;
+/** Returns true when the rect was valid and styles were applied */
+function applyCanvasRect(): boolean {
+  if (!dimsCanvas || !dimsTargetEl) return false;
   const rect = dimsTargetEl.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
+  if (!rect.width || !rect.height) return false;
   dimsCanvas.style.left   = `${rect.left}px`;
   dimsCanvas.style.top    = `${rect.top}px`;
   dimsCanvas.style.width  = `${rect.width}px`;
@@ -79,6 +81,15 @@ function applyCanvasRect(): void {
     camera!.aspect = rect.width / rect.height;
     camera!.updateProjectionMatrix();
   }
+  return true;
+}
+
+/** Called by ResizeObserver / window resize */
+function onTargetResize(): void {
+  if (!dimsCanvas || !dimsWantsVisible) return;
+  const ok = applyCanvasRect();
+  // If the canvas was hidden because initial rect was 0, show it now that dimensions are valid
+  if (ok && dimsCanvas.style.display === 'none') dimsCanvas.style.display = 'block';
 }
 
 export function initDimsRenderer(viewEl: HTMLElement): void {
@@ -91,14 +102,15 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
     if (dimsResizeObs && dimsTargetEl) dimsResizeObs.unobserve(dimsTargetEl);
     dimsTargetEl = viewEl;
     if (!dimsResizeObs) {
-      dimsResizeObs = new ResizeObserver(applyCanvasRect);
-      window.addEventListener('resize', applyCanvasRect);
+      dimsResizeObs = new ResizeObserver(onTargetResize);
+      window.addEventListener('resize', onTargetResize);
     }
     dimsResizeObs.observe(viewEl);
   }
 
-  applyCanvasRect();
-  if (dimsCanvas) dimsCanvas.style.display = 'block';
+  // Signal intent to show — ResizeObserver will reveal canvas when dimensions become valid
+  dimsWantsVisible = true;
+  if (applyCanvasRect() && dimsCanvas) dimsCanvas.style.display = 'block';
 
   if (renderer) return;  // already initialised — position was already applied above
 
@@ -133,6 +145,7 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
 
 /** Hide the shared canvas (call when switching away from a 3D tab) */
 export function detachDimsCanvas(): void {
+  dimsWantsVisible = false;
   if (dimsCanvas) dimsCanvas.style.display = 'none';
 }
 
