@@ -452,6 +452,91 @@ document.querySelectorAll<HTMLInputElement>('.cp-color-input').forEach(input => 
   if (inner) inner.style.background = input.value;
 });
 
+/** Sync a slot color across all UI elements and rebuild 3D texture */
+function syncSlotColor(slot: number, col: string): void {
+  updateColorSlots({ [slot]: col });
+  document.querySelectorAll<HTMLElement>(`.cp-sw-mini[data-slot="${slot}"]`).forEach(el => {
+    el.style.background = col;
+  });
+  const mainInput = document.querySelector<HTMLInputElement>(`.cp-color-input[data-slot="${slot}"]`);
+  if (mainInput) {
+    mainInput.value = col;
+    const inner = mainInput.nextElementSibling as HTMLElement;
+    if (inner) inner.style.background = col;
+  }
+}
+
+/** Open a floating color picker for a given slot (used by layer mini swatches) */
+function openSlotColorPicker(slot: number): void {
+  const tmp = document.createElement('input');
+  tmp.type = 'color';
+  tmp.value = colorSlots[slot] ?? '#888888';
+  tmp.style.cssText = 'position:fixed;left:-9999px;top:-9999px;opacity:0;pointer-events:none';
+  document.body.appendChild(tmp);
+  tmp.addEventListener('input', () => syncSlotColor(slot, tmp.value));
+  tmp.addEventListener('change', () => document.body.removeChild(tmp));
+  tmp.click();
+}
+
+// Mini swatches in layer rows → open color picker on click
+document.querySelectorAll<HTMLElement>('.cp-layer .cp-sw-mini').forEach(el => {
+  el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const slot = Number(el.dataset.slot);
+    if (slot) openSlotColorPicker(slot);
+  });
+});
+
+// + button → inline add-slot form
+let addSlotForm: HTMLElement | null = null;
+document.getElementById('cp-col-plus')?.addEventListener('click', () => {
+  if (addSlotForm) { addSlotForm.remove(); addSlotForm = null; return; }
+  const nextSlot = Math.max(...Object.keys(colorSlots).map(Number)) + 1;
+  const form = document.createElement('div');
+  form.className = 'cp-add-slot-form';
+  form.innerHTML = `
+    <div class="cp-add-slot-preview" id="cp-asp-preview" style="background:#888888"></div>
+    <input type="color" id="cp-asp-color" value="#888888">
+    <div class="cp-add-slot-actions">
+      <button class="cp-btn-cancel" id="cp-asp-cancel">Annuler</button>
+      <button class="cp-btn-confirm" id="cp-asp-confirm">Confirmer</button>
+    </div>`;
+  addSlotForm = form;
+  document.getElementById('cp-swatches')?.after(form);
+
+  const colorInput = form.querySelector<HTMLInputElement>('#cp-asp-color')!;
+  const preview    = form.querySelector<HTMLElement>('#cp-asp-preview')!;
+  colorInput.addEventListener('input', () => { preview.style.background = colorInput.value; });
+
+  form.querySelector('#cp-asp-cancel')?.addEventListener('click', () => { form.remove(); addSlotForm = null; });
+  form.querySelector('#cp-asp-confirm')?.addEventListener('click', () => {
+    const col = colorInput.value;
+    colorSlots[nextSlot] = col;
+    const label = document.createElement('label');
+    label.className = 'cp-swatch';
+    label.dataset.slot = String(nextSlot);
+    label.title = `Couleur ${nextSlot}`;
+    label.innerHTML = `<input type="color" class="cp-color-input" data-slot="${nextSlot}" value="${col}"><div class="cp-sw-inner" style="background:${col}"><span class="cp-sw-num">${nextSlot}</span></div>`;
+    label.querySelector<HTMLInputElement>('.cp-color-input')!.addEventListener('input', function() {
+      syncSlotColor(nextSlot, this.value);
+      (this.nextElementSibling as HTMLElement).style.background = this.value;
+    });
+    document.getElementById('cp-swatches')?.appendChild(label);
+    form.remove(); addSlotForm = null;
+  });
+});
+
+// − button → remove last slot
+document.getElementById('cp-col-minus')?.addEventListener('click', () => {
+  const swatches = document.getElementById('cp-swatches');
+  const all = swatches?.querySelectorAll<HTMLElement>('.cp-swatch');
+  if (!all || all.length <= 1) return;
+  const last = all[all.length - 1];
+  const slot = Number(last.dataset.slot);
+  delete colorSlots[slot];
+  last.remove();
+});
+
 // Layer visibility toggle
 document.querySelectorAll<HTMLButtonElement>('.cp-eye').forEach(btn => {
   const layerId = btn.dataset.layer;
@@ -554,7 +639,7 @@ document.getElementById('ldp-back')?.addEventListener('click', showLayerMain);
 // Layer row clicks
 document.querySelectorAll<HTMLElement>('.cp-layer-nav').forEach(row => {
   row.addEventListener('click', (e) => {
-    if ((e.target as HTMLElement).closest('.cp-eye, .cp-del')) return; // don't navigate on eye/del
+    if ((e.target as HTMLElement).closest('.cp-eye, .cp-del, .cp-sw-mini')) return;
     const layerType = row.dataset.type ?? 'land_cover';
     const layerName = row.querySelector('.cp-layer-name')?.textContent ?? 'Couche';
     const iconSvg = row.querySelector('.cp-layer-ico')?.innerHTML ?? '';

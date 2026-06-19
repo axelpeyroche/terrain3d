@@ -560,8 +560,8 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
   transition: background .12s;
 }
 .cp-layer:hover { background: var(--mut); }
-.cp-layer-fixed { opacity: .65; }
-.cp-layer-fixed:hover { background: transparent; }
+.cp-layer-fixed { opacity: .85; }
+.cp-layer-fixed:hover { background: var(--mut); }
 .cp-drag { color: var(--b2); font-size: 12px; cursor: grab; flex: 0 0 12px; text-align: center; }
 .cp-layer-fixed .cp-drag { opacity: 0; }
 .cp-sw-mini {
@@ -569,6 +569,30 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
   font-size: 9px; font-weight: 700; color: rgba(255,255,255,.9);
   display: flex; align-items: center; justify-content: center;
 }
+.cp-sw-editable { cursor: pointer; transition: filter .15s, outline .15s; }
+.cp-sw-editable:hover { filter: brightness(1.25); outline: 2px solid var(--cyan); outline-offset: 1px; }
+.cp-layer .cp-sw-mini { cursor: pointer; }
+.cp-layer .cp-sw-mini:hover { filter: brightness(1.25); outline: 2px solid var(--cyan); outline-offset: 1px; }
+
+/* Formulaire d'ajout de slot de couleur */
+.cp-add-slot-form {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 12px 8px; background: var(--p2); border-top: 1px solid var(--b1);
+}
+.cp-add-slot-preview {
+  flex: 0 0 22px; width: 22px; height: 22px; border-radius: 4px;
+  border: 1px solid var(--b2);
+}
+.cp-add-slot-form input[type=color] {
+  flex: 1; height: 26px; min-width: 0;
+  border: 1px solid var(--b2); border-radius: 4px; cursor: pointer; background: transparent;
+}
+.cp-add-slot-actions { display: flex; gap: 5px; }
+.cp-btn-cancel, .cp-btn-confirm {
+  padding: 3px 9px; border-radius: 5px; font-size: 11px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.cp-btn-cancel  { background: var(--mut); color: var(--dim); }
+.cp-btn-confirm { background: var(--cyan); color: #000; font-weight: 700; }
 .cp-layer-ico { flex: 0 0 14px; width: 14px; height: 14px; color: var(--dim); }
 .cp-layer-name { flex: 1; font-size: 11.5px; color: var(--txt); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-eye, .cp-del {

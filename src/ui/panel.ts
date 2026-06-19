@@ -502,14 +502,14 @@ export function injectUI(): void {
             <!-- Couches fixes (base + façade) -->
             <div class="cp-layer cp-layer-fixed">
               <span class="cp-drag"></span>
-              <div class="cp-sw-mini" data-slot="3" style="background:#8ab858">3</div>
+              <div class="cp-sw-mini cp-sw-editable" data-slot="1" style="background:#c0af88" title="Changer la couleur">1</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="8" width="12" height="6" rx="1"/></svg>
               <span class="cp-layer-name">Base</span>
             </div>
 
             <div class="cp-layer cp-layer-fixed">
               <span class="cp-drag"></span>
-              <div class="cp-sw-mini" data-slot="1" style="background:#c0af88">1</div>
+              <div class="cp-sw-mini cp-sw-editable" data-slot="1" style="background:#c0af88" title="Changer la couleur">1</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="1" fill="none"/><rect x="2" y="2" width="2" height="12"/><rect x="12" y="2" width="2" height="12"/></svg>
               <span class="cp-layer-name">Façade</span>
             </div>
