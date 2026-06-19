@@ -89,8 +89,8 @@ const LC_ALL_FALSE: Record<string, boolean> = {
   lc_snow: false, lc_glacier: false, lc_urban: false,
 };
 export const layerLCFeatures: Record<string, Record<string, boolean>> = {
-  veg_dense:  { ...LC_ALL_FALSE, lc_forest_detailed: true, lc_shrub: true, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
-  veg_low:    { ...LC_ALL_FALSE, lc_grass: true, lc_grass_detailed: true, lc_crop: true, lc_moss: true },
+  veg_dense:  { ...LC_ALL_FALSE, lc_forest: true, lc_forest_detailed: true, lc_shrub: true, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
+  veg_low:    { ...LC_ALL_FALSE, lc_scrub: true, lc_grass: true, lc_grass_detailed: true, lc_crop: true, lc_moss: true },
   wetland_lc: { ...LC_ALL_FALSE, lc_wetland: true, lc_wetland_detailed: true, lc_mangrove: true },
   snow_lc:    { ...LC_ALL_FALSE, lc_snow: true, lc_glacier: true },
   barren_lc:  { ...LC_ALL_FALSE, lc_barren: true, lc_desert: true, lc_sand: true, lc_rock: true, lc_urban: true },
@@ -930,7 +930,7 @@ function traceGeometry(
       const cy = (1 - (pts[i].lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
       if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
     }
-    ctx.closePath();
+    // No closePath() here: fill() closes implicitly; stroke() must NOT close (spurious return line on rivers)
   };
 
   if (el.type === 'way' && el.geometry) {
