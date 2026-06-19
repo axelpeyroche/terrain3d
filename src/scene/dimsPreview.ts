@@ -732,15 +732,23 @@ function hexToRgb(hex: string): RGB {
 }
 
 function hypso(t: number): RGB {
-  // Gradient based on slot 1 (Terrain nu) so user can change it
-  const [r, g, b] = hexToRgb(colorSlots[1]);
-  const stops: [number, RGB][] = [
-    [0.00, [Math.round(r * 0.64), Math.round(g * 0.63), Math.round(b * 0.58)]],
-    [0.35, [Math.round(r * 0.82), Math.round(g * 0.81), Math.round(b * 0.76)]],
-    [0.65, [r, g, b]],
-    [0.85, [Math.min(255, Math.round(r * 1.12)), Math.min(255, Math.round(g * 1.10)), Math.min(255, Math.round(b * 1.06))]],
-    [1.00, [Math.min(255, Math.round(r * 1.28)), Math.min(255, Math.round(g * 1.26)), Math.min(255, Math.round(b * 1.18))]],
+  // Fixed naturalistic stops (variation visible même sans données OSM)
+  // tinted 40% toward slot 1 (Terrain nu) so the user's color choice has an effect
+  const [sr, sg, sb] = hexToRgb(colorSlots[1]);
+  const base: [number, RGB][] = [
+    [0.00, [0x78, 0x8c, 0x5c]],  // bas: vert sombre
+    [0.18, [0x9a, 0x98, 0x68]],  // plaine: olive
+    [0.38, [0xb0, 0xa0, 0x72]],  // transition: beige-vert
+    [0.58, [0xb8, 0xa8, 0x78]],  // mi-hauteur: beige
+    [0.74, [0xaa, 0x96, 0x70]],  // rocheux: brun
+    [0.88, [0xb4, 0xa8, 0x90]],  // haute altitude: gris-beige
+    [1.00, [0xd8, 0xd0, 0xc0]],  // sommets: quasi blanc
   ];
+  // Blend 60% natural + 40% slot 1 tint
+  const stops: [number, RGB][] = base.map(([pos, [r, g, b]]) => [
+    pos,
+    [Math.round(r*0.6 + sr*0.4), Math.round(g*0.6 + sg*0.4), Math.round(b*0.6 + sb*0.4)] as RGB,
+  ]);
   for (let i = 1; i < stops.length; i++) {
     if (t <= stops[i][0]) {
       const f = (t-stops[i-1][0]) / (stops[i][0]-stops[i-1][0]);
