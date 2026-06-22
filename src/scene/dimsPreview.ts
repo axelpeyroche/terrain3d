@@ -544,7 +544,6 @@ export async function buildDimsPreview(
   const fetchNeeds = {
     features: key !== cachedFeaturesKey,
     buildings: key !== cachedBuildingsKey,
-    roads:     key !== cachedRoadsKey,
   };
 
   if (fetchNeeds.features || fetchNeeds.buildings) {
@@ -558,6 +557,11 @@ export async function buildDimsPreview(
             cachedFeaturesKey = key;
             cachedFeatures = features;
             if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+            // Extract highways embedded in the terrain features response
+            cachedRoadsKey = key;
+            cachedRoads = features
+              .filter(el => el.type === 'way' && el.tags?.highway && (el.geometry?.length ?? 0) >= 2)
+              .map(el => ({ hwType: el.tags!.highway!, geom: el.geometry! }));
           }
         }),
       );
@@ -575,15 +579,6 @@ export async function buildDimsPreview(
     }
 
     await Promise.all(tasks);
-  }
-
-  if (fetchNeeds.roads) {
-    onProgress(60, 'Chargement des routes…');
-    const highways = await fetchHighwayFeatures(bounds);
-    cachedRoadsKey = key;
-    cachedRoads = highways
-      .filter(el => el.type === 'way' && el.tags?.highway && (el.geometry?.length ?? 0) >= 2)
-      .map(el => ({ hwType: el.tags!.highway!, geom: el.geometry! }));
   }
 
   if (!cachedTexture && cachedElev) {
@@ -786,12 +781,13 @@ export function resetDimsCamera(): void {
 
 /* ══════════════════════════════════════════════
    OSM TERRAIN FEATURES (Overpass)
-   Fetches: water, forest, scrub, grassland, glacier, bare rock, wetland
+   Fetches: water, forest, scrub, grassland, glacier, bare rock, wetland + highways
+   Roads are included here to avoid a 3rd sequential Overpass request (rate-limit risk).
 ══════════════════════════════════════════════ */
 async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const query = `[out:json][timeout:40];
+  const query = `[out:json][timeout:55];
 (
   way["natural"="water"]${bb};
   relation["natural"="water"]${bb};
@@ -815,17 +811,19 @@ async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   way["natural"="sand"]${bb};
   way["natural"="wetland"]${bb};
   way["natural"="mud"]${bb};
+  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
 );
 out geom;`;
 
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 30000);
+  const t = setTimeout(() => ctrl.abort(), 50000);
   try {
     const res = await fetch(
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
       { signal: ctrl.signal },
     );
     clearTimeout(t);
+    if (!res.ok) return [];
     return ((await res.json()).elements ?? []) as OSMEl[];
   } catch {
     clearTimeout(t);
@@ -848,30 +846,6 @@ out geom;`;
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 22000);
-  try {
-    const res = await fetch(
-      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-      { signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    return ((await res.json()).elements ?? []) as OSMEl[];
-  } catch {
-    clearTimeout(t);
-    return [];
-  }
-}
-
-async function fetchHighwayFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
-  const { minLat, minLon, maxLat, maxLon } = bounds;
-  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const query = `[out:json][timeout:35];
-(
-  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
-);
-out geom;`;
-
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 30000);
   try {
     const res = await fetch(
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
