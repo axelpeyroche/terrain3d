@@ -330,7 +330,7 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
     const layer = ZONE_LAYERS.find(l => l.id === lid);
     if (!layer) continue;
     const slot = layerSlotOverrides[lid] ?? layer.slot;
-    (m.material as THREE.MeshLambertMaterial).color.set(colorSlots[slot] ?? '#888');
+    (m.material as THREE.MeshBasicMaterial).color.set(colorSlots[slot] ?? '#888');
   }
 }
 
@@ -1282,8 +1282,11 @@ function buildZoneMeshes(
 
     const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
     const col = new THREE.Color(colorSlots[effectiveSlot] ?? '#888');
-    const mat = new THREE.MeshLambertMaterial({
+    // MeshBasicMaterial: ignores lighting (normals irrelevant) → couleur toujours plate
+    // DoubleSide: ShapeGeometry normals pointent vers -Y après remap XY→XZ, donc back-face depuis le dessus
+    const mat = new THREE.MeshBasicMaterial({
       color: col,
+      side: THREE.DoubleSide,
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
     });
 
@@ -1315,7 +1318,6 @@ function buildZoneMeshes(
             pos.setXYZ(i, mx, terrainY(mx, mz), mz);
           }
           pos.needsUpdate = true;
-          geo.computeVertexNormals();
           const mesh = new THREE.Mesh(geo, mat);
           (mesh as any).__zoneLayerId = layer.id;
           mesh.visible = layerVisible[layer.id] ?? true;
