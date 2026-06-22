@@ -388,6 +388,10 @@ export function injectUI(): void {
               <input type="color" class="cp-color-input" data-slot="7" value="#b8b8b8">
               <div class="cp-sw-inner"><span class="cp-sw-num">7</span></div>
             </label>
+            <label class="cp-swatch" data-slot="8" title="Routes">
+              <input type="color" class="cp-color-input" data-slot="8" value="#262626">
+              <div class="cp-sw-inner"><span class="cp-sw-num">8</span></div>
+            </label>
           </div>
         </div>
 
@@ -418,6 +422,22 @@ export function injectUI(): void {
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,12 6,6 10,9 14,4"/></svg>
               <span class="cp-layer-name">Lignes 1</span>
               <button class="cp-eye" data-layer="gpx_line" title="Visibilité">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="8" cy="8" rx="6" ry="4"/><circle cx="8" cy="8" r="2"/></svg>
+              </button>
+              <button class="cp-del" title="Supprimer">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="2,4 14,4"/><path d="M5 4V2h6v2"/><rect x="3" y="4" width="10" height="10" rx="1"/></svg>
+              </button>
+            </div>
+
+            <div class="cp-layer cp-layer-nav" data-layer="roads" data-type="roads">
+              <span class="cp-drag">⠿</span>
+              <div class="cp-sw-mini" data-slot="8" style="background:#262626; color:#fff">8</div>
+              <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M2 13 Q8 9 14 13"/>
+                <path d="M2 10 Q8 6 14 10"/>
+              </svg>
+              <span class="cp-layer-name">Routes</span>
+              <button class="cp-eye active" data-layer="roads" title="Visibilité">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="8" cy="8" rx="6" ry="4"/><circle cx="8" cy="8" r="2"/></svg>
               </button>
               <button class="cp-del" title="Supprimer">

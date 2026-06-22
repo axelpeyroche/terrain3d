@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -696,6 +696,41 @@ document.getElementById('cp-add-layer-btn')?.addEventListener('click', () => {
   wireNewLayerInputs();
 });
 
+function buildRoadsHTML(): string {
+  const isRaised = roadStyle === 'raised';
+  return `
+  <div class="ldp-section">
+    <div class="ldp-row">
+      <label class="ldp-label">Road Style</label>
+      <div class="ldp-row-right" style="display:flex;gap:4px">
+        <button class="ldp-style-btn${isRaised ? ' active' : ''}" data-style="raised">Raised</button>
+        <button class="ldp-style-btn${!isRaised ? ' active' : ''}" data-style="recessed">Recessed</button>
+      </div>
+    </div>
+    <div class="ldp-row">
+      <label class="ldp-label">Road Height</label>
+      <div class="ldp-row-right">
+        <input type="number" id="ldp-road-h" min="0.1" max="20" step="0.05" value="${roadHeightMm.toFixed(2)}" style="width:72px">
+        <span style="margin-left:4px">mm</span>
+      </div>
+    </div>
+    <div class="ldp-row">
+      <label class="ldp-label">Minimum Road Width</label>
+      <div class="ldp-row-right">
+        <input type="number" id="ldp-road-minw" min="0.1" max="10" step="0.05" value="${roadMinWidthMm.toFixed(2)}" style="width:72px">
+        <span style="margin-left:4px">mm</span>
+      </div>
+    </div>
+    <div class="ldp-row">
+      <label class="ldp-label">Road Width Multiplier</label>
+      <div class="ldp-row-right">
+        <input type="number" id="ldp-road-mult" min="0.1" max="10" step="0.05" value="${roadWidthMult.toFixed(2)}" style="width:72px">
+        <span style="margin-left:4px">x</span>
+      </div>
+    </div>
+  </div>`;
+}
+
 function buildBuildingsHTML(): string {
   const hScale  = buildingHeightScale.toFixed(2);
   const szScale = buildingSizeScale.toFixed(2);
@@ -741,6 +776,7 @@ function buildLayerDetailHTML(type: string): string {
   if (type === 'water')      return buildWaterHTML();
   if (type === 'waterways')  return buildWaterwaysHTML();
   if (['veg_dense', 'veg_low', 'wetland_lc', 'snow_lc', 'barren_lc'].includes(type)) return buildLandCoverHTML(type);
+  if (type === 'roads')     return buildRoadsHTML();
   if (type === 'buildings') return buildBuildingsHTML();
   return '';
 }
@@ -1258,6 +1294,24 @@ function wireDetailInputs(type: string): void {
         }
         const s = getDimSettings();
         if (s) rebuildScene(s);
+      });
+    });
+  }
+
+  if (type === 'roads') {
+    const wireN = (id: string, apply: (v: number) => void) => {
+      const el = document.getElementById(id) as HTMLInputElement;
+      el?.addEventListener('change', () => { apply(Number(el.value)); rebuildRoadMeshes(); });
+    };
+    wireN('ldp-road-h',    setRoadHeight);
+    wireN('ldp-road-minw', setRoadMinWidth);
+    wireN('ldp-road-mult', setRoadWidthMult);
+    document.querySelectorAll<HTMLButtonElement>('.ldp-style-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.ldp-style-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        setRoadStyle(btn.dataset.style as 'raised' | 'recessed');
+        rebuildRoadMeshes();
       });
     });
   }

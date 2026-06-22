@@ -28,6 +28,7 @@ export const colorSlots: Record<number, string> = {
   5: '#4a88c0',  // Plans d'eau + Voies navigables
   6: '#ff4500',  // Marqueurs / GPX
   7: '#b8b8b8',  // Bâtiments
+  8: '#262626',  // Routes
 };
 
 // Layer visibility
@@ -37,6 +38,7 @@ export const layerVisible: Record<string, boolean> = {
   gpx: true, gpx_line: true,
   river_polygons: true, barren: true,
   buildings: true,
+  roads: true,
 };
 
 // Per-layer slot assignment overrides (layerId → slot number)
@@ -115,6 +117,19 @@ export function setBuildingHeightScale(v: number): void   { buildingHeightScale 
 export function setBuildingSizeScale(v: number): void     { buildingSizeScale = v; }
 export function setBuildingMinHeight(v: number): void     { buildingMinHeightMm = v; }
 export function setBuildingMinSize(v: number): void       { buildingMinSizeM2 = v; }
+
+// Roads state
+export let roadHeightMm    = 0.8;
+export let roadMinWidthMm  = 0.5;
+export let roadWidthMult   = 1.0;
+export let roadStyle: 'raised' | 'recessed' = 'raised';
+let cachedRoads: { hwType: string; geom: GeoPoint[] }[] = [];
+let cachedRoadsKey = '';
+let roadMeshGroup: THREE.Group | null = null;
+export function setRoadHeight(v: number): void    { roadHeightMm   = v; }
+export function setRoadMinWidth(v: number): void  { roadMinWidthMm = v; }
+export function setRoadWidthMult(v: number): void { roadWidthMult  = v; }
+export function setRoadStyle(s: 'raised' | 'recessed'): void { roadStyle = s; }
 export function setLCFeatureEnabled(layerId: string, key: string, enabled: boolean): void {
   if (!layerLCFeatures[layerId]) return;
   layerLCFeatures[layerId][key] = enabled;
@@ -300,6 +315,13 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
   for (const m of buildingMeshRefs) {
     (m.material as THREE.MeshLambertMaterial).color.set(bldCol);
   }
+  // Update road colors
+  const roadSlot = layerSlotOverrides['roads'] ?? 8;
+  const roadCol = new THREE.Color(colorSlots[roadSlot] ?? '#262626');
+  roadMeshGroup?.traverse(child => {
+    const mat = (child as THREE.Mesh).material as THREE.MeshLambertMaterial;
+    if (mat?.color) mat.color.set(roadCol);
+  });
 }
 
 /** Assign a layer to a different color slot and immediately refresh the 3D preview */
@@ -317,6 +339,8 @@ export function setLayerVisible(id: string, visible: boolean): void {
     for (const g of markerMeshRefs) g.visible = visible;
   } else if (id === 'buildings') {
     for (const m of buildingMeshRefs) m.visible = visible;
+  } else if (id === 'roads') {
+    if (roadMeshGroup) roadMeshGroup.visible = visible;
   } else {
     updateColorSlots({});
   }
@@ -484,11 +508,20 @@ export async function buildDimsPreview(
   }
 
   if (key !== cachedBuildingsKey) {
-    onProgress(60, 'Chargement des bâtiments…');
+    onProgress(55, 'Chargement des bâtiments…');
     const buildings = await fetchBuildingFeatures(bounds);
     if (buildings.length > 0 || cachedBuildingsKey === '') {
       cachedBuildingsKey = key;
       cachedBuildings = buildings;
+    }
+  }
+
+  if (key !== cachedRoadsKey) {
+    onProgress(62, 'Chargement des routes…');
+    const roads = await fetchRoadFeatures(bounds);
+    if (roads.length > 0 || cachedRoadsKey === '') {
+      cachedRoadsKey = key;
+      cachedRoads = roads;
     }
   }
 
@@ -549,6 +582,7 @@ export function rebuildScene(s: DimSettings): void {
   lineMeshGroup = null;
   markerMeshRefs = [];
   buildingMeshRefs = [];
+  roadMeshGroup = null;
 
   // Apply water height offset + hydro-flatten to the elevation grid
   const layH = 0.20;
@@ -639,6 +673,9 @@ export function rebuildScene(s: DimSettings): void {
 
   // ── Line features overlay ─────────────────────────────
   rebuildLineMeshes();
+
+  // ── Roads ────────────────────────────────────────────
+  rebuildRoadMeshes();
 
   // ── Buildings ─────────────────────────────────────────
   if (cachedBuildings.length > 0) {
@@ -807,6 +844,139 @@ function buildBuildingMeshes(
     meshes.push(mesh);
   }
   return meshes;
+}
+
+/* ══════════════════════════════════════════════
+   ROAD FEATURES (Overpass → 3D ribbons)
+══════════════════════════════════════════════ */
+async function fetchRoadFeatures(bounds: LatLonBounds): Promise<{ hwType: string; geom: GeoPoint[] }[]> {
+  const { minLat, minLon, maxLat, maxLon } = bounds;
+  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
+  const query = `[out:json][timeout:28];
+(
+  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
+);
+out geom;`;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 22000);
+  try {
+    const res = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    const data = await res.json();
+    return (data.elements ?? [])
+      .filter((el: any) => el.type === 'way' && el.geometry?.length >= 2)
+      .map((el: any) => ({ hwType: el.tags?.highway ?? '', geom: el.geometry as GeoPoint[] }));
+  } catch {
+    clearTimeout(t);
+    return [];
+  }
+}
+
+// Real-world lane widths (meters) per highway type
+function roadRealWidthM(hwType: string): number {
+  if (hwType === 'motorway' || hwType === 'motorway_link') return 10;
+  if (hwType === 'trunk'    || hwType === 'trunk_link')    return 8;
+  if (hwType === 'primary'  || hwType === 'primary_link')  return 6;
+  if (hwType === 'secondary'|| hwType === 'secondary_link')return 5;
+  if (hwType === 'tertiary' || hwType === 'tertiary_link') return 4;
+  return 3.5; // residential, unclassified, living_street
+}
+
+function buildRoadRibbon(
+  geom: GeoPoint[], halfW: number, heightOff: number,
+  bounds: LatLonBounds, grid: Float32Array, G: number,
+  minE: number, elevRange: number,
+  wMm: number, dMm: number, baseH: number, elevScaleMm: number,
+): THREE.BufferGeometry | null {
+  const { minLat, maxLat, minLon, maxLon } = bounds;
+  const pts: THREE.Vector3[] = [];
+  for (const p of geom) {
+    const u = (p.lon - minLon) / (maxLon - minLon);
+    const v = (p.lat - minLat) / (maxLat - minLat);
+    if (u < -0.02 || u > 1.02 || v < -0.02 || v > 1.02) continue;
+    const x = (u - 0.5) * wMm;
+    const z = (0.5 - v) * dMm;
+    const e = sampleElev(grid, G, u, 1 - v);
+    const y = baseH + ((e - minE) / elevRange) * elevScaleMm + heightOff;
+    pts.push(new THREE.Vector3(x, y, z));
+  }
+  if (pts.length < 2) return null;
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let i = 0; i < pts.length; i++) {
+    const prev = pts[Math.max(0, i - 1)];
+    const next = pts[Math.min(pts.length - 1, i + 1)];
+    const tx = next.x - prev.x;
+    const tz = next.z - prev.z;
+    const tlen = Math.sqrt(tx * tx + tz * tz);
+    if (tlen < 1e-9) {
+      positions.push(pts[i].x, pts[i].y, pts[i].z);
+      positions.push(pts[i].x, pts[i].y, pts[i].z);
+    } else {
+      const px = -tz / tlen * halfW;
+      const pz =  tx / tlen * halfW;
+      positions.push(pts[i].x - px, pts[i].y, pts[i].z - pz); // left
+      positions.push(pts[i].x + px, pts[i].y, pts[i].z + pz); // right
+    }
+    if (i > 0) {
+      const b = (i - 1) * 2;
+      indices.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+    }
+  }
+
+  if (positions.length < 12) return null;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+export function rebuildRoadMeshes(): void {
+  if (roadMeshGroup) {
+    scene?.remove(roadMeshGroup);
+    const si = sceneObjs.indexOf(roadMeshGroup);
+    if (si >= 0) sceneObjs.splice(si, 1);
+    roadMeshGroup = null;
+  }
+  if (!cachedElev || !scene || !cachedRoads.length) return;
+
+  const { grid, minE, elevRange, bounds } = cachedElev;
+  const G = PREVIEW_GRID;
+  const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
+
+  const cLat = (bounds.minLat + bounds.maxLat) / 2;
+  const realW = (bounds.maxLon - bounds.minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
+  const scaleMMperM = wMm / realW;
+
+  const bldSlot = layerSlotOverrides['roads'] ?? 8;
+  const col = new THREE.Color(colorSlots[bldSlot] ?? '#262626');
+  const mat = new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide });
+
+  const heightOff = roadStyle === 'raised' ? roadHeightMm : -roadHeightMm;
+  const group = new THREE.Group();
+
+  for (const road of cachedRoads) {
+    const rawW = roadRealWidthM(road.hwType) * scaleMMperM * roadWidthMult;
+    const halfW = Math.max(roadMinWidthMm, rawW) / 2;
+    const geo = buildRoadRibbon(
+      road.geom, halfW, heightOff,
+      bounds, grid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+    );
+    if (geo) group.add(new THREE.Mesh(geo, mat));
+  }
+
+  if (group.children.length > 0) {
+    group.visible = layerVisible['roads'] ?? true;
+    scene.add(group);
+    sceneObjs.push(group);
+    roadMeshGroup = group;
+  }
 }
 
 /* ══════════════════════════════════════════════
