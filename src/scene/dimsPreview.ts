@@ -80,7 +80,7 @@ export const waterFeaturesEnabled: Record<string, boolean> = {
 export let waterwayLineWidth    = 1.0;   // multiplier on base stroke width
 export let waterwayHeightOffset = -1;    // layers
 export const waterwayFeaturesEnabled: Record<string, boolean> = {
-  rivers: true, streams_named: true, streams_unnamed: false,
+  rivers: true, streams_named: true, streams_unnamed: true,
   river_polygons: true, canals: true, canal_polygons: true,
 };
 
@@ -124,7 +124,6 @@ export let roadMinWidthMm  = 0.5;
 export let roadWidthMult   = 1.0;
 export let roadStyle: 'raised' | 'recessed' = 'raised';
 let cachedRoads: { hwType: string; geom: GeoPoint[] }[] = [];
-let cachedRoadsKey = '';
 let roadMeshGroup: THREE.Group | null = null;
 export function setRoadHeight(v: number): void    { roadHeightMm   = v; }
 export function setRoadMinWidth(v: number): void  { roadMinWidthMm = v; }
@@ -502,6 +501,10 @@ export async function buildDimsPreview(
     if (features.length > 0) {
       cachedFeaturesKey = key;
       cachedFeatures = features;
+      // Extract road data from terrain features (highway ways are included in the query)
+      cachedRoads = features
+        .filter(el => el.type === 'way' && el.tags?.highway && (el.geometry?.length ?? 0) >= 2)
+        .map(el => ({ hwType: el.tags!.highway!, geom: el.geometry! }));
       // Invalidate texture so it gets rebuilt with real zone colors
       if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
     }
@@ -513,15 +516,6 @@ export async function buildDimsPreview(
     if (buildings.length > 0 || cachedBuildingsKey === '') {
       cachedBuildingsKey = key;
       cachedBuildings = buildings;
-    }
-  }
-
-  if (key !== cachedRoadsKey) {
-    onProgress(62, 'Chargement des routes…');
-    const roads = await fetchRoadFeatures(bounds);
-    if (roads.length > 0 || cachedRoadsKey === '') {
-      cachedRoadsKey = key;
-      cachedRoads = roads;
     }
   }
 
@@ -715,7 +709,7 @@ export function resetDimsCamera(): void {
 async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const query = `[out:json][timeout:28];
+  const query = `[out:json][timeout:40];
 (
   way["natural"="water"]${bb};
   relation["natural"="water"]${bb};
@@ -739,11 +733,12 @@ async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   way["natural"="sand"]${bb};
   way["natural"="wetland"]${bb};
   way["natural"="mud"]${bb};
+  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
 );
 out geom;`;
 
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 22000);
+  const t = setTimeout(() => ctrl.abort(), 40000);
   try {
     const res = await fetch(
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
@@ -850,33 +845,8 @@ function buildBuildingMeshes(
 }
 
 /* ══════════════════════════════════════════════
-   ROAD FEATURES (Overpass → 3D ribbons)
+   ROAD RIBBONS (built from cachedFeatures highway data)
 ══════════════════════════════════════════════ */
-async function fetchRoadFeatures(bounds: LatLonBounds): Promise<{ hwType: string; geom: GeoPoint[] }[]> {
-  const { minLat, minLon, maxLat, maxLon } = bounds;
-  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const query = `[out:json][timeout:28];
-(
-  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
-);
-out geom;`;
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 22000);
-  try {
-    const res = await fetch(
-      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-      { signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    const data = await res.json();
-    return (data.elements ?? [])
-      .filter((el: any) => el.type === 'way' && el.geometry?.length >= 2)
-      .map((el: any) => ({ hwType: el.tags?.highway ?? '', geom: el.geometry as GeoPoint[] }));
-  } catch {
-    clearTimeout(t);
-    return [];
-  }
-}
 
 // Real-world lane widths (meters) per highway type
 function roadRealWidthM(hwType: string): number {
