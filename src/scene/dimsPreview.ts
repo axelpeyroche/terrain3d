@@ -275,7 +275,7 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
     cachedTexture = buildMapTexture(
       cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
       cachedElev.minE, cachedElev.elevRange, cachedFeatures,
-      lastW, lastD, lastElevScale,
+      lastW, lastD, lastElevScale, cachedRoads, cachedBuildings,
     );
     if (terrainMeshRef) {
       const mat = terrainMeshRef.material as THREE.MeshLambertMaterial;
@@ -350,8 +350,28 @@ export function setLayerVisible(id: string, visible: boolean): void {
     for (const g of markerMeshRefs) g.visible = visible;
   } else if (id === 'buildings') {
     for (const m of buildingMeshRefs) m.visible = visible;
+    // also update texture footprints
+    if (cachedElev) {
+      if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+      cachedTexture = buildMapTexture(
+        cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
+        cachedElev.minE, cachedElev.elevRange, cachedFeatures,
+        lastW, lastD, lastElevScale, cachedRoads, cachedBuildings,
+      );
+      if (terrainMeshRef) { (terrainMeshRef.material as THREE.MeshLambertMaterial).map = cachedTexture; (terrainMeshRef.material as THREE.MeshLambertMaterial).needsUpdate = true; }
+    }
   } else if (id === 'roads') {
     if (roadMeshGroup) roadMeshGroup.visible = visible;
+    // also update texture road lines
+    if (cachedElev) {
+      if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+      cachedTexture = buildMapTexture(
+        cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
+        cachedElev.minE, cachedElev.elevRange, cachedFeatures,
+        lastW, lastD, lastElevScale, cachedRoads, cachedBuildings,
+      );
+      if (terrainMeshRef) { (terrainMeshRef.material as THREE.MeshLambertMaterial).map = cachedTexture; (terrainMeshRef.material as THREE.MeshLambertMaterial).needsUpdate = true; }
+    }
   } else {
     // all OSM layers (zones + waterways) — rebuild texture
     if (cachedElev) {
@@ -580,7 +600,7 @@ export async function buildDimsPreview(
     cachedTexture = buildMapTexture(
       bounds, cachedElev.grid, PREVIEW_GRID,
       cachedElev.minE, cachedElev.elevRange, cachedFeatures,
-      tW, tD, esc0,
+      tW, tD, esc0, cachedRoads, cachedBuildings,
     );
   } else if (!needFetch) {
     onProgress(50, 'Reconstruction…');
@@ -611,7 +631,7 @@ export function rebuildScene(s: DimSettings): void {
 
   // Rebuild texture if invalidated (water feature toggle, color change, etc.)
   if (!cachedTexture) {
-    cachedTexture = buildMapTexture(rb, grid, PREVIEW_GRID, minE, elevRange, cachedFeatures, wMm, dMm, elevScaleMm);
+    cachedTexture = buildMapTexture(rb, grid, PREVIEW_GRID, minE, elevRange, cachedFeatures, wMm, dMm, elevScaleMm, cachedRoads, cachedBuildings);
   }
 
   const cLat = (rb.minLat + rb.maxLat) / 2;
@@ -736,7 +756,7 @@ export function rebuildScene(s: DimSettings): void {
   if (cachedBuildings.length > 0) {
     const visible = layerVisible['buildings'] ?? true;
     for (const m of buildBuildingMeshes(
-      cachedBuildings, rb, grid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+      cachedBuildings, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
     )) {
       m.visible = visible;
       buildingMeshRefs.push(m);
@@ -870,7 +890,7 @@ function buildBuildingMeshes(
   baseH: number, elevScaleMm: number,
 ): THREE.Mesh[] {
   const { minLat, maxLat, minLon, maxLon } = bounds;
-  const color = new THREE.Color(colorSlots[7] ?? '#888888');
+  const color = new THREE.Color(colorSlots[layerSlotOverrides['buildings'] ?? 7] ?? '#888888');
   const clippingPlanes = [
     new THREE.Plane(new THREE.Vector3(-1, 0, 0), wMm / 2),
     new THREE.Plane(new THREE.Vector3(1, 0, 0), wMm / 2),
@@ -1345,6 +1365,8 @@ function buildMapTexture(
   features: OSMEl[],
   wMm: number, dMm: number,
   elevScaleMm: number,
+  roads: { hwType: string; geom: GeoPoint[] }[],
+  buildings: OSMEl[],
 ): THREE.CanvasTexture {
   const S = TEX_SIZE;
   const cv = document.createElement('canvas');
@@ -1450,7 +1472,54 @@ function buildMapTexture(
     ctx.putImageData(imgData, 0, 0);
   }
 
-  // Step 4 — waterway lines drawn on top of shaded terrain (crisp, unaffected by shade)
+  // Step 4a — road lines painted on shaded terrain (texture pass, before waterways)
+  if ((layerVisible['roads'] ?? true) && roads.length > 0) {
+    const roadSlot = layerSlotOverrides['roads'] ?? 8;
+    const roadCol = colorSlots[roadSlot] ?? '#262626';
+    const cLat = (bounds.minLat + bounds.maxLat) / 2;
+    const lonScale = Math.cos(cLat * Math.PI / 180);
+    const realW = (bounds.maxLon - bounds.minLon) * lonScale * 111320;
+    const scaleTexPerM = S / realW;
+
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const road of roads) {
+      const baseW = roadRealWidthM(road.hwType) * scaleTexPerM * roadWidthMult;
+      const lw = Math.max(1.5, baseW);
+      ctx.beginPath();
+      let first = true;
+      for (const p of road.geom) {
+        const cx = (p.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+        const cy = (1 - (p.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
+        if (first) { ctx.moveTo(cx, cy); first = false; } else ctx.lineTo(cx, cy);
+      }
+      ctx.strokeStyle = roadCol;
+      ctx.lineWidth = lw;
+      ctx.stroke();
+    }
+  }
+
+  // Step 4b — building footprints painted on terrain
+  if ((layerVisible['buildings'] ?? true) && buildings.length > 0) {
+    const bldSlot = layerSlotOverrides['buildings'] ?? 7;
+    const bldCol = colorSlots[bldSlot] ?? '#b8b8b8';
+    ctx.fillStyle = bldCol;
+    ctx.beginPath();
+    for (const el of buildings) {
+      const polys = getOsmPolygons(el);
+      if (!polys.length) continue;
+      const outer = polys[0];
+      if (outer.length < 3) continue;
+      for (let i = 0; i < outer.length; i++) {
+        const cx = (outer[i].lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+        const cy = (1 - (outer[i].lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
+        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      }
+      ctx.closePath();
+    }
+    ctx.fill('nonzero');
+  }
+
+  // Step 4c — waterway lines drawn on top of shaded terrain (crisp, unaffected by shade)
   for (const layer of ZONE_LAYERS) {
     if (layer.fill) continue;
     if (!layerVisible[layer.id]) continue;
