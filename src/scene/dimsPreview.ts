@@ -19,6 +19,7 @@ let cachedZoneKey = '';
 let cachedFeatures: OSMEl[] = [];
 let cachedFeaturesKey = '';
 let cachedRoadsKey = '';
+let lastZonePoly: Array<[number, number]> | null = null;
 
 // Color slots 1-7 (Bambu-style filament colors)
 export const colorSlots: Record<number, string> = {
@@ -548,37 +549,19 @@ export async function buildDimsPreview(
 
   if (fetchNeeds.features || fetchNeeds.buildings) {
     onProgress(30, 'Chargement des données géographiques…');
-    const tasks: Promise<void>[] = [];
-
-    if (fetchNeeds.features) {
-      tasks.push(
-        fetchTerrainFeatures(bounds).then(features => {
-          if (features.length > 0) {
-            cachedFeaturesKey = key;
-            cachedFeatures = features;
-            if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
-            // Extract highways embedded in the terrain features response
-            cachedRoadsKey = key;
-            cachedRoads = features
-              .filter(el => el.type === 'way' && el.tags?.highway && (el.geometry?.length ?? 0) >= 2)
-              .map(el => ({ hwType: el.tags!.highway!, geom: el.geometry! }));
-          }
-        }),
-      );
+    const { zoneFeatures, buildings, roads } = await fetchAllOSMFeatures(bounds);
+    // Update caches if fetch returned any data (empty = failure or genuinely empty area)
+    if (zoneFeatures.length > 0 || buildings.length > 0 || roads.length > 0) {
+      cachedFeaturesKey = key;
+      cachedBuildingsKey = key;
+      cachedRoadsKey = key;
+      if (zoneFeatures.length > 0) {
+        cachedFeatures = zoneFeatures;
+        if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+      }
+      cachedBuildings = buildings;
+      cachedRoads = roads;
     }
-
-    if (fetchNeeds.buildings) {
-      tasks.push(
-        fetchBuildingFeatures(bounds).then(buildings => {
-          if (buildings.length > 0 || cachedBuildingsKey === '') {
-            cachedBuildingsKey = key;
-            cachedBuildings = buildings;
-          }
-        }),
-      );
-    }
-
-    await Promise.all(tasks);
   }
 
   if (!cachedTexture && cachedElev) {
@@ -639,6 +622,7 @@ export function rebuildScene(s: DimSettings): void {
 
   const G = PREVIEW_GRID;
   const modelPts = zonePtsToModel(zonePts, zoneType, rb, wMm, dMm);
+  lastZonePoly = modelPts;
   const facadeW = Math.max(1, facadeWidthMm);
 
   terrainMeshRef = null;
@@ -780,14 +764,19 @@ export function resetDimsCamera(): void {
 }
 
 /* ══════════════════════════════════════════════
-   OSM TERRAIN FEATURES (Overpass)
-   Fetches: water, forest, scrub, grassland, glacier, bare rock, wetland + highways
-   Roads are included here to avoid a 3rd sequential Overpass request (rate-limit risk).
+   SINGLE OSM FETCH — zones + buildings + routes en une requête
+   Évite les rate-limits Overpass (max 2 concurrent) et les timeouts séquentiels.
 ══════════════════════════════════════════════ */
-async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
+async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
+  zoneFeatures: OSMEl[];
+  buildings: OSMEl[];
+  roads: { hwType: string; geom: GeoPoint[] }[];
+}> {
+  const empty = { zoneFeatures: [], buildings: [], roads: [] };
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const query = `[out:json][timeout:55];
+  const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
+  const query = `[out:json][timeout:60][maxsize:536870912];
 (
   way["natural"="water"]${bb};
   relation["natural"="water"]${bb};
@@ -811,52 +800,53 @@ async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   way["natural"="sand"]${bb};
   way["natural"="wetland"]${bb};
   way["natural"="mud"]${bb};
-  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
+  way["building"]${bb};
+  relation["building"]["type"="multipolygon"]${bb};
+  way["highway"~"^(${HW})$"]${bb};
 );
-out geom;`;
+out geom qt;`;
 
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 50000);
+  const t = setTimeout(() => ctrl.abort(), 58000);
   try {
     const res = await fetch(
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
       { signal: ctrl.signal },
     );
     clearTimeout(t);
-    if (!res.ok) return [];
-    return ((await res.json()).elements ?? []) as OSMEl[];
+    if (!res.ok) return empty;
+    const elements: OSMEl[] = (await res.json()).elements ?? [];
+    const zoneFeatures: OSMEl[] = [];
+    const buildings: OSMEl[] = [];
+    const roads: { hwType: string; geom: GeoPoint[] }[] = [];
+    for (const el of elements) {
+      const tags = el.tags;
+      if (!tags) continue;
+      if (tags.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
+        roads.push({ hwType: tags.highway, geom: el.geometry! });
+      } else if (tags.building) {
+        buildings.push(el);
+      } else {
+        zoneFeatures.push(el);
+      }
+    }
+    return { zoneFeatures, buildings, roads };
   } catch {
     clearTimeout(t);
-    return [];
+    return empty;
   }
 }
 
-/* ══════════════════════════════════════════════
-   BUILDING FEATURES (Overpass)
-══════════════════════════════════════════════ */
-async function fetchBuildingFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
-  const { minLat, minLon, maxLat, maxLon } = bounds;
-  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const query = `[out:json][timeout:28];
-(
-  way["building"]${bb};
-  relation["building"]["type"="multipolygon"]${bb};
-);
-out geom;`;
-
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 22000);
-  try {
-    const res = await fetch(
-      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-      { signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    return ((await res.json()).elements ?? []) as OSMEl[];
-  } catch {
-    clearTimeout(t);
-    return [];
+/** Ray-casting point-in-polygon test. poly is [[x,z]…] in model space (mm). */
+function pointInZone(x: number, z: number, poly: Array<[number, number]>): boolean {
+  let inside = false;
+  const n = poly.length;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = poly[i][0], zi = poly[i][1];
+    const xj = poly[j][0], zj = poly[j][1];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
   }
+  return inside;
 }
 
 function buildBuildingMeshes(
@@ -902,6 +892,13 @@ function buildBuildingMeshes(
     // Centroid in model coords (for size scaling)
     const cSx = cLonFrac * wMm - wMm / 2;
     const cSy = cLatFrac * dMm - dMm / 2;
+
+    // Skip buildings whose centroid falls outside the zone polygon
+    if (lastZonePoly) {
+      const cZx = cSx;
+      const cZz = (0.5 - cLatFrac) * dMm;
+      if (!pointInZone(cZx, cZz, lastZonePoly)) continue;
+    }
 
     const shape = new THREE.Shape();
     for (let i = 0; i < outer.length; i++) {
@@ -1046,6 +1043,16 @@ export function rebuildRoadMeshes(): void {
   const group = new THREE.Group();
 
   for (const road of cachedRoads) {
+    // Skip road ribbons entirely outside the zone polygon
+    if (lastZonePoly) {
+      const rb2 = bounds;
+      const hasPointInZone = road.geom.some(p => {
+        const rx = (p.lon - rb2.minLon) / (rb2.maxLon - rb2.minLon) * wMm - wMm / 2;
+        const rz = (0.5 - (p.lat - rb2.minLat) / (rb2.maxLat - rb2.minLat)) * dMm;
+        return pointInZone(rx, rz, lastZonePoly!);
+      });
+      if (!hasPointInZone) continue;
+    }
     const rawW = roadRealWidthM(road.hwType) * scaleMMperM * roadWidthMult;
     const halfW = Math.max(roadMinWidthMm, rawW) / 2;
     const geo = buildRoadRibbon(
