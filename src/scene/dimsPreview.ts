@@ -275,6 +275,7 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
     cachedTexture = buildMapTexture(
       cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
       cachedElev.minE, cachedElev.elevRange, cachedFeatures,
+      lastW, lastD, lastElevScale,
     );
     if (terrainMeshRef) {
       const mat = terrainMeshRef.material as THREE.MeshLambertMaterial;
@@ -351,15 +352,15 @@ export function setLayerVisible(id: string, visible: boolean): void {
     for (const m of buildingMeshRefs) m.visible = visible;
   } else if (id === 'roads') {
     if (roadMeshGroup) roadMeshGroup.visible = visible;
-  } else if (ZONE_LAYERS.find(l => l.id === id && l.fill)) {
-    for (const m of zoneMeshRefs) {
-      if ((m as any).__zoneLayerId === id) m.visible = visible;
-    }
   } else {
-    // waterway lines — still in texture
+    // all OSM layers (zones + waterways) — rebuild texture
     if (cachedElev) {
       if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
-      cachedTexture = buildMapTexture(cachedElev.bounds, cachedElev.grid, PREVIEW_GRID, cachedElev.minE, cachedElev.elevRange, cachedFeatures);
+      cachedTexture = buildMapTexture(
+        cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
+        cachedElev.minE, cachedElev.elevRange, cachedFeatures,
+        lastW, lastD, lastElevScale,
+      );
       if (terrainMeshRef) {
         const mat = terrainMeshRef.material as THREE.MeshLambertMaterial;
         mat.map = cachedTexture;
@@ -567,9 +568,19 @@ export async function buildDimsPreview(
 
   if (!cachedTexture && cachedElev) {
     onProgress(70, 'Génération de la texture…');
+    const { wMm: tW, dMm: tD, exag: tEx } = settings;
+    const rb0 = bounds;
+    const cLat0 = (rb0.minLat + rb0.maxLat) / 2;
+    const avgLen0 = Math.max(
+      (rb0.maxLon - rb0.minLon) * Math.cos(cLat0 * Math.PI / 180) * 111320,
+      (rb0.maxLat - rb0.minLat) * 111320,
+    );
+    const maxDim0 = Math.max(tW, tD);
+    const esc0 = Math.max(1, Math.min(maxDim0 * 0.5, (cachedElev.elevRange / avgLen0) * maxDim0 * tEx));
     cachedTexture = buildMapTexture(
       bounds, cachedElev.grid, PREVIEW_GRID,
       cachedElev.minE, cachedElev.elevRange, cachedFeatures,
+      tW, tD, esc0,
     );
   } else if (!needFetch) {
     onProgress(50, 'Reconstruction…');
@@ -600,7 +611,7 @@ export function rebuildScene(s: DimSettings): void {
 
   // Rebuild texture if invalidated (water feature toggle, color change, etc.)
   if (!cachedTexture) {
-    cachedTexture = buildMapTexture(rb, grid, PREVIEW_GRID, minE, elevRange, cachedFeatures);
+    cachedTexture = buildMapTexture(rb, grid, PREVIEW_GRID, minE, elevRange, cachedFeatures, wMm, dMm, elevScaleMm);
   }
 
   const cLat = (rb.minLat + rb.maxLat) / 2;
@@ -649,12 +660,6 @@ export function rebuildScene(s: DimSettings): void {
     }));
     terrainMeshRef = tm;
     add(tm);
-  }
-
-  // ── Zone fills (géométrie 3D pour bords nets) ─────────
-  for (const m of buildZoneMeshes(cachedFeatures, rb, grid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm)) {
-    zoneMeshRefs.push(m);
-    add(m);
   }
 
   // ── Base ──────────────────────────────────────────────
@@ -1039,7 +1044,7 @@ export function rebuildRoadMeshes(): void {
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
   });
 
-  const heightOff = (roadStyle === 'raised' ? roadHeightMm : -roadHeightMm) + 0.05;
+  const heightOff = (roadStyle === 'raised' ? roadHeightMm : -roadHeightMm) + 0.20;
   const group = new THREE.Group();
 
   for (const road of cachedRoads) {
@@ -1238,7 +1243,7 @@ function buildZoneMeshes(
   baseH: number, elevScaleMm: number,
 ): THREE.Mesh[] {
   const { minLat, maxLat, minLon, maxLon } = bounds;
-  const OFFSET_MM = 0.03;
+  const OFFSET_MM = 0.08; // physically above terrain → no polygonOffset needed
   const DENSIFY_MM = 6;
 
   const terrainY = (mx: number, mz: number): number => {
@@ -1282,12 +1287,16 @@ function buildZoneMeshes(
 
     const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
     const col = new THREE.Color(colorSlots[effectiveSlot] ?? '#888');
-    // MeshBasicMaterial: ignores lighting (normals irrelevant) → couleur toujours plate
-    // DoubleSide: ShapeGeometry normals pointent vers -Y après remap XY→XZ, donc back-face depuis le dessus
+    const clippingPlanes = [
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), wMm / 2),
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), wMm / 2),
+      new THREE.Plane(new THREE.Vector3(0, 0, -1), dMm / 2),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), dMm / 2),
+    ];
     const mat = new THREE.MeshBasicMaterial({
       color: col,
       side: THREE.DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      clippingPlanes,
     });
 
     const layerEls = features.filter(el => {
@@ -1334,46 +1343,32 @@ function buildMapTexture(
   grid: Float32Array, G: number,
   minE: number, elevRange: number,
   features: OSMEl[],
+  wMm: number, dMm: number,
+  elevScaleMm: number,
 ): THREE.CanvasTexture {
   const S = TEX_SIZE;
   const cv = document.createElement('canvas');
   cv.width = cv.height = S;
   const ctx = cv.getContext('2d')!;
 
-  // Step 1 — hypsometric elevation base (always present, provides fallback coloring)
-  const id = ctx.createImageData(S, S);
-  const d = id.data;
-  for (let row = 0; row < S; row++) {
-    for (let col = 0; col < S; col++) {
-      const gx = col / (S - 1) * (G - 1);
-      const gy = row / (S - 1) * (G - 1);
-      const gi = Math.min(G - 2, Math.floor(gx));
-      const gj = Math.min(G - 2, Math.floor(gy));
-      const fx = gx - gi, fy = gy - gj;
-      const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
-              + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-      const t = Math.max(0, Math.min(1, (e - minE) / elevRange));
-      const [r, g, b] = hypso(t);
-      const pi = (row * S + col) * 4;
-      d[pi] = r; d[pi+1] = g; d[pi+2] = b; d[pi+3] = 255;
-    }
-  }
-  ctx.putImageData(id, 0, 0);
+  // Step 1 — base terrain color (slot 1)
+  const baseSlotCol = colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88';
+  ctx.fillStyle = baseSlotCol;
+  ctx.fillRect(0, 0, S, S);
 
-  // Step 2 — draw each OSM layer in order, filtered by size slider
+  // Step 2 — draw all OSM zone fills + waterway lines in layer order
   const filterSlider = document.getElementById('cp-filter') as HTMLInputElement | null;
-  const filterVal = filterSlider ? Number(filterSlider.value) : 100; // 0=strict, 100=all
+  const filterVal = filterSlider ? Number(filterSlider.value) : 100;
   const lonScale = Math.cos((bounds.minLat + bounds.maxLat) / 2 * Math.PI / 180);
   const boundsAreaM2 = (bounds.maxLon - bounds.minLon) * lonScale * 111320
                      * (bounds.maxLat - bounds.minLat) * 111320;
-  // At slider=0: keep only features ≥ 2% of bounds area. At slider=100: keep all.
   const minAreaM2 = Math.pow(1 - filterVal / 100, 2) * 0.02 * boundsAreaM2;
 
   for (const layer of ZONE_LAYERS) {
-    if (layer.fill) continue; // fills rendered as 3D geometry (buildZoneMeshes)
     if (!layerVisible[layer.id]) continue;
     const layerEls = features.filter(el => {
       if (!el.tags || !layer.match(el.tags)) return false;
+      if (layer.fill && minAreaM2 > 0) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
       return true;
     });
     if (!layerEls.length) continue;
@@ -1387,19 +1382,73 @@ function buildMapTexture(
       ctx.fillStyle = col;
       ctx.fill('evenodd');
     } else {
-      // Waterway lines — dynamic width by type
-      for (const el of layerEls) {
-        if (!el.tags) continue;
-        const ww = el.tags.waterway ?? '';
-        const lw = (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth;
-        ctx.beginPath();
-        traceGeometry(ctx, el, bounds, S);
-        ctx.strokeStyle = col;
-        ctx.lineWidth = lw;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.stroke();
+      // Waterway lines drawn after hillshade (below — saved for pass 4)
+    }
+  }
+
+  // Step 3 — hillshade pass: precompute per-grid-cell shade, then interpolate per pixel
+  {
+    const SX = wMm / (G - 1);
+    const SZ = dMm / (G - 1);
+    const EVS = elevScaleMm / (elevRange > 0 ? elevRange : 1);
+    // Light from NW at 45° altitude (azimuth 315°)
+    const LX = -0.5, LY = 0.7071, LZ = -0.5;
+
+    const shadeGrid = new Float32Array(G * G);
+    for (let gj = 0; gj < G; gj++) {
+      for (let gi = 0; gi < G; gi++) {
+        const giL = Math.max(0, gi - 1), giR = Math.min(G - 1, gi + 1);
+        const gjU = Math.max(0, gj - 1), gjD = Math.min(G - 1, gj + 1);
+        const dEdX = (grid[gj * G + giR] - grid[gj * G + giL]) / ((giR - giL) * SX);
+        const dEdZ = (grid[gjD * G + gi] - grid[gjU * G + gi]) / ((gjD - gjU) * SZ);
+        const sX = dEdX * EVS, sZ = dEdZ * EVS;
+        const len = Math.sqrt(sX * sX + 1 + sZ * sZ);
+        const dot = (-sX * LX + LY - sZ * LZ) / len;
+        shadeGrid[gj * G + gi] = Math.max(0.35, Math.min(1.3, 0.45 + 0.85 * Math.max(0, dot)));
       }
+    }
+
+    const imgData = ctx.getImageData(0, 0, S, S);
+    const d = imgData.data;
+    for (let row = 0; row < S; row++) {
+      for (let col = 0; col < S; col++) {
+        const gx = col / (S - 1) * (G - 1);
+        const gy = row / (S - 1) * (G - 1);
+        const gi = Math.min(G - 2, Math.floor(gx));
+        const gj = Math.min(G - 2, Math.floor(gy));
+        const fx = gx - gi, fy = gy - gj;
+        const shade = shadeGrid[gj*G+gi]*(1-fx)*(1-fy)
+                    + shadeGrid[gj*G+gi+1]*fx*(1-fy)
+                    + shadeGrid[(gj+1)*G+gi]*(1-fx)*fy
+                    + shadeGrid[(gj+1)*G+gi+1]*fx*fy;
+        const pi = (row * S + col) * 4;
+        d[pi]   = d[pi]   * shade > 255 ? 255 : d[pi]   * shade;
+        d[pi+1] = d[pi+1] * shade > 255 ? 255 : d[pi+1] * shade;
+        d[pi+2] = d[pi+2] * shade > 255 ? 255 : d[pi+2] * shade;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+
+  // Step 4 — waterway lines drawn on top of shaded terrain (crisp, unaffected by shade)
+  for (const layer of ZONE_LAYERS) {
+    if (layer.fill) continue;
+    if (!layerVisible[layer.id]) continue;
+    const layerEls = features.filter(el => el.tags && layer.match(el.tags));
+    if (!layerEls.length) continue;
+    const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
+    const col = colorSlots[effectiveSlot] ?? '#888';
+    for (const el of layerEls) {
+      if (!el.tags) continue;
+      const ww = el.tags.waterway ?? '';
+      const lw = (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth;
+      ctx.beginPath();
+      traceGeometry(ctx, el, bounds, S);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = lw;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.stroke();
     }
   }
 
@@ -1429,7 +1478,7 @@ function traceGeometry(
     drawPts(el.geometry);
   } else if (el.type === 'relation' && el.members) {
     for (const m of el.members) {
-      if (m.role === 'outer' && m.geometry) drawPts(m.geometry);
+      if ((m.role === 'outer' || m.role === 'inner') && m.geometry) drawPts(m.geometry);
     }
   }
 }
@@ -1950,28 +1999,54 @@ function spawnMarkerMesh(latFrac: number, lonFrac: number, shape: string): void 
   void latFrac; void lonFrac; void shape;
 }
 
+function sampleTerrainY(
+  x: number, z: number,
+  wMm: number, dMm: number,
+  grid: Float32Array, G: number,
+  minE: number, elevRange: number, baseH: number, elevScaleMm: number,
+  yLift: number,
+): number {
+  const u = Math.max(0, Math.min(1, x / wMm + 0.5));
+  const v = Math.max(0, Math.min(1, 0.5 - z / dMm));
+  const gx = u * (G - 1), gv = (1 - v) * (G - 1);
+  const gi = Math.min(G - 2, Math.floor(gx)), gj = Math.min(G - 2, Math.floor(gv));
+  const fx = gx - gi, fy = gv - gj;
+  const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
+          + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
+  return baseH + ((e - minE) / elevRange) * elevScaleMm + yLift;
+}
+
 function buildGpxLine(
   pts: LatLon[], bounds: LatLonBounds,
   wMm: number, dMm: number,
   grid: Float32Array, G: number,
   minE: number, elevRange: number, baseH: number, elevScaleMm: number,
 ): THREE.Object3D | null {
-  const verts: THREE.Vector3[] = [];
+  const yLift = 0.08 + gpxLineHeightOffset * 0.2;
+  const rawVerts: THREE.Vector3[] = [];
   for (const pt of pts) {
-    // Clamp to bounds instead of skipping — avoids gaps when GPX extends slightly outside
     const u = Math.max(0.0005, Math.min(0.9995, (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)));
     const v = Math.max(0.0005, Math.min(0.9995, (pt.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)));
     const x = (u - 0.5) * wMm, z = (0.5 - v) * dMm;
-    const gx = u*(G-1), gv = (1-v)*(G-1);
-    const gi = Math.min(G-2, Math.floor(gx)), gj = Math.min(G-2, Math.floor(gv));
-    const fx = gx-gi, fy = gv-gj;
-    const e = grid[gj*G+gi]*(1-fx)*(1-fy) + grid[gj*G+gi+1]*fx*(1-fy)
-            + grid[(gj+1)*G+gi]*(1-fx)*fy   + grid[(gj+1)*G+gi+1]*fx*fy;
-    const yLift = gpxLineHeightOffset * 0.2;
-    const newPt = new THREE.Vector3(x, baseH + ((e - minE) / elevRange) * elevScaleMm + yLift, z);
-    // Deduplicate very close points — prevents degenerate CatmullRomCurve3 tangents
-    if (verts.length > 0 && newPt.distanceTo(verts[verts.length - 1]) < 0.08) continue;
-    verts.push(newPt);
+    rawVerts.push(new THREE.Vector3(x, sampleTerrainY(x, z, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm, yLift), z));
+  }
+  if (rawVerts.length < 2) return null;
+
+  // Densify: add intermediate terrain-sampled points every ~1mm to hug contours
+  const DENSIFY_MM = 1.0;
+  const verts: THREE.Vector3[] = [rawVerts[0]];
+  for (let i = 0; i < rawVerts.length - 1; i++) {
+    const a = rawVerts[i], b = rawVerts[i + 1];
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const steps = Math.max(1, Math.floor(dist / DENSIFY_MM));
+    for (let j = 1; j <= steps; j++) {
+      const t = j / steps;
+      const mx = a.x + dx * t, mz = a.z + dz * t;
+      const my = sampleTerrainY(mx, mz, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm, yLift);
+      const np = new THREE.Vector3(mx, my, mz);
+      if (np.distanceTo(verts[verts.length - 1]) >= 0.08) verts.push(np);
+    }
   }
   if (verts.length < 2) return null;
 
