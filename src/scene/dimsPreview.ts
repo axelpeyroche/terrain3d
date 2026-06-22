@@ -103,9 +103,17 @@ export const layerLCHeightOffset: Record<string, number> = {
 
 // Buildings state
 export let buildingFloorHeightMm = 0.20;
+export let buildingHeightScale   = 1.0;
+export let buildingSizeScale     = 1.0;
+export let buildingMinHeightMm   = 0.60;
+export let buildingMinSizeM2     = 1.0;
 let cachedBuildings: OSMEl[] = [];
 let cachedBuildingsKey = '';
-export function setBuildingFloorHeight(h: number): void { buildingFloorHeightMm = h; }
+export function setBuildingFloorHeight(h: number): void   { buildingFloorHeightMm = h; }
+export function setBuildingHeightScale(v: number): void   { buildingHeightScale = v; }
+export function setBuildingSizeScale(v: number): void     { buildingSizeScale = v; }
+export function setBuildingMinHeight(v: number): void     { buildingMinHeightMm = v; }
+export function setBuildingMinSize(v: number): void       { buildingMinSizeM2 = v; }
 export function setLCFeatureEnabled(layerId: string, key: string, enabled: boolean): void {
   if (!layerLCFeatures[layerId]) return;
   layerLCFeatures[layerId][key] = enabled;
@@ -735,30 +743,41 @@ function buildBuildingMeshes(
   const mat = new THREE.MeshLambertMaterial({ color });
   const meshes: THREE.Mesh[] = [];
 
+  const cLat = (minLat + maxLat) / 2;
+  const lonScale = Math.cos(cLat * Math.PI / 180);
+
   for (const el of buildings) {
     const polys = getOsmPolygons(el);
     if (!polys.length) continue;
     const outer = polys[0];
     if (outer.length < 3) continue;
 
+    // Filter by real-world footprint area
+    if (buildingMinSizeM2 > 0 && computeFeatureAreaM2(el, lonScale) < buildingMinSizeM2) continue;
+
     const levels = parseFloat(el.tags?.['building:levels'] ?? '2') || 2;
-    const heightMm = levels * buildingFloorHeightMm;
+    const heightMm = Math.max(buildingMinHeightMm, levels * buildingFloorHeightMm * buildingHeightScale);
+
+    // Centroid in geo coords for elevation sampling
+    let sumLon = 0, sumLat = 0;
+    for (const p of outer) { sumLon += p.lon; sumLat += p.lat; }
+    const cLonFrac = (sumLon / outer.length - minLon) / (maxLon - minLon);
+    const cLatFrac = (sumLat / outer.length - minLat) / (maxLat - minLat);
+
+    // Centroid in model coords (for size scaling)
+    const cSx = cLonFrac * wMm - wMm / 2;
+    const cSy = cLatFrac * dMm - dMm / 2;
 
     const shape = new THREE.Shape();
     for (let i = 0; i < outer.length; i++) {
       const lonFrac = (outer[i].lon - minLon) / (maxLon - minLon);
       const latFrac = (outer[i].lat - minLat) / (maxLat - minLat);
-      const sx = lonFrac * wMm - wMm / 2;
-      const sy = latFrac * dMm - dMm / 2;
+      const sx = cSx + (lonFrac * wMm - wMm / 2 - cSx) * buildingSizeScale;
+      const sy = cSy + (latFrac * dMm - dMm / 2 - cSy) * buildingSizeScale;
       if (i === 0) shape.moveTo(sx, sy); else shape.lineTo(sx, sy);
     }
     shape.closePath();
 
-    // Sample elevation at footprint centroid
-    let sumLon = 0, sumLat = 0;
-    for (const p of outer) { sumLon += p.lon; sumLat += p.lat; }
-    const cLonFrac = (sumLon / outer.length - minLon) / (maxLon - minLon);
-    const cLatFrac = (sumLat / outer.length - minLat) / (maxLat - minLat);
     const elev = sampleElev(grid, G, cLonFrac, 1 - cLatFrac);
     const yBase = baseH + ((elev - minE) / elevRange) * elevScaleMm;
 
