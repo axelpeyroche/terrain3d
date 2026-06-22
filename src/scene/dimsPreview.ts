@@ -379,7 +379,7 @@ export function setLayerVisible(id: string, visible: boolean): void {
       cachedTexture = buildMapTexture(
         cachedElev.bounds, cachedElev.grid, PREVIEW_GRID,
         cachedElev.minE, cachedElev.elevRange, cachedFeatures,
-        lastW, lastD, lastElevScale,
+        lastW, lastD, lastElevScale, cachedRoads, cachedBuildings,
       );
       if (terrainMeshRef) {
         const mat = terrainMeshRef.material as THREE.MeshLambertMaterial;
@@ -766,10 +766,14 @@ export function rebuildScene(s: DimSettings): void {
 
   // ── Camera ────────────────────────────────────────────
   const diag = Math.sqrt(wMm * wMm + dMm * dMm);
-  if (controls.target.lengthSq() < 0.1) {
-    camera!.position.set(wMm * 0.7, totalH + diag * 0.44, dMm * 0.92);
-    const tgt = new THREE.Vector3(0, totalH * 0.2, 0);
-    camera!.lookAt(tgt); controls!.target.copy(tgt); controls!.update();
+  {
+    // Always anchor rotation center to map center; reset camera on first load only
+    const tgt = new THREE.Vector3(0, totalH * 0.3, 0);
+    if (controls.target.lengthSq() < 0.1) {
+      camera!.position.set(wMm * 0.7, totalH + diag * 0.44, dMm * 0.92);
+      camera!.lookAt(tgt);
+    }
+    controls!.target.copy(tgt); controls!.update();
   }
 }
 
@@ -1484,7 +1488,7 @@ function buildMapTexture(
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const road of roads) {
       const baseW = roadRealWidthM(road.hwType) * scaleTexPerM * roadWidthMult;
-      const lw = Math.max(1.5, baseW);
+      const lw = Math.max(4, baseW);
       ctx.beginPath();
       let first = true;
       for (const p of road.geom) {

@@ -535,7 +535,7 @@ export function injectUI(): void {
               <div class="cp-sw-mini" data-slot="1" style="background:#c0af88">1</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="1,13 6,5 10,9 13,4 15,13"/></svg>
               <span class="cp-layer-name">Terrain nu</span>
-              <button class="cp-eye active" data-layer="terrain" title="Visibilité">
+              <button class="cp-eye active" data-layer="barren" title="Visibilité">
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="8" cy="8" rx="6" ry="4"/><circle cx="8" cy="8" r="2"/></svg>
               </button>
               <button class="cp-del" title="Supprimer">
