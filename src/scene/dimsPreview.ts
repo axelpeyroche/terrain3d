@@ -689,7 +689,7 @@ export function rebuildScene(s: DimSettings): void {
 
   // ── GPX ───────────────────────────────────────────────
   if (gpxPoints.length >= 2) {
-    const ln = buildGpxLine(gpxPoints, rb, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm);
+    const ln = buildGpxLine(gpxPoints, rb, wMm, dMm, workGrid, G, minE, elevRange, baseH, elevScaleMm);
     if (ln) {
       ln.visible = layerVisible['gpx_line'] ?? true;
       gpxLineMeshRef = ln;
@@ -1351,10 +1351,30 @@ function buildMapTexture(
   cv.width = cv.height = S;
   const ctx = cv.getContext('2d')!;
 
-  // Step 1 — base terrain color (slot 1)
-  const baseSlotCol = colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88';
-  ctx.fillStyle = baseSlotCol;
-  ctx.fillRect(0, 0, S, S);
+  // Step 1 — elevation-based base zones: low→veg_low, mid→veg_dense, high→barren
+  // Rendered at grid resolution then upscaled (fast, fills gap areas without OSM data)
+  {
+    const cVegL = hexToRgb(colorSlots[layerSlotOverrides['veg_low']  ?? 3] ?? '#8ab858');
+    const cVegD = hexToRgb(colorSlots[layerSlotOverrides['veg_dense'] ?? 4] ?? '#3a6828');
+    const cBase = hexToRgb(colorSlots[layerSlotOverrides['base']      ?? 1] ?? '#c0af88');
+    const snapCv = document.createElement('canvas');
+    snapCv.width = G; snapCv.height = G;
+    const snapCtx = snapCv.getContext('2d')!;
+    const snapId = snapCtx.createImageData(G, G);
+    const sd = snapId.data;
+    for (let gj = 0; gj < G; gj++) {
+      for (let gi = 0; gi < G; gi++) {
+        const t = Math.max(0, Math.min(1, (grid[gj * G + gi] - minE) / (elevRange || 1)));
+        const rgb = t < 0.4 ? lerp3(cVegL, cVegD, t / 0.4)
+                  : t < 0.65 ? lerp3(cVegD, cBase, (t - 0.4) / 0.25)
+                  : cBase;
+        const pi = (gj * G + gi) * 4;
+        sd[pi] = rgb[0]; sd[pi + 1] = rgb[1]; sd[pi + 2] = rgb[2]; sd[pi + 3] = 255;
+      }
+    }
+    snapCtx.putImageData(snapId, 0, 0);
+    ctx.drawImage(snapCv, 0, 0, S, S);
+  }
 
   // Step 2 — draw all OSM zone fills + waterway lines in layer order
   const filterSlider = document.getElementById('cp-filter') as HTMLInputElement | null;
@@ -2022,7 +2042,8 @@ function buildGpxLine(
   grid: Float32Array, G: number,
   minE: number, elevRange: number, baseH: number, elevScaleMm: number,
 ): THREE.Object3D | null {
-  const yLift = 0.08 + gpxLineHeightOffset * 0.2;
+  const tubRadiusEarly = gpxLineThickness * 0.21;
+  const yLift = tubRadiusEarly + 0.05 + gpxLineHeightOffset * 0.2;
   const rawVerts: THREE.Vector3[] = [];
   for (const pt of pts) {
     const u = Math.max(0.0005, Math.min(0.9995, (pt.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)));
@@ -2055,12 +2076,16 @@ function buildGpxLine(
   const tubRadius = gpxLineThickness * 0.21;
 
   if (tubRadius >= 0.1) {
-    // Use arc-length spaced points to ensure uniform tube width throughout the path
     const rawCurve = new THREE.CatmullRomCurve3(verts, false, 'centripetal');
     const numUniform = Math.min(2000, Math.max(80, verts.length * 5));
     const uniformPts = rawCurve.getSpacedPoints(numUniform);
+    // Clamp Y: spline smoothing can dip below terrain between control points
+    for (const pt of uniformPts) {
+      const minY = sampleTerrainY(pt.x, pt.z, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm, yLift - tubRadius);
+      if (pt.y < minY) pt.y = minY;
+    }
     const geo = new THREE.TubeGeometry(
-      new THREE.CatmullRomCurve3(uniformPts, false, 'catmullrom'),
+      new THREE.CatmullRomCurve3(uniformPts, false, 'centripetal'),
       numUniform, tubRadius, 8, false,
     );
     return new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: col }));
