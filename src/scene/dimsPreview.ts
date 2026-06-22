@@ -584,6 +584,9 @@ export function rebuildScene(s: DimSettings): void {
   buildingMeshRefs = [];
   roadMeshGroup = null;
 
+  // Set scene dims early so rebuildRoadMeshes / rebuildLineMeshes can use them
+  lastW = wMm; lastD = dMm; lastBaseH = baseH; lastElevScale = elevScaleMm;
+
   // Apply water height offset + hydro-flatten to the elevation grid
   const layH = 0.20;
   const workGrid = applyWaterToGrid(grid, G, rb, cachedFeatures, elevRange, elevScaleMm, layH);
