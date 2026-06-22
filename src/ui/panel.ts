@@ -22,8 +22,12 @@ export function injectUI(): void {
       <span class="tab-num">3</span>
       <span class="tab-lbl">Couleurs</span>
     </button>
-    <button class="tab-btn" data-tab="render" id="tab-render-btn" disabled>
+    <button class="tab-btn" data-tab="apercu" id="tab-apercu-btn" disabled>
       <span class="tab-num">4</span>
+      <span class="tab-lbl">Aperçu</span>
+    </button>
+    <button class="tab-btn" data-tab="render" id="tab-render-btn" disabled>
+      <span class="tab-num">5</span>
       <span class="tab-lbl">Générer &amp; Exporter</span>
     </button>
   </nav>
@@ -574,8 +578,8 @@ export function injectUI(): void {
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>
           Dimensions
         </button>
-        <button class="btn-next" id="btn-next-render">
-          Générer
+        <button class="btn-next" id="btn-next-apercu">
+          Aperçu
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
         </button>
       </div>
@@ -603,6 +607,28 @@ export function injectUI(): void {
       </div>
 
     </div><!-- /#colors-wrap -->
+  </section>
+
+  <!-- ── ONGLET 4 : APERÇU ─────────────────────────── -->
+  <section id="panel-apercu" class="panel">
+    <div id="apercu-wrap">
+      <div id="apercu-3d-area">
+        <div id="apercu-loading" class="hidden">
+          <div class="dims-spin"></div>
+          <span>Chargement…</span>
+        </div>
+      </div>
+      <div class="apercu-nav">
+        <button class="btn-back" id="btn-back-colors">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>
+          Couleurs
+        </button>
+        <button class="btn-next" id="btn-next-render">
+          Générer
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
+        </button>
+      </div>
+    </div>
   </section>
 
   <!-- ── DIALOGUE PARAMÈTRES D'IMPRESSION ──────────── -->

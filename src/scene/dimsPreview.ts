@@ -59,6 +59,7 @@ interface MarkerData {
 const placedMarkersData: MarkerData[] = [];
 let markerMeshRefs: THREE.Object3D[] = [];
 let buildingMeshRefs: THREE.Mesh[] = [];
+let zoneMeshRefs: THREE.Mesh[] = [];
 const markerMeshToId = new Map<THREE.Object3D, number>();
 let selectedMarkerId = -1;
 
@@ -323,6 +324,14 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
     const mat = (child as THREE.Mesh).material as THREE.MeshLambertMaterial;
     if (mat?.color) mat.color.set(roadCol);
   });
+  // Update zone fill mesh colors
+  for (const m of zoneMeshRefs) {
+    const lid = (m as any).__zoneLayerId as string;
+    const layer = ZONE_LAYERS.find(l => l.id === lid);
+    if (!layer) continue;
+    const slot = layerSlotOverrides[lid] ?? layer.slot;
+    (m.material as THREE.MeshLambertMaterial).color.set(colorSlots[slot] ?? '#888');
+  }
 }
 
 /** Assign a layer to a different color slot and immediately refresh the 3D preview */
@@ -342,8 +351,21 @@ export function setLayerVisible(id: string, visible: boolean): void {
     for (const m of buildingMeshRefs) m.visible = visible;
   } else if (id === 'roads') {
     if (roadMeshGroup) roadMeshGroup.visible = visible;
+  } else if (ZONE_LAYERS.find(l => l.id === id && l.fill)) {
+    for (const m of zoneMeshRefs) {
+      if ((m as any).__zoneLayerId === id) m.visible = visible;
+    }
   } else {
-    updateColorSlots({});
+    // waterway lines — still in texture
+    if (cachedElev) {
+      if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+      cachedTexture = buildMapTexture(cachedElev.bounds, cachedElev.grid, PREVIEW_GRID, cachedElev.minE, cachedElev.elevRange, cachedFeatures);
+      if (terrainMeshRef) {
+        const mat = terrainMeshRef.material as THREE.MeshLambertMaterial;
+        mat.map = cachedTexture;
+        mat.needsUpdate = true;
+      }
+    }
   }
 }
 
@@ -600,6 +622,7 @@ export function rebuildScene(s: DimSettings): void {
   lineMeshGroup = null;
   markerMeshRefs = [];
   buildingMeshRefs = [];
+  zoneMeshRefs = [];
   roadMeshGroup = null;
 
   // Set scene dims early so rebuildRoadMeshes / rebuildLineMeshes can use them
@@ -626,6 +649,12 @@ export function rebuildScene(s: DimSettings): void {
     }));
     terrainMeshRef = tm;
     add(tm);
+  }
+
+  // ── Zone fills (géométrie 3D pour bords nets) ─────────
+  for (const m of buildZoneMeshes(cachedFeatures, rb, grid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm)) {
+    zoneMeshRefs.push(m);
+    add(m);
   }
 
   // ── Base ──────────────────────────────────────────────
@@ -1010,7 +1039,7 @@ export function rebuildRoadMeshes(): void {
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
   });
 
-  const heightOff = roadStyle === 'raised' ? roadHeightMm : -roadHeightMm;
+  const heightOff = (roadStyle === 'raised' ? roadHeightMm : -roadHeightMm) + 0.05;
   const group = new THREE.Group();
 
   for (const road of cachedRoads) {
@@ -1200,6 +1229,104 @@ function computeFeatureAreaM2(el: OSMEl, lonScale: number): number {
   return 0;
 }
 
+function buildZoneMeshes(
+  features: OSMEl[],
+  bounds: LatLonBounds,
+  grid: Float32Array, G: number,
+  minE: number, elevRange: number,
+  wMm: number, dMm: number,
+  baseH: number, elevScaleMm: number,
+): THREE.Mesh[] {
+  const { minLat, maxLat, minLon, maxLon } = bounds;
+  const OFFSET_MM = 0.03;
+  const DENSIFY_MM = 6;
+
+  const terrainY = (mx: number, mz: number): number => {
+    const u = Math.max(0, Math.min(1, mx / wMm + 0.5));
+    const vv = Math.max(0, Math.min(1, 0.5 - mz / dMm));
+    const e = sampleElev(grid, G, u, 1 - vv);
+    return baseH + ((e - minE) / elevRange) * elevScaleMm + OFFSET_MM;
+  };
+
+  const geoToV2 = (geom: GeoPoint[]): THREE.Vector2[] => {
+    const raw: [number, number][] = geom.map(p => {
+      const u = (p.lon - minLon) / (maxLon - minLon);
+      const v = (p.lat - minLat) / (maxLat - minLat);
+      return [(u - 0.5) * wMm, (0.5 - v) * dMm];
+    });
+    // Densify edges so interior triangles follow terrain
+    const out: [number, number][] = [raw[0]];
+    for (let i = 1; i < raw.length; i++) {
+      const [ax, az] = raw[i - 1], [bx, bz] = raw[i];
+      const len = Math.sqrt((bx - ax) ** 2 + (bz - az) ** 2);
+      const n = Math.max(1, Math.round(len / DENSIFY_MM));
+      for (let s = 1; s <= n; s++) {
+        const t = s / n;
+        out.push([ax + (bx - ax) * t, az + (bz - az) * t]);
+      }
+    }
+    return out.map(([x, z]) => new THREE.Vector2(x, z));
+  };
+
+  const filterSlider = document.getElementById('cp-filter') as HTMLInputElement | null;
+  const filterVal = filterSlider ? Number(filterSlider.value) : 100;
+  const lonScale = Math.cos((bounds.minLat + bounds.maxLat) / 2 * Math.PI / 180);
+  const boundsAreaM2 = (bounds.maxLon - bounds.minLon) * lonScale * 111320
+                     * (bounds.maxLat - bounds.minLat) * 111320;
+  const minAreaM2 = Math.pow(1 - filterVal / 100, 2) * 0.02 * boundsAreaM2;
+
+  const meshes: THREE.Mesh[] = [];
+
+  for (const layer of ZONE_LAYERS) {
+    if (!layer.fill) continue;
+
+    const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
+    const col = new THREE.Color(colorSlots[effectiveSlot] ?? '#888');
+    const mat = new THREE.MeshLambertMaterial({
+      color: col,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    });
+
+    const layerEls = features.filter(el => {
+      if (!el.tags || !layer.match(el.tags)) return false;
+      if (minAreaM2 <= 0) return true;
+      return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
+    });
+
+    for (const el of layerEls) {
+      try {
+        const outerRings = getOsmPolygons(el);
+        const innerGeoms = el.type === 'relation' && el.members
+          ? el.members.filter(m => m.role === 'inner' && m.geometry).map(m => m.geometry!)
+          : [];
+
+        for (const outer of outerRings) {
+          if (outer.length < 3) continue;
+          const shape = new THREE.Shape(geoToV2(outer));
+          for (const inner of innerGeoms) {
+            if (inner.length >= 3) shape.holes.push(new THREE.Path(geoToV2(inner)));
+          }
+          const geo = new THREE.ShapeGeometry(shape);
+          // Remap ShapeGeometry XY → model XZ with terrain Y
+          const pos = geo.attributes.position as THREE.BufferAttribute;
+          for (let i = 0; i < pos.count; i++) {
+            const mx = pos.getX(i);
+            const mz = pos.getY(i); // ShapeGeometry Y = model Z axis
+            pos.setXYZ(i, mx, terrainY(mx, mz), mz);
+          }
+          pos.needsUpdate = true;
+          geo.computeVertexNormals();
+          const mesh = new THREE.Mesh(geo, mat);
+          (mesh as any).__zoneLayerId = layer.id;
+          mesh.visible = layerVisible[layer.id] ?? true;
+          meshes.push(mesh);
+        }
+      } catch { /* skip malformed features */ }
+    }
+  }
+  return meshes;
+}
+
 function buildMapTexture(
   bounds: LatLonBounds,
   grid: Float32Array, G: number,
@@ -1241,11 +1368,11 @@ function buildMapTexture(
   const minAreaM2 = Math.pow(1 - filterVal / 100, 2) * 0.02 * boundsAreaM2;
 
   for (const layer of ZONE_LAYERS) {
+    if (layer.fill) continue; // fills rendered as 3D geometry (buildZoneMeshes)
     if (!layerVisible[layer.id]) continue;
     const layerEls = features.filter(el => {
       if (!el.tags || !layer.match(el.tags)) return false;
-      if (!layer.fill || minAreaM2 <= 0) return true; // don't filter lines by area
-      return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
+      return true;
     });
     if (!layerEls.length) continue;
 

@@ -305,6 +305,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     switchTab(tab);
     if (tab === 'params') onDimsTabOpen();
     else if (tab === 'colors') onColorsTabOpen();
+    else if (tab === 'apercu') onAperçuTabOpen();
     else detachDimsCanvas(); // zone or render tab — hide the 3D preview canvas
     if (tab === 'render') {
       const canvas = document.getElementById('c3d') as HTMLCanvasElement;
@@ -320,7 +321,14 @@ document.getElementById('btn-next-colors')?.addEventListener('click', () => {
   onColorsTabOpen();
 });
 
-/* ── Bouton "Générer" (onglet 3 → 4) ── */
+/* ── Bouton "Aperçu" (onglet 3 → 4) ── */
+document.getElementById('btn-next-apercu')?.addEventListener('click', () => {
+  document.getElementById('tab-apercu-btn')?.removeAttribute('disabled');
+  switchTab('apercu');
+  onAperçuTabOpen();
+});
+
+/* ── Bouton "Générer" (onglet 4 → 5) ── */
 document.getElementById('btn-next-render')?.addEventListener('click', () => {
   document.getElementById('tab-render-btn')?.removeAttribute('disabled');
   switchTab('render');
@@ -333,6 +341,7 @@ document.getElementById('btn-next-render')?.addEventListener('click', () => {
 document.getElementById('btn-back-zone')?.addEventListener('click', () => { detachDimsCanvas(); switchTab('zone'); });
 document.getElementById('btn-back-dims')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
 document.getElementById('btn-back-params')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
+document.getElementById('btn-back-colors')?.addEventListener('click', () => { switchTab('colors'); onColorsTabOpen(); });
 
 /* ── Generate (onglet 3 manuel) ── */
 document.getElementById('btn-gen')?.addEventListener('click', generate);
@@ -417,6 +426,22 @@ function onColorsTabOpen(): void {
       rebuildScene(getDimSettings());
     }
     syncSwatchUI();
+  });
+}
+
+function onAperçuTabOpen(): void {
+  if (!state.bounds) return;
+  syncDimsInputsFromState();
+  requestAnimationFrame(() => {
+    const area = document.getElementById('apercu-3d-area')!;
+    if (!dimsRendererReady) {
+      dimsRendererReady = true;
+      initDimsRenderer(area);
+      triggerDimsBuild();
+    } else {
+      initDimsRenderer(area);
+      rebuildScene(getDimSettings());
+    }
   });
 }
 
