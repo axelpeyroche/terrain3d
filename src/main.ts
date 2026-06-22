@@ -710,7 +710,7 @@ function buildRoadsHTML(): string {
     <div class="ldp-row">
       <label class="ldp-label">Road Height</label>
       <div class="ldp-row-right">
-        <input type="number" id="ldp-road-h" min="0.1" max="20" step="0.05" value="${roadHeightMm.toFixed(2)}" style="width:72px">
+        <input type="number" id="ldp-road-h" min="0" max="20" step="0.05" value="${roadHeightMm.toFixed(2)}" style="width:72px">
         <span style="margin-left:4px">mm</span>
       </div>
     </div>

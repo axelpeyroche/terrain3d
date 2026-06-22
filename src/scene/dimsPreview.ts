@@ -18,6 +18,7 @@ let cachedMask: THREE.CanvasTexture | null = null;
 let cachedZoneKey = '';
 let cachedFeatures: OSMEl[] = [];
 let cachedFeaturesKey = '';
+let cachedRoadsKey = '';
 
 // Color slots 1-7 (Bambu-style filament colors)
 export const colorSlots: Record<number, string> = {
@@ -119,7 +120,7 @@ export function setBuildingMinHeight(v: number): void     { buildingMinHeightMm 
 export function setBuildingMinSize(v: number): void       { buildingMinSizeM2 = v; }
 
 // Roads state
-export let roadHeightMm    = 0.8;
+export let roadHeightMm    = 0.0;
 export let roadMinWidthMm  = 0.5;
 export let roadWidthMult   = 1.0;
 export let roadStyle: 'raised' | 'recessed' = 'raised';
@@ -155,7 +156,7 @@ let dimsResizeObs: ResizeObserver | null = null;
 let dimsWantsVisible = false; // true when a 3D tab is active and canvas should be shown
 
 const PREVIEW_GRID = 256;
-const TEX_SIZE = 2048; // high-res for precise zone boundaries
+const TEX_SIZE = 3072; // high-res for precise zone boundaries
 
 interface OSMEl {
   type: 'way' | 'relation' | string;
@@ -231,6 +232,7 @@ export function initDimsRenderer(viewEl: HTMLElement): void {
   renderer = new THREE.WebGLRenderer({ canvas: dimsCanvas!, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(W, H, false);
+  renderer.localClippingEnabled = true;
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x080c14);
@@ -494,29 +496,51 @@ export async function buildDimsPreview(
     cachedElev = await loadElevation(bounds);
   }
 
-  // Feature fetch is independent of elevation cache: retry until we get real data
-  if (key !== cachedFeaturesKey) {
-    onProgress(35, 'Chargement des données géographiques…');
-    const features = await fetchTerrainFeatures(bounds);
-    if (features.length > 0) {
-      cachedFeaturesKey = key;
-      cachedFeatures = features;
-      // Extract road data from terrain features (highway ways are included in the query)
-      cachedRoads = features
-        .filter(el => el.type === 'way' && el.tags?.highway && (el.geometry?.length ?? 0) >= 2)
-        .map(el => ({ hwType: el.tags!.highway!, geom: el.geometry! }));
-      // Invalidate texture so it gets rebuilt with real zone colors
-      if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+  // Fetch terrain features, buildings, and highways independently so each can fail
+  // without blocking the others. Terrain + buildings run in parallel; highways after.
+  const fetchNeeds = {
+    features: key !== cachedFeaturesKey,
+    buildings: key !== cachedBuildingsKey,
+    roads:     key !== cachedRoadsKey,
+  };
+
+  if (fetchNeeds.features || fetchNeeds.buildings) {
+    onProgress(30, 'Chargement des données géographiques…');
+    const tasks: Promise<void>[] = [];
+
+    if (fetchNeeds.features) {
+      tasks.push(
+        fetchTerrainFeatures(bounds).then(features => {
+          if (features.length > 0) {
+            cachedFeaturesKey = key;
+            cachedFeatures = features;
+            if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
+          }
+        }),
+      );
     }
+
+    if (fetchNeeds.buildings) {
+      tasks.push(
+        fetchBuildingFeatures(bounds).then(buildings => {
+          if (buildings.length > 0 || cachedBuildingsKey === '') {
+            cachedBuildingsKey = key;
+            cachedBuildings = buildings;
+          }
+        }),
+      );
+    }
+
+    await Promise.all(tasks);
   }
 
-  if (key !== cachedBuildingsKey) {
-    onProgress(55, 'Chargement des bâtiments…');
-    const buildings = await fetchBuildingFeatures(bounds);
-    if (buildings.length > 0 || cachedBuildingsKey === '') {
-      cachedBuildingsKey = key;
-      cachedBuildings = buildings;
-    }
+  if (fetchNeeds.roads) {
+    onProgress(60, 'Chargement des routes…');
+    const highways = await fetchHighwayFeatures(bounds);
+    cachedRoadsKey = key;
+    cachedRoads = highways
+      .filter(el => el.type === 'way' && el.tags?.highway && (el.geometry?.length ?? 0) >= 2)
+      .map(el => ({ hwType: el.tags!.highway!, geom: el.geometry! }));
   }
 
   if (!cachedTexture && cachedElev) {
@@ -672,7 +696,7 @@ export function rebuildScene(s: DimSettings): void {
   rebuildLineMeshes();
 
   // ── Roads ────────────────────────────────────────────
-  rebuildRoadMeshes();
+  try { rebuildRoadMeshes(); } catch (e) { console.warn('rebuildRoadMeshes failed:', e); }
 
   // ── Buildings ─────────────────────────────────────────
   if (cachedBuildings.length > 0) {
@@ -733,12 +757,11 @@ async function fetchTerrainFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
   way["natural"="sand"]${bb};
   way["natural"="wetland"]${bb};
   way["natural"="mud"]${bb};
-  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
 );
 out geom;`;
 
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 40000);
+  const t = setTimeout(() => ctrl.abort(), 30000);
   try {
     const res = await fetch(
       `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
@@ -780,6 +803,30 @@ out geom;`;
   }
 }
 
+async function fetchHighwayFeatures(bounds: LatLonBounds): Promise<OSMEl[]> {
+  const { minLat, minLon, maxLat, maxLon } = bounds;
+  const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
+  const query = `[out:json][timeout:35];
+(
+  way["highway"~"^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street)$"]${bb};
+);
+out geom;`;
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const res = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    return ((await res.json()).elements ?? []) as OSMEl[];
+  } catch {
+    clearTimeout(t);
+    return [];
+  }
+}
+
 function buildBuildingMeshes(
   buildings: OSMEl[],
   bounds: LatLonBounds,
@@ -790,7 +837,13 @@ function buildBuildingMeshes(
 ): THREE.Mesh[] {
   const { minLat, maxLat, minLon, maxLon } = bounds;
   const color = new THREE.Color(colorSlots[7] ?? '#888888');
-  const mat = new THREE.MeshLambertMaterial({ color });
+  const clippingPlanes = [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), wMm / 2),
+    new THREE.Plane(new THREE.Vector3(1, 0, 0), wMm / 2),
+    new THREE.Plane(new THREE.Vector3(0, 0, -1), dMm / 2),
+    new THREE.Plane(new THREE.Vector3(0, 0, 1), dMm / 2),
+  ];
+  const mat = new THREE.MeshLambertMaterial({ color, clippingPlanes });
   const meshes: THREE.Mesh[] = [];
 
   const cLat = (minLat + maxLat) / 2;
@@ -865,18 +918,41 @@ function buildRoadRibbon(
   wMm: number, dMm: number, baseH: number, elevScaleMm: number,
 ): THREE.BufferGeometry | null {
   const { minLat, maxLat, minLon, maxLon } = bounds;
-  const pts: THREE.Vector3[] = [];
+
+  // Sample terrain Y at a model-space (x, z) point
+  const terrainY = (x: number, z: number): number => {
+    const u = Math.max(0, Math.min(1, x / wMm + 0.5));
+    const vv = Math.max(0, Math.min(1, 0.5 - z / dMm));
+    const e = sampleElev(grid, G, u, 1 - vv);
+    return baseH + ((e - minE) / elevRange) * elevScaleMm + heightOff;
+  };
+
+  // Build anchor points from OSM nodes
+  const anchors: THREE.Vector3[] = [];
   for (const p of geom) {
     const u = (p.lon - minLon) / (maxLon - minLon);
     const v = (p.lat - minLat) / (maxLat - minLat);
     if (u < -0.02 || u > 1.02 || v < -0.02 || v > 1.02) continue;
     const x = (u - 0.5) * wMm;
     const z = (0.5 - v) * dMm;
-    const e = sampleElev(grid, G, u, 1 - v);
-    const y = baseH + ((e - minE) / elevRange) * elevScaleMm + heightOff;
-    pts.push(new THREE.Vector3(x, y, z));
+    anchors.push(new THREE.Vector3(x, terrainY(x, z), z));
   }
-  if (pts.length < 2) return null;
+  if (anchors.length < 2) return null;
+
+  // Densify: resample terrain elevation every STEP mm so the ribbon hugs the terrain
+  const STEP = 1.5;
+  const pts: THREE.Vector3[] = [anchors[0]];
+  for (let i = 1; i < anchors.length; i++) {
+    const a = anchors[i - 1], b = anchors[i];
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const len = Math.sqrt(dx * dx + dz * dz);
+    const n = Math.max(1, Math.round(len / STEP));
+    for (let s = 1; s <= n; s++) {
+      const t = s / n;
+      const x = a.x + dx * t, z = a.z + dz * t;
+      pts.push(new THREE.Vector3(x, terrainY(x, z), z));
+    }
+  }
 
   const positions: number[] = [];
   const indices: number[] = [];
@@ -929,7 +1005,10 @@ export function rebuildRoadMeshes(): void {
 
   const bldSlot = layerSlotOverrides['roads'] ?? 8;
   const col = new THREE.Color(colorSlots[bldSlot] ?? '#262626');
-  const mat = new THREE.MeshLambertMaterial({ color: col, side: THREE.DoubleSide });
+  const mat = new THREE.MeshLambertMaterial({
+    color: col, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
+  });
 
   const heightOff = roadStyle === 'raised' ? roadHeightMm : -roadHeightMm;
   const group = new THREE.Group();
@@ -1195,7 +1274,9 @@ function buildMapTexture(
     }
   }
 
-  return new THREE.CanvasTexture(cv);
+  const tex = new THREE.CanvasTexture(cv);
+  if (renderer) tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
 }
 
 /** Trace element geometry into the current canvas path (supports ways + relations) */
