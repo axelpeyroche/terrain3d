@@ -20,6 +20,7 @@ let cachedFeatures: OSMEl[] = [];
 let cachedFeaturesKey = '';
 let cachedRoadsKey = '';
 let lastZonePoly: Array<[number, number]> | null = null;
+let lastWorkGrid: Float32Array | null = null;
 
 // Color slots 1-7 (Bambu-style filament colors)
 export const colorSlots: Record<number, string> = {
@@ -641,6 +642,7 @@ export function rebuildScene(s: DimSettings): void {
   // Apply water height offset + hydro-flatten to the elevation grid
   const layH = 0.20;
   const workGrid = applyWaterToGrid(grid, G, rb, cachedFeatures, elevRange, elevScaleMm, layH);
+  lastWorkGrid = workGrid;
 
   // ── Terrain ───────────────────────────────────────────
   {
@@ -956,7 +958,7 @@ function buildRoadRibbon(
     return baseH + ((e - minE) / elevRange) * elevScaleMm + heightOff;
   };
 
-  // Build anchor points from OSM nodes
+  // Build anchor points from OSM nodes — skip points outside zone polygon
   const anchors: THREE.Vector3[] = [];
   for (const p of geom) {
     const u = (p.lon - minLon) / (maxLon - minLon);
@@ -964,6 +966,7 @@ function buildRoadRibbon(
     if (u < -0.02 || u > 1.02 || v < -0.02 || v > 1.02) continue;
     const x = (u - 0.5) * wMm;
     const z = (0.5 - v) * dMm;
+    if (lastZonePoly && !pointInZone(x, z, lastZonePoly)) continue;
     anchors.push(new THREE.Vector3(x, terrainY(x, z), z));
   }
   if (anchors.length < 2) return null;
@@ -1024,7 +1027,8 @@ export function rebuildRoadMeshes(): void {
   }
   if (!cachedElev || !scene || !cachedRoads.length) return;
 
-  const { grid, minE, elevRange, bounds } = cachedElev;
+  const { minE, elevRange, bounds } = cachedElev;
+  const grid = lastWorkGrid ?? cachedElev.grid;
   const G = PREVIEW_GRID;
   const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
 
@@ -1039,7 +1043,7 @@ export function rebuildRoadMeshes(): void {
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
   });
 
-  const heightOff = (roadStyle === 'raised' ? roadHeightMm : -roadHeightMm) + 0.20;
+  const heightOff = (roadStyle === 'raised' ? roadHeightMm : -roadHeightMm);
   const group = new THREE.Group();
 
   for (const road of cachedRoads) {
