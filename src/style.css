@@ -861,7 +861,7 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
 .ldp-line-group-chk { flex-shrink: 0; }
 
 /* ════ PANEL APERÇU (tab 4) ══════════════════ */
-#panel-apercu { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+/* display géré exclusivement par .panel / .panel.active — ne pas surcharger #panel-apercu ici */
 #apercu-wrap { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
 #apercu-3d-area { flex: 1; position: relative; background: #080c14; overflow: hidden; }
 #apercu-loading {
