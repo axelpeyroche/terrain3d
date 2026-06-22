@@ -385,7 +385,7 @@ export function injectUI(): void {
               <div class="cp-sw-inner"><span class="cp-sw-num">6</span></div>
             </label>
             <label class="cp-swatch" data-slot="7" title="Bâtiments">
-              <input type="color" class="cp-color-input" data-slot="7" value="#888888">
+              <input type="color" class="cp-color-input" data-slot="7" value="#b8b8b8">
               <div class="cp-sw-inner"><span class="cp-sw-num">7</span></div>
             </label>
           </div>
@@ -427,7 +427,7 @@ export function injectUI(): void {
 
             <div class="cp-layer cp-layer-nav" data-layer="buildings" data-type="buildings">
               <span class="cp-drag">⠿</span>
-              <div class="cp-sw-mini" data-slot="7" style="background:#888888; color:#fff">7</div>
+              <div class="cp-sw-mini" data-slot="7" style="background:#b8b8b8; color:#333">7</div>
               <svg class="cp-layer-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
                 <rect x="3" y="6" width="10" height="8" rx="0.5"/>
                 <polyline points="1,7 8,2 15,7"/>

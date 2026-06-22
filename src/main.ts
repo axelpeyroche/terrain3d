@@ -706,29 +706,29 @@ function buildBuildingsHTML(): string {
     <div class="ldp-row">
       <label class="ldp-label">Building height scale</label>
       <div class="ldp-row-right">
-        <input type="range" id="ldp-bld-hscale" min="0.1" max="5" step="0.05" value="${hScale}" style="width:100px">
-        <span id="ldp-bld-hscale-val">${hScale}x</span>
+        <input type="number" id="ldp-bld-hscale" min="0.1" max="20" step="0.05" value="${hScale}" style="width:72px">
+        <span style="margin-left:4px">x</span>
       </div>
     </div>
     <div class="ldp-row">
       <label class="ldp-label">Building size scale</label>
       <div class="ldp-row-right">
-        <input type="range" id="ldp-bld-szscale" min="0.1" max="5" step="0.05" value="${szScale}" style="width:100px">
-        <span id="ldp-bld-szscale-val">${szScale}x</span>
+        <input type="number" id="ldp-bld-szscale" min="0.1" max="20" step="0.05" value="${szScale}" style="width:72px">
+        <span style="margin-left:4px">x</span>
       </div>
     </div>
     <div class="ldp-row">
       <label class="ldp-label">Minimum building height</label>
       <div class="ldp-row-right">
-        <input type="range" id="ldp-bld-minh" min="0" max="5" step="0.05" value="${minH}" style="width:100px">
-        <span id="ldp-bld-minh-val">${minH} mm</span>
+        <input type="number" id="ldp-bld-minh" min="0" max="20" step="0.05" value="${minH}" style="width:72px">
+        <span style="margin-left:4px">mm</span>
       </div>
     </div>
     <div class="ldp-row">
       <label class="ldp-label">Hide buildings smaller than</label>
       <div class="ldp-row-right">
-        <input type="range" id="ldp-bld-minsz" min="0" max="100" step="0.5" value="${minSz}" style="width:100px">
-        <span id="ldp-bld-minsz-val">${minSz} m²</span>
+        <input type="number" id="ldp-bld-minsz" min="0" max="10000" step="0.5" value="${minSz}" style="width:72px">
+        <span style="margin-left:4px">m²</span>
       </div>
     </div>
   </div>`;

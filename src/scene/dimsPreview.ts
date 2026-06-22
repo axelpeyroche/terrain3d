@@ -27,7 +27,7 @@ export const colorSlots: Record<number, string> = {
   4: '#3a6828',  // Végétation dense
   5: '#4a88c0',  // Plans d'eau + Voies navigables
   6: '#ff4500',  // Marqueurs / GPX
-  7: '#888888',  // Bâtiments
+  7: '#b8b8b8',  // Bâtiments
 };
 
 // Layer visibility
@@ -55,6 +55,7 @@ interface MarkerData {
 }
 const placedMarkersData: MarkerData[] = [];
 let markerMeshRefs: THREE.Object3D[] = [];
+let buildingMeshRefs: THREE.Mesh[] = [];
 const markerMeshToId = new Map<THREE.Object3D, number>();
 let selectedMarkerId = -1;
 
@@ -293,6 +294,12 @@ export function updateColorSlots(slots: Partial<Record<number, string>>): void {
       if (mat?.color) mat.color.set(markerCol);
     });
   }
+  // Update building colors
+  const bldSlot = layerSlotOverrides['buildings'] ?? 7;
+  const bldCol = new THREE.Color(colorSlots[bldSlot] ?? '#b8b8b8');
+  for (const m of buildingMeshRefs) {
+    (m.material as THREE.MeshLambertMaterial).color.set(bldCol);
+  }
 }
 
 /** Assign a layer to a different color slot and immediately refresh the 3D preview */
@@ -308,6 +315,8 @@ export function setLayerVisible(id: string, visible: boolean): void {
     if (gpxLineMeshRef) gpxLineMeshRef.visible = visible;
   } else if (id === 'gpx') {
     for (const g of markerMeshRefs) g.visible = visible;
+  } else if (id === 'buildings') {
+    for (const m of buildingMeshRefs) m.visible = visible;
   } else {
     updateColorSlots({});
   }
@@ -539,6 +548,7 @@ export function rebuildScene(s: DimSettings): void {
   gpxLineMeshRef = null;
   lineMeshGroup = null;
   markerMeshRefs = [];
+  buildingMeshRefs = [];
 
   // Apply water height offset + hydro-flatten to the elevation grid
   const layH = 0.20;
@@ -631,10 +641,15 @@ export function rebuildScene(s: DimSettings): void {
   rebuildLineMeshes();
 
   // ── Buildings ─────────────────────────────────────────
-  if ((layerVisible['buildings'] ?? true) && cachedBuildings.length > 0) {
+  if (cachedBuildings.length > 0) {
+    const visible = layerVisible['buildings'] ?? true;
     for (const m of buildBuildingMeshes(
       cachedBuildings, rb, grid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
-    )) add(m);
+    )) {
+      m.visible = visible;
+      buildingMeshRefs.push(m);
+      add(m);
+    }
   }
 
   // ── Camera ────────────────────────────────────────────
