@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, buildPrintPreview, clearPrintPreview, isPrintPreviewActive, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -335,6 +335,32 @@ document.getElementById('btn-next-render')?.addEventListener('click', () => {
   const canvas = document.getElementById('c3d') as HTMLCanvasElement;
   if (canvas) ensureThree(canvas);
   generate();
+});
+
+/* ── Bouton "Aperçu impression 3D" (toggle voxel / lisse) ── */
+document.getElementById('btn-print-preview')?.addEventListener('click', async () => {
+  const btn     = document.getElementById('btn-print-preview') as HTMLButtonElement;
+  const loading = document.getElementById('apercu-print-loading')!;
+
+  if (isPrintPreviewActive()) {
+    clearPrintPreview();
+    btn.classList.remove('active');
+    btn.querySelector('span')!.textContent = 'Aperçu impression';
+  } else {
+    loading.classList.remove('hidden');
+    btn.disabled = true;
+
+    // Laisser le navigateur rendre le spinner avant de bloquer sur la génération
+    await new Promise<void>(r => setTimeout(r, 60));
+
+    const layerH = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20);
+    buildPrintPreview(layerH);
+
+    loading.classList.add('hidden');
+    btn.disabled = false;
+    btn.classList.add('active');
+    btn.querySelector('span')!.textContent = 'Aperçu lisse';
+  }
 });
 
 /* ── Boutons retour ── */
