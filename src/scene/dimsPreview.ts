@@ -1362,28 +1362,11 @@ function buildMapTexture(
   cv.width = cv.height = S;
   const ctx = cv.getContext('2d')!;
 
-  // Step 1 — elevation-based base zones: low→veg_low, mid→veg_dense, high→barren
-  // Rendered at grid resolution then upscaled (fast, fills gap areas without OSM data)
-  {
-    const cVegL = hexToRgb(colorSlots[layerSlotOverrides['veg_low']  ?? 3] ?? '#8ab858');
-    const cVegD = hexToRgb(colorSlots[layerSlotOverrides['veg_dense'] ?? 4] ?? '#3a6828');
-    const cBase = hexToRgb(colorSlots[layerSlotOverrides['base']      ?? 1] ?? '#c0af88');
-    const snapCv = document.createElement('canvas');
-    snapCv.width = G; snapCv.height = G;
-    const snapCtx = snapCv.getContext('2d')!;
-    const snapId = snapCtx.createImageData(G, G);
-    const sd = snapId.data;
-    for (let gj = 0; gj < G; gj++) {
-      for (let gi = 0; gi < G; gi++) {
-        const t = Math.max(0, Math.min(1, (grid[gj * G + gi] - minE) / (elevRange || 1)));
-        const rgb = t < 0.45 ? cVegL : t < 0.70 ? cVegD : cBase;
-        const pi = (gj * G + gi) * 4;
-        sd[pi] = rgb[0]; sd[pi + 1] = rgb[1]; sd[pi + 2] = rgb[2]; sd[pi + 3] = 255;
-      }
-    }
-    snapCtx.putImageData(snapId, 0, 0);
-    ctx.drawImage(snapCv, 0, 0, S, S);
-  }
+  // Step 1 — couleur de base neutre : terrain nu sur tout le canvas.
+  // Les zones OSM (Step 2) peindront leurs couleurs spécifiques par-dessus.
+  // Sans hillshade, mélanger élévation + zones OSM créait des conflits de couleurs.
+  ctx.fillStyle = colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88';
+  ctx.fillRect(0, 0, S, S);
 
   // Step 2 — draw all OSM zone fills + waterway lines in layer order
   const filterSlider = document.getElementById('cp-filter') as HTMLInputElement | null;
