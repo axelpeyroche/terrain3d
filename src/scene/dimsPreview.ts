@@ -2415,7 +2415,8 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
       // 3MF Z-up : x=sceneX, y=sceneZ, z=sceneY(hauteur)
       const x0 = cx - vW / 2, x1 = cx + vW / 2;
       const y0 = czv - vD / 2, y1 = czv + vD / 2;
-      const zBot = 0, zTop = baseH + h;
+      // Les colonnes de terrain commencent AU-DESSUS de la plaque de base
+      const zBot = baseH, zTop = baseH + h;
 
       // Face supérieure (+Z)
       quad(x0,y0,zTop, x1,y0,zTop, x1,y1,zTop, x0,y1,zTop);
@@ -2463,36 +2464,93 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
 
   if (!bySlot.size) { alert('Aucune donnée à exporter.'); return; }
 
-  interface Obj3 { id: number; name: string; col: string; vx: string; tr: string; }
+  interface Obj3 { id: number; slot: number; name: string; col: string; vx: string; tr: string; }
   const objects: Obj3[] = [];
   let oid = 1;
 
+  // Plaque de base : boîte plate couvrant toute l'empreinte, Z=0→baseH, slot 1
+  {
+    const x0 = -wMm / 2, x1 = wMm / 2, y0 = -dMm / 2, y1 = dMm / 2;
+    const bH = baseH;
+    let vx = '', tr = '', vc = 0;
+    function bq(ax: number, ay: number, az: number, bx: number, by: number, bz: number,
+                cx: number, cy: number, cz: number, dx: number, dy: number, dz: number) {
+      vx += `<vertex x="${ax.toFixed(3)}" y="${ay.toFixed(3)}" z="${az.toFixed(3)}"/>` +
+            `<vertex x="${bx.toFixed(3)}" y="${by.toFixed(3)}" z="${bz.toFixed(3)}"/>` +
+            `<vertex x="${cx.toFixed(3)}" y="${cy.toFixed(3)}" z="${cz.toFixed(3)}"/>` +
+            `<vertex x="${dx.toFixed(3)}" y="${dy.toFixed(3)}" z="${dz.toFixed(3)}"/>`;
+      tr += `<triangle v1="${vc}" v2="${vc+1}" v3="${vc+2}"/><triangle v1="${vc}" v2="${vc+2}" v3="${vc+3}"/>`;
+      vc += 4;
+    }
+    bq(x0,y0,bH, x1,y0,bH, x1,y1,bH, x0,y1,bH);  // top  +Z
+    bq(x0,y1,0,  x1,y1,0,  x1,y0,0,  x0,y0,0);    // bot  -Z
+    bq(x1,y0,0,  x1,y1,0,  x1,y1,bH, x1,y0,bH);   // +X
+    bq(x0,y1,0,  x0,y0,0,  x0,y0,bH, x0,y1,bH);   // -X
+    bq(x1,y1,0,  x0,y1,0,  x0,y1,bH, x1,y1,bH);   // +Y
+    bq(x0,y0,0,  x1,y0,0,  x1,y0,bH, x0,y0,bH);   // -Y
+    const baseSlot = layerSlotOverrides['base'] ?? 1;
+    const baseCol = (colorSlots[baseSlot] ?? '#c0af88').replace('#', '');
+    objects.push({ id: oid++, slot: baseSlot, name: 'base_plate', col: baseCol, vx, tr });
+  }
+
   for (const [slot, slotCells] of bySlot) {
     const { vx, tr } = buildSlotMesh(slot, slotCells);
-    if (tr) objects.push({ id: oid++, name: `terrain_s${slot}`, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
+    if (tr) objects.push({ id: oid++, slot, name: `terrain_s${slot}`, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
   }
 
   if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
 
+  // ── Assembly 3MF avec métadonnées Bambu Studio ──────────────────────────
+  // model_settings.config : assigne chaque objet à son slot filament (extruder N = slot N)
+  // Bambu Studio lit ce fichier pour colorier automatiquement chaque objet.
+  const config = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<config>',
+    ...objects.map(o =>
+      `  <object id="${o.id}" name="${o.name}">` +
+      `<metadata key="extruder" value="${o.slot}"/>` +
+      `</object>`
+    ),
+    '</config>',
+  ].join('\n');
+
   const matGroups  = objects.map(o => `<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`).join('\n');
   const resObjs    = objects.map(o => `<object id="${o.id}" type="model" pid="${o.id+1000}" pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
-  const buildItems = objects.map(o => `<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`).join('\n');
+  const buildItems = objects.map((o, i) => `<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1" identify_id="${i+1}"/>`).join('\n');
+
   const model = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
     '  <metadata name="Title">Terrain3D</metadata>',
+    '  <metadata name="Designer">Terrain3D App</metadata>',
     '  <resources>', matGroups, resObjs, '  </resources>',
     '  <build>', buildItems, '  </build>',
     '</model>',
   ].join('\n');
-  const rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>';
-  const ct   = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-3mfdocument"/></Types>';
+
+  const rels = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+    '  <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>',
+    '  <Relationship Target="/metadata/model_settings.config" Id="rel1" Type="http://schemas.bambulab.com/package/2021/bambu-model-settings"/>',
+    '</Relationships>',
+  ].join('\n');
+
+  const ct = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+    '  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+    '  <Default Extension="model" ContentType="application/vnd.ms-3mfdocument"/>',
+    '  <Override PartName="/metadata/model_settings.config" ContentType="application/xml"/>',
+    '</Types>',
+  ].join('\n');
 
   const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
   zip.file('[Content_Types].xml', ct);
   zip.folder('_rels')!.file('.rels', rels);
   zip.folder('3D')!.file('3dmodel.model', model);
+  zip.folder('metadata')!.file('model_settings.config', config);
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
