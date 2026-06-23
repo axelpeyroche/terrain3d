@@ -2240,8 +2240,11 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
       if (b > r + 25 && b > g + 25 && b > 70) waterMask[i] = 1;
     }
     const dirs: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
-    // 2 passes : remplit les lacunes jusqu'à 2 voxels de large
+    // 2 passes : remplit les lacunes jusqu'à 2 voxels de large.
+    // IMPORTANT : on accumule dans toAdd et on l'applique APRÈS la passe,
+    // pour éviter le flood-fill (expansion en cascade dans la même passe).
     for (let pass = 0; pass < 2; pass++) {
+      const toAdd = new Uint8Array(vgrid * vgrid);
       for (let vj = 0; vj < vgrid; vj++) {
         for (let vi = 0; vi < vgrid; vi++) {
           if (!waterMask[vj * vgrid + vi]) continue;
@@ -2251,10 +2254,11 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
             if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid || waterMask[nj * vgrid + ni]) continue;
             const no = (nj * vgrid + ni) * 4;
             result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
-            waterMask[nj * vgrid + ni] = 1; // marquer comme eau pour la passe suivante
+            toAdd[nj * vgrid + ni] = 1;
           }
         }
       }
+      for (let i = 0; i < vgrid * vgrid; i++) if (toAdd[i]) waterMask[i] = 1;
     }
     return result;
   } catch {
