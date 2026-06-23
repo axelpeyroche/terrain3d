@@ -2226,45 +2226,91 @@ function tickLabels(): void {
 
 /* ══════════════════════════════════════════════
    PRINT PREVIEW — aperçu impression FDM
-   Clone la géométrie du terrain et quantifie les hauteurs Y
-   au pas de couche d'impression → effet staircase authentique.
+   InstancedMesh de colonnes (voxels) : chaque colonne de la grille
+   va du plan de base jusqu'à la hauteur quantifiée au pas de couche.
+   La couleur de chaque colonne est échantillonnée depuis la texture
+   de zones baked (zones OSM + hillshade).
 ══════════════════════════════════════════════ */
 let printPreviewGroup: THREE.Group | null = null;
 let printPreviewActive = false;
 
 export function buildPrintPreview(layerHeightMm = 0.20): void {
-  if (!scene || !terrainMeshRef) return;
+  if (!scene || !terrainMeshRef || !cachedElev || !cachedTexture) return;
   clearPrintPreview();
   printPreviewActive = true;
 
-  const lh    = Math.max(0.01, layerHeightMm);
-  const baseH = lastBaseH;
+  const VGRID    = 120; // colonnes par axe
+  const lh       = Math.max(0.01, layerHeightMm);
+  const wMm      = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
+  const { minE, elevRange } = cachedElev;
+  const G        = PREVIEW_GRID;
+  const workGrid = lastWorkGrid ?? cachedElev.grid;
+  const voxelW   = wMm / VGRID;
+  const voxelD   = dMm / VGRID;
 
-  // Clone la géométrie du terrain et quantifie chaque sommet Y au pas de couche
-  const geo = (terrainMeshRef.geometry as THREE.BufferGeometry).clone();
-  const pos = geo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) {
-    const yRel   = pos.getY(i) - baseH;
-    const quantY = Math.max(0, Math.floor(yRel / lh)) * lh + baseH;
-    pos.setY(i, quantY);
+  // Lecture des pixels depuis le canvas de la texture baked (zones + hillshade)
+  const texImage = cachedTexture.image;
+  if (!(texImage instanceof HTMLCanvasElement)) return;
+  const texCtx = texImage.getContext('2d');
+  if (!texCtx) return;
+  const { width: texW, height: texH } = texImage;
+  const pixels = texCtx.getImageData(0, 0, texW, texH).data;
+
+  const count  = VGRID * VGRID;
+  const boxGeo = new THREE.BoxGeometry(voxelW * 0.99, 1, voxelD * 0.99);
+  const mat    = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const iMesh  = new THREE.InstancedMesh(boxGeo, mat, count);
+
+  const dummy = new THREE.Object3D();
+  const col   = new THREE.Color();
+
+  for (let vj = 0, idx = 0; vj < VGRID; vj++) {
+    for (let vi = 0; vi < VGRID; vi++, idx++) {
+      const u  = (vi + 0.5) / VGRID;
+      const v  = (vj + 0.5) / VGRID;
+      const cx = (u - 0.5) * wMm;
+      const cz = (0.5 - v) * dMm;
+
+      // Colonne hors de la zone → invisible (scale 0)
+      if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) {
+        dummy.scale.setScalar(0);
+        dummy.position.set(cx, baseH, cz);
+        dummy.updateMatrix();
+        iMesh.setMatrixAt(idx, dummy.matrix);
+        dummy.scale.setScalar(1);
+        continue;
+      }
+
+      const elev = sampleElev(workGrid, G, u, 1 - v);
+      const yRaw = ((elev - minE) / elevRange) * elevScaleMm;
+      const yQ   = Math.max(lh, Math.ceil(yRaw / lh) * lh);
+
+      dummy.position.set(cx, baseH + yQ / 2, cz);
+      dummy.scale.set(1, yQ, 1);
+      dummy.updateMatrix();
+      iMesh.setMatrixAt(idx, dummy.matrix);
+
+      // Couleur échantillonnée depuis la texture
+      const px = Math.max(0, Math.min(texW - 1, Math.round(u * (texW - 1))));
+      const py = Math.max(0, Math.min(texH - 1, Math.round(v * (texH - 1))));
+      const pi = (py * texW + px) * 4;
+      col.setRGB(pixels[pi] / 255, pixels[pi + 1] / 255, pixels[pi + 2] / 255);
+      iMesh.setColorAt(idx, col);
+    }
   }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals(); // recalcule les normales pour un éclairage correct des terrasses
 
-  // Partage le même matériau (texture zones + hillshade) que le terrain lisse
-  const printMesh = new THREE.Mesh(geo, terrainMeshRef.material);
+  iMesh.instanceMatrix.needsUpdate = true;
+  if (iMesh.instanceColor) iMesh.instanceColor.needsUpdate = true;
 
   printPreviewGroup = new THREE.Group();
-  printPreviewGroup.add(printMesh);
+  printPreviewGroup.add(iMesh);
   scene.add(printPreviewGroup);
   sceneObjs.push(printPreviewGroup);
 
-  // Masquer le terrain lisse et les meshes qui lévitent au-dessus
   terrainMeshRef.visible = false;
   for (const m of zoneMeshRefs) m.visible = false;
   if (roadMeshGroup) roadMeshGroup.visible = false;
   if (lineMeshGroup) lineMeshGroup.visible = false;
-  // Base, façades, bâtiments 3D et trace GPX restent visibles
 }
 
 export function clearPrintPreview(): void {
@@ -2273,7 +2319,12 @@ export function clearPrintPreview(): void {
     scene.remove(printPreviewGroup);
     const si = sceneObjs.indexOf(printPreviewGroup);
     if (si >= 0) sceneObjs.splice(si, 1);
-    printPreviewGroup.traverse(c => { (c as THREE.Mesh).geometry?.dispose(); });
+    printPreviewGroup.traverse(c => {
+      const m = c as THREE.Mesh;
+      m.geometry?.dispose();
+      if (Array.isArray(m.material)) m.material.forEach(mt => mt.dispose());
+      else (m.material as THREE.Material | undefined)?.dispose();
+    });
     printPreviewGroup = null;
   }
   printPreviewActive = false;
