@@ -2234,17 +2234,52 @@ function tickLabels(): void {
 let printPreviewGroup: THREE.Group | null = null;
 let printPreviewActive = false;
 
-/** Lit les pixels de la texture baked à résolution réduite via drawImage.
- *  Doit être appelé AVANT clearPrintPreview pour ne jamais laisser
- *  la scène incohérente si la lecture du canvas échoue. */
+/** Supersampling 4× de la texture baked.
+ *  Pour chaque case de la grille de sortie, on examine tous les sous-pixels
+ *  haute résolution : si l'un d'eux est bleu dominant (cours d'eau), on
+ *  utilise sa couleur plutôt que la moyenne — cela préserve les traits fins.
+ *  Doit être appelé AVANT clearPrintPreview. */
 function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
   if (!cachedTexture) return null;
   try {
+    const SS   = 4;                              // facteur de suréchantillonnage
+    const bigN = Math.min(vgrid * SS, 2048);    // plafonné pour limiter la RAM
+    const step = bigN / vgrid;                  // px source par px cible
+
     const cv = document.createElement('canvas');
-    cv.width = cv.height = vgrid;
+    cv.width = cv.height = bigN;
     const ctx = cv.getContext('2d')!;
-    ctx.drawImage(cachedTexture.image as CanvasImageSource, 0, 0, vgrid, vgrid);
-    return ctx.getImageData(0, 0, vgrid, vgrid).data;
+    ctx.drawImage(cachedTexture.image as CanvasImageSource, 0, 0, bigN, bigN);
+    const big = ctx.getImageData(0, 0, bigN, bigN).data;
+
+    const result = new Uint8ClampedArray(vgrid * vgrid * 4);
+    for (let vj = 0; vj < vgrid; vj++) {
+      const y0 = Math.floor(vj * step);
+      const y1 = Math.min(Math.ceil((vj + 1) * step), bigN);
+      for (let vi = 0; vi < vgrid; vi++) {
+        const x0 = Math.floor(vi * step);
+        const x1 = Math.min(Math.ceil((vi + 1) * step), bigN);
+        let sumR = 0, sumG = 0, sumB = 0, n = 0;
+        let wR = 0, wG = 0, wB = 0, hasWater = false;
+        for (let sy = y0; sy < y1; sy++) {
+          for (let sx = x0; sx < x1; sx++) {
+            const pi = (sy * bigN + sx) * 4;
+            const r = big[pi], g = big[pi+1], b = big[pi+2];
+            sumR += r; sumG += g; sumB += b; n++;
+            // Un pixel est "eau" si le bleu domine nettement le rouge ET le vert
+            if (!hasWater && b > r + 25 && b > g + 25 && b > 70) {
+              wR = r; wG = g; wB = b; hasWater = true;
+            }
+          }
+        }
+        const out = (vj * vgrid + vi) * 4;
+        result[out]   = hasWater ? wR : sumR / n;
+        result[out+1] = hasWater ? wG : sumG / n;
+        result[out+2] = hasWater ? wB : sumB / n;
+        result[out+3] = 255;
+      }
+    }
+    return result;
   } catch {
     return null;
   }
@@ -2343,12 +2378,13 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     alert('Ouvrez d\'abord l\'onglet "Aperçu" pour générer la prévisualisation.'); return;
   }
 
-  const VGRID = 80;
   const lh    = 0.20;
   const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
   const { minE, elevRange } = cachedElev;
   const G        = PREVIEW_GRID;
   const workGrid = lastWorkGrid ?? cachedElev.grid;
+  // Résolution ~1 mm/case pour le 3MF (qualité impression), max 300
+  const VGRID = Math.min(300, Math.max(80, Math.round(Math.max(wMm, dMm) / 1.0)));
   const vW = wMm / VGRID, vD = dMm / VGRID;
 
   const pixels = sampleTexturePixels(VGRID);
