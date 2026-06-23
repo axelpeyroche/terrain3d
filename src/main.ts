@@ -193,6 +193,7 @@ export function updateZoneFooter(): void {
    ═══════════════════════════════════════════ */
 let dimsRendererReady = false;
 let dimsBuilding = false;
+let activeTab = '';
 
 function getDimSettings(): DimSettings {
   const n = (id: string, def: number) => Number((document.getElementById(id) as HTMLInputElement)?.value ?? def) || def;
@@ -302,6 +303,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const tab = (btn as HTMLElement).dataset.tab;
     if (!tab || (btn as HTMLButtonElement).disabled) return;
+    activeTab = tab;
     switchTab(tab);
     if (tab === 'params') { clearPrintPreview(); onDimsTabOpen(); }
     else if (tab === 'colors') { clearPrintPreview(); onColorsTabOpen(); }
@@ -351,10 +353,10 @@ document.getElementById('btn-print-preview')?.addEventListener('click', () => {
 });
 
 /* ── Boutons retour ── */
-document.getElementById('btn-back-zone')?.addEventListener('click', () => { detachDimsCanvas(); switchTab('zone'); });
-document.getElementById('btn-back-dims')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
-document.getElementById('btn-back-params')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
-document.getElementById('btn-back-colors')?.addEventListener('click', () => { clearPrintPreview(); switchTab('colors'); onColorsTabOpen(); });
+document.getElementById('btn-back-zone')?.addEventListener('click', () => { activeTab = 'zone'; detachDimsCanvas(); switchTab('zone'); });
+document.getElementById('btn-back-dims')?.addEventListener('click', () => { activeTab = 'params'; switchTab('params'); onDimsTabOpen(); });
+document.getElementById('btn-back-params')?.addEventListener('click', () => { activeTab = 'params'; switchTab('params'); onDimsTabOpen(); });
+document.getElementById('btn-back-colors')?.addEventListener('click', () => { activeTab = 'colors'; clearPrintPreview(); switchTab('colors'); onColorsTabOpen(); });
 
 /* ── Generate (onglet 3 manuel) ── */
 document.getElementById('btn-gen')?.addEventListener('click', generate);
@@ -454,19 +456,22 @@ function applyPrintPreview(): void {
 
 function onAperçuTabOpen(): void {
   if (!state.bounds) return;
+  activeTab = 'apercu';
   syncDimsInputsFromState();
   requestAnimationFrame(async () => {
     const area = document.getElementById('apercu-3d-area')!;
-    clearPrintPreview(); // réinitialise avant de reconstruire la scène
+    clearPrintPreview();
     if (!dimsRendererReady) {
       dimsRendererReady = true;
       initDimsRenderer(area);
-      await triggerDimsBuild(); // attend la fin du chargement complet
+      await triggerDimsBuild();
     } else {
       initDimsRenderer(area);
       rebuildScene(getDimSettings());
     }
-    applyPrintPreview(); // applique automatiquement l'aperçu impression
+    // Seulement si l'utilisateur est toujours dans l'onglet aperçu
+    // (il peut avoir changé d'onglet pendant le chargement initial)
+    if (activeTab === 'apercu') applyPrintPreview();
   });
 }
 
