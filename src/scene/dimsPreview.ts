@@ -1410,12 +1410,10 @@ function buildMapTexture(
     const realW = (bounds.maxLon - bounds.minLon) * lonScale * 111320;
     const scaleTexPerM = S / realW;
 
-    // Largeur minimum = 1 voxel d'impression (~S/120) pour survivre au sous-échantillonnage 3MF.
-    const minRoadPx = Math.ceil(S / 120);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const road of roads) {
       const baseW = roadRealWidthM(road.hwType) * scaleTexPerM * roadWidthMult;
-      const lw = Math.max(minRoadPx, baseW);
+      const lw = Math.max(8, baseW);
       ctx.beginPath();
       let first = true;
       for (const p of road.geom) {
@@ -1461,8 +1459,7 @@ function buildMapTexture(
     for (const el of layerEls) {
       if (!el.tags) continue;
       const ww = el.tags.waterway ?? '';
-      const minWWPx = Math.ceil(S / 120);
-      const lw = Math.max(minWWPx, (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth);
+      const lw = (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth;
       ctx.beginPath();
       traceGeometry(ctx, el, bounds, S);
       ctx.strokeStyle = col;
@@ -2349,6 +2346,111 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
   if (lineMeshGroup) lineMeshGroup.visible = false;
 }
 
+/**
+ * Construit une carte de slots à la résolution VGRID×VGRID pour l'export 3MF.
+ * Contrairement à sampleTexturePixels (qui réduit la texture visuelle et perd les
+ * traits fins), buildSlotMap dessine directement à l'échelle voxel : routes et cours
+ * d'eau font 2-4 pixels = 2-4 voxels, garantissant leur détection par nearestSlot.
+ */
+function buildSlotMap(VGRID: number): Uint8ClampedArray | null {
+  if (!cachedElev) return null;
+  const { bounds } = cachedElev;
+  const S = VGRID;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+
+  // Couleur de base
+  ctx.fillStyle = colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88';
+  ctx.fillRect(0, 0, S, S);
+
+  // Zones OSM (polygones remplis)
+  for (const layer of ZONE_LAYERS) {
+    if (!layer.fill || !layerVisible[layer.id]) continue;
+    const layerEls = (cachedFeatures ?? []).filter(el => el.tags && layer.match(el.tags));
+    if (!layerEls.length) continue;
+    const col = colorSlots[layerSlotOverrides[layer.id] ?? layer.slot] ?? '#888';
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    for (const el of layerEls) traceGeometry(ctx, el, bounds, S);
+    ctx.fill('evenodd');
+  }
+
+  // Bâtiments (empreintes polygonales)
+  if ((layerVisible['buildings'] ?? true) && cachedBuildings.length > 0) {
+    ctx.fillStyle = colorSlots[layerSlotOverrides['buildings'] ?? 7] ?? '#b8b8b8';
+    ctx.beginPath();
+    for (const el of cachedBuildings) {
+      const polys = getOsmPolygons(el);
+      if (!polys.length) continue;
+      const outer = polys[0];
+      if (outer.length < 3) continue;
+      for (let i = 0; i < outer.length; i++) {
+        const cx = (outer[i].lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+        const cy = (1 - (outer[i].lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
+        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      }
+      ctx.closePath();
+    }
+    ctx.fill('nonzero');
+  }
+
+  // Cours d'eau (lignes 3-4 px = 3-4 voxels → toujours capturés)
+  for (const layer of ZONE_LAYERS) {
+    if (layer.fill || !(layerVisible[layer.id] ?? true)) continue;
+    const layerEls = (cachedFeatures ?? []).filter(el => el.tags && layer.match(el.tags));
+    if (!layerEls.length) continue;
+    const col = colorSlots[layerSlotOverrides[layer.id] ?? layer.slot] ?? '#888';
+    for (const el of layerEls) {
+      if (!el.tags) continue;
+      const ww = el.tags.waterway ?? '';
+      const lw = ww === 'river' ? 4 : ww === 'canal' ? 3 : 2;
+      ctx.beginPath();
+      traceGeometry(ctx, el, bounds, S);
+      ctx.strokeStyle = col; ctx.lineWidth = lw;
+      ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.stroke();
+    }
+  }
+
+  // Routes (lignes 3 px = 3 voxels)
+  if ((layerVisible['roads'] ?? true) && cachedRoads.length > 0) {
+    ctx.strokeStyle = colorSlots[layerSlotOverrides['roads'] ?? 8] ?? '#262626';
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const road of cachedRoads) {
+      ctx.beginPath();
+      let first = true;
+      for (const p of road.geom) {
+        const cx = (p.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+        const cy = (1 - (p.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
+        if (first) { ctx.moveTo(cx, cy); first = false; } else ctx.lineTo(cx, cy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // Dilatation 1-ring : les traits fins (1-2 px) s'étendent à leurs voisins
+  const raw = ctx.getImageData(0, 0, S, S).data;
+  const bC = parseInt((colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88').replace('#', ''), 16);
+  const bR = (bC >> 16) & 0xff, bG = (bC >> 8) & 0xff, bB = bC & 0xff;
+  const result = new Uint8ClampedArray(raw);
+  const mask = new Uint8Array(S * S);
+  for (let i = 0; i < S * S; i++) {
+    const d = (raw[i*4]-bR)**2 + (raw[i*4+1]-bG)**2 + (raw[i*4+2]-bB)**2;
+    if (d > 400) mask[i] = 1;
+  }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (!mask[y*S+x]) continue;
+    const src = (y*S+x)*4;
+    for (const [dy, dx] of [[-1,0],[1,0],[0,-1],[0,1]] as [number,number][]) {
+      const ny = y+dy, nx = x+dx;
+      if (ny < 0 || ny >= S || nx < 0 || nx >= S || mask[ny*S+nx]) continue;
+      const no = (ny*S+nx)*4;
+      result[no] = raw[src]; result[no+1] = raw[src+1]; result[no+2] = raw[src+2];
+    }
+  }
+  return result;
+}
+
 /* ══════════════════════════════════════════════
    EXPORT 3MF — depuis l'aperçu dims preview
    Base + façades (THREE.js mesh) + terrain en voxels
@@ -2368,7 +2470,9 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
   const VGRID = Math.min(150, Math.max(60, Math.round(Math.max(wMm, dMm) / 1.5)));
   const vW = wMm / VGRID, vD = dMm / VGRID;
 
-  const pixels = sampleTexturePixels(VGRID);
+  // buildSlotMap dessine à la résolution VGRID avec des lignes épaisses (3px = 3 voxels).
+  // Bien plus précis que sampleTexturePixels qui réduit la texture visuelle et perd les traits fins.
+  const pixels = buildSlotMap(VGRID);
 
   function nearestSlot(r: number, g: number, b: number): number {
     let best = 1, bd = Infinity;
@@ -2542,7 +2646,7 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
   ].join('\n');
 
   const matGroups  = objects.map(o => `<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`).join('\n');
-  const resObjs    = objects.map(o => `<object id="${o.id}" type="model" pid="${o.id+1000}" pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
+  const resObjs    = objects.map(o => `<object id="${o.id}" type="model" name="${o.name}" pid="${o.id+1000}" pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
   const buildItems = objects.map((o, i) => `<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1" identify_id="${i+1}"/>`).join('\n');
 
   const model = [
