@@ -1413,7 +1413,7 @@ function buildMapTexture(
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const road of roads) {
       const baseW = roadRealWidthM(road.hwType) * scaleTexPerM * roadWidthMult;
-      const lw = Math.max(8, baseW);
+      const lw = Math.max(4, baseW);
       ctx.beginPath();
       let first = true;
       for (const p of road.geom) {
@@ -2205,9 +2205,9 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
         const x0 = Math.floor(vi * step);
         const x1 = Math.min(Math.ceil((vi + 1) * step), bigN);
         let sumR = 0, sumG = 0, sumB = 0, n = 0;
-        // Eau (bleu dominant) : priorité absolue
+        // Eau (bleu dominant) : priorité absolue, capture 1 pixel suffit
         let wR = 0, wG = 0, wB = 0, hasWater = false;
-        // Pixel le plus "différent" de la base (routes, bâtiments, GPX…)
+        // Pixel le plus "différent" de la base (routes sombres, bâtiments gris…)
         let spR = 0, spG = 0, spB = 0, spBestD = 0;
         for (let sy = y0; sy < y1; sy++) {
           for (let sx = x0; sx < x1; sx++) {
@@ -2231,25 +2231,28 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
       }
     }
 
-    // Dilatation 1-ring : tout pixel non-base (eau, routes, bâtiments, zones)
-    // propage sa couleur aux 4 voisins restés à la couleur de base.
-    // Compense le sous-échantillonnage des traits fins après mise à l'échelle.
-    const specialMask = new Uint8Array(vgrid * vgrid);
+    // Dilatation eau uniquement (2 passes) : comble les lacunes de cours d'eau fins
+    // en diagonale. Les routes/zones gardent leur taille réelle (pas de dilatation
+    // générale pour éviter de les épaissir artificiellement dans l'aperçu).
+    const waterMask = new Uint8Array(vgrid * vgrid);
     for (let i = 0; i < vgrid * vgrid; i++) {
-      const r = result[i*4], g = result[i*4+1], b = result[i*4+2];
-      const d = (r - bR) ** 2 + (g - bG) ** 2 + (b - bB) ** 2;
-      if (d > 400) specialMask[i] = 1;
+      const b = result[i*4+2], r = result[i*4], g = result[i*4+1];
+      if (b > r + 25 && b > g + 25 && b > 70) waterMask[i] = 1;
     }
     const dirs: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
-    for (let vj = 0; vj < vgrid; vj++) {
-      for (let vi = 0; vi < vgrid; vi++) {
-        if (!specialMask[vj * vgrid + vi]) continue;
-        const src = (vj * vgrid + vi) * 4;
-        for (const [dj, di] of dirs) {
-          const nj = vj + dj, ni = vi + di;
-          if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid || specialMask[nj * vgrid + ni]) continue;
-          const no = (nj * vgrid + ni) * 4;
-          result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
+    // 2 passes : remplit les lacunes jusqu'à 2 voxels de large
+    for (let pass = 0; pass < 2; pass++) {
+      for (let vj = 0; vj < vgrid; vj++) {
+        for (let vi = 0; vi < vgrid; vi++) {
+          if (!waterMask[vj * vgrid + vi]) continue;
+          const src = (vj * vgrid + vi) * 4;
+          for (const [dj, di] of dirs) {
+            const nj = vj + dj, ni = vi + di;
+            if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid || waterMask[nj * vgrid + ni]) continue;
+            const no = (nj * vgrid + ni) * 4;
+            result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
+            waterMask[nj * vgrid + ni] = 1; // marquer comme eau pour la passe suivante
+          }
         }
       }
     }
@@ -2395,7 +2398,7 @@ function buildSlotMap(VGRID: number): Uint8ClampedArray | null {
     ctx.fill('nonzero');
   }
 
-  // Cours d'eau (lignes 3-4 px = 3-4 voxels → toujours capturés)
+  // Cours d'eau (lignes 1-2 px = 1-2 voxels ; dilatation ci-dessous complète à 3 voxels)
   for (const layer of ZONE_LAYERS) {
     if (layer.fill || !(layerVisible[layer.id] ?? true)) continue;
     const layerEls = (cachedFeatures ?? []).filter(el => el.tags && layer.match(el.tags));
@@ -2404,7 +2407,7 @@ function buildSlotMap(VGRID: number): Uint8ClampedArray | null {
     for (const el of layerEls) {
       if (!el.tags) continue;
       const ww = el.tags.waterway ?? '';
-      const lw = ww === 'river' ? 4 : ww === 'canal' ? 3 : 2;
+      const lw = ww === 'river' ? 2 : 1;
       ctx.beginPath();
       traceGeometry(ctx, el, bounds, S);
       ctx.strokeStyle = col; ctx.lineWidth = lw;
@@ -2412,10 +2415,10 @@ function buildSlotMap(VGRID: number): Uint8ClampedArray | null {
     }
   }
 
-  // Routes (lignes 3 px = 3 voxels)
+  // Routes (lignes 2 px = 2 voxels ; dilatation complète à 4 voxels)
   if ((layerVisible['roads'] ?? true) && cachedRoads.length > 0) {
     ctx.strokeStyle = colorSlots[layerSlotOverrides['roads'] ?? 8] ?? '#262626';
-    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const road of cachedRoads) {
       ctx.beginPath();
       let first = true;
@@ -2466,8 +2469,8 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
   const { minE, elevRange } = cachedElev;
   const G = PREVIEW_GRID;
   const workGrid = lastWorkGrid ?? cachedElev.grid;
-  // ~1.5 mm/case pour garder le fichier léger, max 150 colonnes
-  const VGRID = Math.min(150, Math.max(60, Math.round(Math.max(wMm, dMm) / 1.5)));
+  // ~0.67 mm/case pour un rendu fidèle à l'aperçu, max 300 colonnes
+  const VGRID = Math.min(300, Math.max(80, Math.round(Math.max(wMm, dMm) / 0.67)));
   const vW = wMm / VGRID, vD = dMm / VGRID;
 
   // buildSlotMap dessine à la résolution VGRID avec des lignes épaisses (3px = 3 voxels).
@@ -2631,30 +2634,55 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
 
   if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
 
-  // ── Assembly 3MF avec métadonnées Bambu Studio ──────────────────────────
-  // model_settings.config : assigne chaque objet à son slot filament (extruder N = slot N)
-  // Bambu Studio lit ce fichier pour colorier automatiquement chaque objet.
+  // ── Format Bambu Studio : une assemblée parent contenant tous les composants ──
+  // Reproduit la structure du fichier de référence : un seul <item> dans <build>,
+  // chaque couche = un <component> dans l'assemblée, avec <part> dans model_settings.config.
+  const assemblyId = oid; // id suivant le dernier slot
+
+  // Couleurs par matériau pour prévisualisation
+  const matGroups = objects.map(o =>
+    `<basematerials id="${o.id + 1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`
+  ).join('\n');
+
+  // Maillages individuels par couche
+  const resObjs = objects.map(o =>
+    `<object id="${o.id}" type="model" name="${o.name}" pid="${o.id + 1000}" pindex="0">` +
+    `<mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh>` +
+    `</object>`
+  ).join('\n');
+
+  // Objet assemblée : groupe tous les composants en un seul objet Bambu
+  const components = objects.map(o =>
+    `<component objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`
+  ).join('');
+  const assemblyObj = `<object id="${assemblyId}" type="model" name="Terrain3D">` +
+    `<components>${components}</components></object>`;
+
+  // Un seul item dans le build = un seul modèle dans Bambu Studio
+  const buildItems = `<item objectid="${assemblyId}" transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1" identify_id="1"/>`;
+
+  // model_settings.config : <object> parent + <part> par couche avec extruder
   const config = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<config>',
+    `  <object id="${assemblyId}" name="Terrain3D">`,
+    `    <metadata key="name" value="Terrain3D"/>`,
+    `    <metadata key="extruder" value="1"/>`,
     ...objects.map(o =>
-      `  <object id="${o.id}" name="${o.name}">` +
+      `    <part id="${o.id}" subtype="normal_part">` +
+      `<metadata key="name" value="${o.name}"/>` +
       `<metadata key="extruder" value="${o.slot}"/>` +
-      `</object>`
+      `</part>`
     ),
+    '  </object>',
     '</config>',
   ].join('\n');
-
-  const matGroups  = objects.map(o => `<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`).join('\n');
-  const resObjs    = objects.map(o => `<object id="${o.id}" type="model" name="${o.name}" pid="${o.id+1000}" pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
-  const buildItems = objects.map((o, i) => `<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0" printable="1" identify_id="${i+1}"/>`).join('\n');
 
   const model = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
     '  <metadata name="Title">Terrain3D</metadata>',
-    '  <metadata name="Designer">Terrain3D App</metadata>',
-    '  <resources>', matGroups, resObjs, '  </resources>',
+    '  <resources>', matGroups, resObjs, assemblyObj, '  </resources>',
     '  <build>', buildItems, '  </build>',
     '</model>',
   ].join('\n');
