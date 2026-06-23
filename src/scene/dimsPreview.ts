@@ -2335,7 +2335,14 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
 
       const elev = sampleElev(workGrid, G, u, 1 - v);
       const yRaw = ((elev - minE) / elevRange) * elevScaleMm;
-      const yQ   = Math.max(lh, Math.ceil(yRaw / lh) * lh);
+
+      let pr = 0, pg = 0, pb = 0, isWater = false;
+      if (pixels) {
+        const pi = ((VGRID - 1 - vj) * VGRID + vi) * 4;
+        pr = pixels[pi]; pg = pixels[pi + 1]; pb = pixels[pi + 2];
+        isWater = pb > pr + 25 && pb > pg + 25 && pb > 70;
+      }
+      const yQ = Math.max(lh, Math.ceil(yRaw / lh) * lh - (isWater ? 2 * lh : 0));
 
       dummy.position.set(cx, baseH + yQ / 2, cz);
       dummy.scale.set(1, yQ, 1);
@@ -2343,10 +2350,7 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
       iMesh.setMatrixAt(idx, dummy.matrix);
 
       if (pixels) {
-        // Le canvas a nord en haut (vj=0) mais la position 3D a vj=0 = sud.
-        // On retourne vj pour aligner couleur et élévation (qui utilise 1-v).
-        const pi = ((VGRID - 1 - vj) * VGRID + vi) * 4;
-        col.setRGB(pixels[pi] / 255, pixels[pi + 1] / 255, pixels[pi + 2] / 255);
+        col.setRGB(pr / 255, pg / 255, pb / 255);
       } else {
         col.copy(defCol);
       }
@@ -2378,13 +2382,13 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     alert('Ouvrez d\'abord l\'onglet "Aperçu" pour générer la prévisualisation.'); return;
   }
 
-  const lh    = 0.20;
+  const lh = 0.20;
   const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
   const { minE, elevRange } = cachedElev;
-  const G        = PREVIEW_GRID;
+  const G = PREVIEW_GRID;
   const workGrid = lastWorkGrid ?? cachedElev.grid;
-  // Résolution ~1 mm/case pour le 3MF (qualité impression), max 300
-  const VGRID = Math.min(300, Math.max(80, Math.round(Math.max(wMm, dMm) / 1.0)));
+  // ~1.5 mm/case pour garder le fichier léger, max 150 colonnes
+  const VGRID = Math.min(150, Math.max(60, Math.round(Math.max(wMm, dMm) / 1.5)));
   const vW = wMm / VGRID, vD = dMm / VGRID;
 
   const pixels = sampleTexturePixels(VGRID);
@@ -2393,101 +2397,125 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     let best = 1, bd = Infinity;
     for (const [k, hex] of Object.entries(colorSlots)) {
       const c = new THREE.Color(hex);
-      const d = (c.r - r/255)**2 + (c.g - g/255)**2 + (c.b - b/255)**2;
+      const d = (c.r - r / 255) ** 2 + (c.g - g / 255) ** 2 + (c.b - b / 255) ** 2;
       if (d < bd) { bd = d; best = Number(k); }
     }
     return best;
   }
 
-  interface Vox { cx: number; cz: number; h: number; }
-  const bySlot = new Map<number, Vox[]>();
+  // Première passe : construction de la grille complète
+  interface CellData { slot: number; h: number; }
+  const allCells = new Map<string, CellData>();
+  const bySlot = new Map<number, Map<string, number>>();  // slot → (key → hauteur)
+
   for (let vj = 0; vj < VGRID; vj++) {
     for (let vi = 0; vi < VGRID; vi++) {
       const u = (vi + 0.5) / VGRID, v = (vj + 0.5) / VGRID;
       const cx = (u - 0.5) * wMm, cz = (0.5 - v) * dMm;
       if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) continue;
       const elev = sampleElev(workGrid, G, u, 1 - v);
-      const yQ   = Math.max(lh, Math.ceil(((elev - minE) / elevRange) * elevScaleMm / lh) * lh);
-      const pif  = ((VGRID - 1 - vj) * VGRID + vi) * 4;
-      const slot = pixels
-        ? nearestSlot(pixels[pif], pixels[pif+1], pixels[pif+2])
-        : 1;
-      if (!bySlot.has(slot)) bySlot.set(slot, []);
-      bySlot.get(slot)!.push({ cx, cz, h: yQ });
+      const yRaw = ((elev - minE) / elevRange) * elevScaleMm;
+      const pif = ((VGRID - 1 - vj) * VGRID + vi) * 4;
+      let slot = 1, isWater = false;
+      if (pixels) {
+        const pr = pixels[pif], pg = pixels[pif + 1], pb = pixels[pif + 2];
+        isWater = pb > pr + 25 && pb > pg + 25 && pb > 70;
+        slot = nearestSlot(pr, pg, pb);
+      }
+      const yQ = Math.max(lh, Math.ceil(yRaw / lh) * lh - (isWater ? 2 * lh : 0));
+      const key = `${vi},${vj}`;
+      allCells.set(key, { slot, h: yQ });
+      if (!bySlot.has(slot)) bySlot.set(slot, new Map());
+      bySlot.get(slot)!.set(key, yQ);
     }
   }
 
-  function buildSlotGeo(voxels: Vox[]): { vx: string; tr: string } {
-    let vx = '', tr = '', base = 0;
-    const hw = vW * 0.99 / 2, hd = vD * 0.99 / 2;
-    for (const { cx, cz, h } of voxels) {
-      // THREE Y-up → 3MF Z-up : x=sceneX, y=sceneZ, z=sceneY
-      const x0 = cx-hw, x1 = cx+hw, y0 = cz-hd, y1 = cz+hd, z0 = baseH, z1 = baseH+h;
-      vx += `<vertex x="${x0.toFixed(3)}" y="${y0.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
-            `<vertex x="${x1.toFixed(3)}" y="${y0.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
-            `<vertex x="${x1.toFixed(3)}" y="${y1.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
-            `<vertex x="${x0.toFixed(3)}" y="${y1.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
-            `<vertex x="${x0.toFixed(3)}" y="${y0.toFixed(3)}" z="${z1.toFixed(3)}"/>` +
-            `<vertex x="${x1.toFixed(3)}" y="${y0.toFixed(3)}" z="${z1.toFixed(3)}"/>` +
-            `<vertex x="${x1.toFixed(3)}" y="${y1.toFixed(3)}" z="${z1.toFixed(3)}"/>` +
-            `<vertex x="${x0.toFixed(3)}" y="${y1.toFixed(3)}" z="${z1.toFixed(3)}"/>`;
-      const b = base;
-      tr += `<triangle v1="${b}" v2="${b+3}" v3="${b+2}"/><triangle v1="${b}" v2="${b+2}" v3="${b+1}"/>` +
-            `<triangle v1="${b+4}" v2="${b+5}" v3="${b+6}"/><triangle v1="${b+4}" v2="${b+6}" v3="${b+7}"/>` +
-            `<triangle v1="${b}" v2="${b+1}" v3="${b+5}"/><triangle v1="${b}" v2="${b+5}" v3="${b+4}"/>` +
-            `<triangle v1="${b+2}" v2="${b+3}" v3="${b+7}"/><triangle v1="${b+2}" v2="${b+7}" v3="${b+6}"/>` +
-            `<triangle v1="${b}" v2="${b+4}" v3="${b+7}"/><triangle v1="${b}" v2="${b+7}" v3="${b+3}"/>` +
-            `<triangle v1="${b+1}" v2="${b+2}" v3="${b+6}"/><triangle v1="${b+1}" v2="${b+6}" v3="${b+5}"/>`;
-      base += 8;
+  // Maillage manifold : 1 solide watertight par slot, sans faces internes.
+  // Chaque colonne va du plateau (z=0) au sommet (z=baseH+h).
+  // Parois latérales uniquement aux frontières de slot ou aux marches de hauteur.
+  // Ordre de winding vérifié pour normales sortantes (règle de la main droite, 3MF Z-up).
+  function buildSlotMesh(slot: number, slotCells: Map<string, number>): { vx: string; tr: string } {
+    let vx = '', tr = '';
+    let vc = 0;
+
+    // quad(a,b,c,d) → tri(a,b,c) + tri(a,c,d)
+    function quad(
+      ax: number, ay: number, az: number,
+      bx: number, by: number, bz: number,
+      cx: number, cy: number, cz: number,
+      dx: number, dy: number, dz: number
+    ) {
+      vx += `<vertex x="${ax.toFixed(3)}" y="${ay.toFixed(3)}" z="${az.toFixed(3)}"/>` +
+            `<vertex x="${bx.toFixed(3)}" y="${by.toFixed(3)}" z="${bz.toFixed(3)}"/>` +
+            `<vertex x="${cx.toFixed(3)}" y="${cy.toFixed(3)}" z="${cz.toFixed(3)}"/>` +
+            `<vertex x="${dx.toFixed(3)}" y="${dy.toFixed(3)}" z="${dz.toFixed(3)}"/>`;
+      tr += `<triangle v1="${vc}" v2="${vc+1}" v3="${vc+2}"/>` +
+            `<triangle v1="${vc}" v2="${vc+2}" v3="${vc+3}"/>`;
+      vc += 4;
+    }
+
+    for (const [key, h] of slotCells) {
+      const [vi, vj] = key.split(',').map(Number);
+      const u = (vi + 0.5) / VGRID, vc_v = (vj + 0.5) / VGRID;
+      const cx = (u - 0.5) * wMm, czv = (0.5 - vc_v) * dMm;
+      // 3MF Z-up : x=sceneX, y=sceneZ, z=sceneY(hauteur)
+      const x0 = cx - vW / 2, x1 = cx + vW / 2;
+      const y0 = czv - vD / 2, y1 = czv + vD / 2;
+      const zBot = 0, zTop = baseH + h;
+
+      // Face supérieure (+Z)
+      quad(x0,y0,zTop, x1,y0,zTop, x1,y1,zTop, x0,y1,zTop);
+      // Face inférieure (-Z)
+      quad(x0,y1,zBot, x1,y1,zBot, x1,y0,zBot, x0,y0,zBot);
+
+      // Voisin +X (vi+1, vj)
+      const nx = allCells.get(`${vi+1},${vj}`);
+      if (!nx || nx.slot !== slot) {
+        quad(x1,y0,zBot, x1,y1,zBot, x1,y1,zTop, x1,y0,zTop);
+      } else if (nx.h < h) {
+        const zS = baseH + nx.h;
+        quad(x1,y0,zS, x1,y1,zS, x1,y1,zTop, x1,y0,zTop);
+      }
+
+      // Voisin -X (vi-1, vj)
+      const px = allCells.get(`${vi-1},${vj}`);
+      if (!px || px.slot !== slot) {
+        quad(x0,y1,zBot, x0,y0,zBot, x0,y0,zTop, x0,y1,zTop);
+      } else if (px.h < h) {
+        const zS = baseH + px.h;
+        quad(x0,y1,zS, x0,y0,zS, x0,y0,zTop, x0,y1,zTop);
+      }
+
+      // Voisin +Y (vj-1, cz croissant)
+      const py = allCells.get(`${vi},${vj-1}`);
+      if (!py || py.slot !== slot) {
+        quad(x1,y1,zBot, x0,y1,zBot, x0,y1,zTop, x1,y1,zTop);
+      } else if (py.h < h) {
+        const zS = baseH + py.h;
+        quad(x1,y1,zS, x0,y1,zS, x0,y1,zTop, x1,y1,zTop);
+      }
+
+      // Voisin -Y (vj+1, cz décroissant)
+      const ny = allCells.get(`${vi},${vj+1}`);
+      if (!ny || ny.slot !== slot) {
+        quad(x0,y0,zBot, x1,y0,zBot, x1,y0,zTop, x0,y0,zTop);
+      } else if (ny.h < h) {
+        const zS = baseH + ny.h;
+        quad(x0,y0,zS, x1,y0,zS, x1,y0,zTop, x0,y0,zTop);
+      }
     }
     return { vx, tr };
   }
 
-  function serMesh(mesh: THREE.Mesh, off = 0): { vx: string; tr: string; n: number } {
-    mesh.updateWorldMatrix(true, false);
-    const geo = (mesh.geometry as THREE.BufferGeometry).clone();
-    geo.applyMatrix4(mesh.matrixWorld);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    const idx = geo.index;
-    let vx = '';
-    for (let i = 0; i < pos.count; i++)
-      vx += `<vertex x="${pos.getX(i).toFixed(3)}" y="${pos.getZ(i).toFixed(3)}" z="${pos.getY(i).toFixed(3)}"/>`;
-    let tr = '';
-    if (idx) {
-      for (let i = 0; i < idx.count; i += 3)
-        tr += `<triangle v1="${idx.getX(i)+off}" v2="${idx.getX(i+1)+off}" v3="${idx.getX(i+2)+off}"/>`;
-    } else {
-      for (let i = 0; i < pos.count; i += 3)
-        tr += `<triangle v1="${i+off}" v2="${i+1+off}" v3="${i+2+off}"/>`;
-    }
-    geo.dispose();
-    return { vx, tr, n: pos.count };
-  }
+  if (!bySlot.size) { alert('Aucune donnée à exporter.'); return; }
 
   interface Obj3 { id: number; name: string; col: string; vx: string; tr: string; }
   const objects: Obj3[] = [];
   let oid = 1;
 
-  if (baseMeshRef) {
-    const { vx, tr } = serMesh(baseMeshRef);
-    if (tr) {
-      const s = layerSlotOverrides['base'] ?? 1;
-      objects.push({ id: oid++, name: 'base', col: (colorSlots[s] ?? '#c0af88').replace('#',''), vx, tr });
-    }
-  }
-
-  if (facadeMeshRefs.length) {
-    let allVx = '', allTr = '', off = 0;
-    for (const m of facadeMeshRefs) { const r = serMesh(m, off); allVx += r.vx; allTr += r.tr; off += r.n; }
-    if (allTr) {
-      const s = layerSlotOverrides['facade'] ?? 1;
-      objects.push({ id: oid++, name: 'facades', col: (colorSlots[s] ?? '#c0af88').replace('#',''), vx: allVx, tr: allTr });
-    }
-  }
-
-  for (const [slot, voxels] of bySlot) {
-    const { vx, tr } = buildSlotGeo(voxels);
-    if (tr) objects.push({ id: oid++, name: `terrain_s${slot}`, col: (colorSlots[slot]??'#888888').replace('#',''), vx, tr });
+  for (const [slot, slotCells] of bySlot) {
+    const { vx, tr } = buildSlotMesh(slot, slotCells);
+    if (tr) objects.push({ id: oid++, name: `terrain_s${slot}`, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
   }
 
   if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
