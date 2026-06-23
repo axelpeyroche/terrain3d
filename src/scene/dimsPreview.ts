@@ -361,6 +361,7 @@ export function setLayerVisible(id: string, visible: boolean): void {
         lastW, lastD, lastElevScale, cachedRoads, cachedBuildings,
       );
       if (terrainMeshRef) { (terrainMeshRef.material as THREE.MeshLambertMaterial).map = cachedTexture; (terrainMeshRef.material as THREE.MeshLambertMaterial).needsUpdate = true; }
+      if (printPreviewActive) buildPrintPreview();
     }
   } else if (id === 'roads') {
     if (roadMeshGroup) roadMeshGroup.visible = visible;
@@ -373,6 +374,7 @@ export function setLayerVisible(id: string, visible: boolean): void {
         lastW, lastD, lastElevScale, cachedRoads, cachedBuildings,
       );
       if (terrainMeshRef) { (terrainMeshRef.material as THREE.MeshLambertMaterial).map = cachedTexture; (terrainMeshRef.material as THREE.MeshLambertMaterial).needsUpdate = true; }
+      if (printPreviewActive) buildPrintPreview();
     }
   } else {
     // all OSM layers (zones + waterways) — rebuild texture
@@ -388,6 +390,7 @@ export function setLayerVisible(id: string, visible: boolean): void {
         mat.map = cachedTexture;
         mat.needsUpdate = true;
       }
+      if (printPreviewActive) buildPrintPreview();
     }
   }
 }
@@ -1407,10 +1410,12 @@ function buildMapTexture(
     const realW = (bounds.maxLon - bounds.minLon) * lonScale * 111320;
     const scaleTexPerM = S / realW;
 
+    // Largeur minimum = 1 voxel d'impression (~S/120) pour survivre au sous-échantillonnage 3MF.
+    const minRoadPx = Math.ceil(S / 120);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const road of roads) {
       const baseW = roadRealWidthM(road.hwType) * scaleTexPerM * roadWidthMult;
-      const lw = Math.max(4, baseW);
+      const lw = Math.max(minRoadPx, baseW);
       ctx.beginPath();
       let first = true;
       for (const p of road.geom) {
@@ -1456,7 +1461,8 @@ function buildMapTexture(
     for (const el of layerEls) {
       if (!el.tags) continue;
       const ww = el.tags.waterway ?? '';
-      const lw = (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth;
+      const minWWPx = Math.ceil(S / 120);
+      const lw = Math.max(minWWPx, (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth);
       ctx.beginPath();
       traceGeometry(ctx, el, bounds, S);
       ctx.strokeStyle = col;
@@ -2179,15 +2185,20 @@ let printPreviewActive = false;
 function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
   if (!cachedTexture) return null;
   try {
-    const SS   = 4;                              // facteur de suréchantillonnage
-    const bigN = Math.min(vgrid * SS, 2048);    // plafonné pour limiter la RAM
-    const step = bigN / vgrid;                  // px source par px cible
+    const SS   = 4;
+    const bigN = Math.min(vgrid * SS, 2048);
+    const step = bigN / vgrid;
 
     const cv = document.createElement('canvas');
     cv.width = cv.height = bigN;
     const ctx = cv.getContext('2d')!;
     ctx.drawImage(cachedTexture.image as CanvasImageSource, 0, 0, bigN, bigN);
     const big = ctx.getImageData(0, 0, bigN, bigN).data;
+
+    // Couleur de base pour détecter les pixels "spéciaux" (routes, bâtiments, GPX…)
+    const baseHexRaw = colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88';
+    const baseC = parseInt(baseHexRaw.replace('#', ''), 16);
+    const bR = (baseC >> 16) & 0xff, bG = (baseC >> 8) & 0xff, bB = baseC & 0xff;
 
     const result = new Uint8ClampedArray(vgrid * vgrid * 4);
     for (let vj = 0; vj < vgrid; vj++) {
@@ -2197,7 +2208,10 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
         const x0 = Math.floor(vi * step);
         const x1 = Math.min(Math.ceil((vi + 1) * step), bigN);
         let sumR = 0, sumG = 0, sumB = 0, n = 0;
+        // Eau (bleu dominant) : priorité absolue
         let wR = 0, wG = 0, wB = 0, hasWater = false;
+        // Pixel le plus "différent" de la base (routes, bâtiments, GPX…)
+        let spR = 0, spG = 0, spB = 0, spBestD = 0;
         for (let sy = y0; sy < y1; sy++) {
           for (let sx = x0; sx < x1; sx++) {
             const pi = (sy * bigN + sx) * 4;
@@ -2206,32 +2220,37 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
             if (!hasWater && b > r + 25 && b > g + 25 && b > 70) {
               wR = r; wG = g; wB = b; hasWater = true;
             }
+            if (!hasWater) {
+              const d = (r - bR) ** 2 + (g - bG) ** 2 + (b - bB) ** 2;
+              if (d > 600 && d > spBestD) { spBestD = d; spR = r; spG = g; spB = b; }
+            }
           }
         }
         const out = (vj * vgrid + vi) * 4;
-        result[out]   = hasWater ? wR : sumR / n;
-        result[out+1] = hasWater ? wG : sumG / n;
-        result[out+2] = hasWater ? wB : sumB / n;
-        result[out+3] = 255;
+        const useR = hasWater ? wR : spBestD > 0 ? spR : sumR / n;
+        const useG = hasWater ? wG : spBestD > 0 ? spG : sumG / n;
+        const useB = hasWater ? wB : spBestD > 0 ? spB : sumB / n;
+        result[out] = useR; result[out+1] = useG; result[out+2] = useB; result[out+3] = 255;
       }
     }
 
-    // Dilatation eau 1-ring : propage chaque cellule eau sur ses 4 voisins.
-    // Compense le sous-échantillonnage des cours d'eau fins (< 2 voxels de large).
-    const waterMask = new Uint8Array(vgrid * vgrid);
+    // Dilatation 1-ring : tout pixel non-base (eau, routes, bâtiments, zones)
+    // propage sa couleur aux 4 voisins restés à la couleur de base.
+    // Compense le sous-échantillonnage des traits fins après mise à l'échelle.
+    const specialMask = new Uint8Array(vgrid * vgrid);
     for (let i = 0; i < vgrid * vgrid; i++) {
-      const b = result[i*4+2], r = result[i*4], g = result[i*4+1];
-      if (b > r + 25 && b > g + 25 && b > 70) waterMask[i] = 1;
+      const r = result[i*4], g = result[i*4+1], b = result[i*4+2];
+      const d = (r - bR) ** 2 + (g - bG) ** 2 + (b - bB) ** 2;
+      if (d > 400) specialMask[i] = 1;
     }
+    const dirs: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
     for (let vj = 0; vj < vgrid; vj++) {
       for (let vi = 0; vi < vgrid; vi++) {
-        if (!waterMask[vj * vgrid + vi]) continue;
+        if (!specialMask[vj * vgrid + vi]) continue;
         const src = (vj * vgrid + vi) * 4;
-        const dirs: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
         for (const [dj, di] of dirs) {
           const nj = vj + dj, ni = vi + di;
-          if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid) continue;
-          if (waterMask[nj * vgrid + ni]) continue;
+          if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid || specialMask[nj * vgrid + ni]) continue;
           const no = (nj * vgrid + ni) * 4;
           result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
         }
