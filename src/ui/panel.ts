@@ -621,10 +621,6 @@ export function injectUI(): void {
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="7" width="12" height="8" rx="1.5"/><path d="M6 7V4.5A1.5 1.5 0 017.5 3h5A1.5 1.5 0 0114 4.5V7"/><rect x="7" y="12" width="6" height="4" rx="0.5" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r="0.8" fill="currentColor" stroke="none"/></svg>
           <span>Aperçu impression</span>
         </button>
-        <div id="apercu-print-loading" class="hidden">
-          <div class="dims-spin"></div>
-          <span>Génération de l'aperçu impression…</span>
-        </div>
       </div>
       <div class="apercu-nav">
         <button class="btn-back" id="btn-back-colors">

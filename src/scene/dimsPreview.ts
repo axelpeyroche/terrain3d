@@ -2226,201 +2226,45 @@ function tickLabels(): void {
 
 /* ══════════════════════════════════════════════
    PRINT PREVIEW — aperçu impression FDM
-   Génère un InstancedMesh de colonnes voxels qui reproduit
-   l'effet staircase des couches d'impression 3D.
+   Clone la géométrie du terrain et quantifie les hauteurs Y
+   au pas de couche d'impression → effet staircase authentique.
 ══════════════════════════════════════════════ */
 let printPreviewGroup: THREE.Group | null = null;
 let printPreviewActive = false;
-const VOXEL_G = 120; // résolution XZ de la grille voxels (120×120 colonnes)
-
-/** Canvas G×G avec couleurs de zone sans hillshade — pour colorer les voxels */
-function buildVoxelColorCanvas(G: number): Uint8ClampedArray {
-  if (!cachedElev) return new Uint8ClampedArray(G * G * 4);
-  const { grid, minE, elevRange, bounds } = cachedElev;
-
-  const cv = document.createElement('canvas');
-  cv.width = G; cv.height = G;
-  const ctx = cv.getContext('2d')!;
-
-  // Étape 1 : base altimétrique (même logique que buildMapTexture Step 1)
-  const cVegL = hexToRgb(colorSlots[layerSlotOverrides['veg_low']   ?? 3] ?? '#8ab858');
-  const cVegD = hexToRgb(colorSlots[layerSlotOverrides['veg_dense']  ?? 4] ?? '#3a6828');
-  const cBase = hexToRgb(colorSlots[layerSlotOverrides['base']       ?? 1] ?? '#c0af88');
-  const snapId = ctx.createImageData(G, G);
-  const sd = snapId.data;
-  for (let gj = 0; gj < G; gj++) {
-    for (let gi = 0; gi < G; gi++) {
-      const elev = sampleElev(grid, PREVIEW_GRID, gi / (G - 1), gj / (G - 1));
-      const t = Math.max(0, Math.min(1, (elev - minE) / (elevRange || 1)));
-      const rgb = t < 0.4  ? lerp3(cVegL, cVegD, t / 0.4)
-                : t < 0.65 ? lerp3(cVegD, cBase, (t - 0.4) / 0.25)
-                : cBase;
-      const pi = (gj * G + gi) * 4;
-      sd[pi] = rgb[0]; sd[pi + 1] = rgb[1]; sd[pi + 2] = rgb[2]; sd[pi + 3] = 255;
-    }
-  }
-  ctx.putImageData(snapId, 0, 0);
-
-  // Étape 2 : remplissages de zones OSM
-  const filterSlider = document.getElementById('cp-filter') as HTMLInputElement | null;
-  const filterVal    = filterSlider ? Number(filterSlider.value) : 100;
-  const lonScale     = Math.cos((bounds.minLat + bounds.maxLat) / 2 * Math.PI / 180);
-  const boundsAreaM2 = (bounds.maxLon - bounds.minLon) * lonScale * 111320
-                     * (bounds.maxLat - bounds.minLat) * 111320;
-  const minAreaM2    = Math.pow(1 - filterVal / 100, 2) * 0.02 * boundsAreaM2;
-
-  for (const layer of ZONE_LAYERS) {
-    if (!layer.fill || !(layerVisible[layer.id] ?? true)) continue;
-    const layerEls = cachedFeatures.filter(el => {
-      if (!el.tags || !layer.match(el.tags)) return false;
-      if (minAreaM2 > 0) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
-      return true;
-    });
-    if (!layerEls.length) continue;
-    const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
-    ctx.beginPath();
-    for (const el of layerEls) traceGeometry(ctx, el, bounds, G);
-    ctx.fillStyle = colorSlots[effectiveSlot] ?? '#888';
-    ctx.fill('evenodd');
-  }
-
-  // Étape 3 : empreintes bâtiments
-  if (layerVisible['buildings'] ?? true) {
-    const bldSlot = layerSlotOverrides['buildings'] ?? 7;
-    ctx.fillStyle = colorSlots[bldSlot] ?? '#b8b8b8';
-    ctx.beginPath();
-    for (const el of cachedBuildings) {
-      const polys = getOsmPolygons(el);
-      if (!polys.length) continue;
-      const outer = polys[0];
-      if (outer.length < 3) continue;
-      for (let i = 0; i < outer.length; i++) {
-        const cx = (outer[i].lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * G;
-        const cy = (1 - (outer[i].lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * G;
-        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
-      }
-      ctx.closePath();
-    }
-    ctx.fill('nonzero');
-  }
-
-  // Étape 4 : lignes de routes
-  if (layerVisible['roads'] ?? true) {
-    const roadSlot = layerSlotOverrides['roads'] ?? 8;
-    const lonSc    = Math.cos((bounds.minLat + bounds.maxLat) / 2 * Math.PI / 180);
-    const realW    = (bounds.maxLon - bounds.minLon) * lonSc * 111320;
-    const texScale = G / realW;
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = colorSlots[roadSlot] ?? '#262626';
-    for (const road of cachedRoads) {
-      const lw = Math.max(1, roadRealWidthM(road.hwType) * texScale * roadWidthMult);
-      ctx.beginPath();
-      let first = true;
-      for (const p of road.geom) {
-        const cx = (p.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * G;
-        const cy = (1 - (p.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * G;
-        if (first) { ctx.moveTo(cx, cy); first = false; } else ctx.lineTo(cx, cy);
-      }
-      ctx.lineWidth = lw;
-      ctx.stroke();
-    }
-  }
-
-  // Étape 5 : voies d'eau (lignes)
-  for (const layer of ZONE_LAYERS) {
-    if (layer.fill || !(layerVisible[layer.id] ?? true)) continue;
-    const layerEls = cachedFeatures.filter(el => el.tags && layer.match(el.tags));
-    if (!layerEls.length) continue;
-    const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
-    ctx.strokeStyle = colorSlots[effectiveSlot] ?? '#4a88c0';
-    for (const el of layerEls) {
-      if (!el.tags) continue;
-      const ww = el.tags.waterway ?? '';
-      ctx.beginPath();
-      traceGeometry(ctx, el, bounds, G);
-      ctx.lineWidth = (ww === 'river' ? 3 : ww === 'canal' ? 2 : 1) * waterwayLineWidth;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-    }
-  }
-
-  return ctx.getImageData(0, 0, G, G).data;
-}
 
 export function buildPrintPreview(layerHeightMm = 0.20): void {
-  if (!scene || !cachedElev || !lastWorkGrid) return;
+  if (!scene || !terrainMeshRef) return;
   clearPrintPreview();
   printPreviewActive = true;
 
-  const { minE, elevRange } = cachedElev;
-  const grid     = lastWorkGrid;
-  const wMm      = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
-  const lh       = Math.max(0.05, layerHeightMm);
+  const lh    = Math.max(0.01, layerHeightMm);
+  const baseH = lastBaseH;
 
-  const colorPx  = buildVoxelColorCanvas(VOXEL_G);
-
-  const cellW = wMm / VOXEL_G;
-  const cellD = dMm / VOXEL_G;
-
-  // BoxGeometry unitaire (Y=1) — on scale Y = hauteur réelle de chaque colonne
-  const boxGeo  = new THREE.BoxGeometry(cellW * 0.96, 1, cellD * 0.96);
-  const mat     = new THREE.MeshLambertMaterial();
-  const instMesh = new THREE.InstancedMesh(boxGeo, mat, VOXEL_G * VOXEL_G);
-  instMesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-
-  const dummy  = new THREE.Object3D();
-  const iColor = new THREE.Color();
-
-  for (let gj = 0; gj < VOXEL_G; gj++) {
-    for (let gi = 0; gi < VOXEL_G; gi++) {
-      const idx = gj * VOXEL_G + gi;
-      const u   = gi / (VOXEL_G - 1);
-      const v   = gj / (VOXEL_G - 1);
-      const x   = (u - 0.5) * wMm;
-      const z   = (0.5 - v) * dMm;
-
-      // Colonnes hors zone : invisible
-      if (lastZonePoly && !pointInZone(x, z, lastZonePoly)) {
-        dummy.position.set(x, -9999, z);
-        dummy.scale.set(0.001, 0.001, 0.001);
-        dummy.updateMatrix();
-        instMesh.setMatrixAt(idx, dummy.matrix);
-        iColor.setRGB(0, 0, 0);
-        instMesh.setColorAt(idx, iColor);
-        continue;
-      }
-
-      const elev   = sampleElev(grid, PREVIEW_GRID, u, v);
-      const rawH   = Math.max(0, (elev - minE) / (elevRange || 1)) * elevScaleMm;
-      // Quantification à la hauteur de couche → effet staircase FDM
-      const steps  = Math.max(1, Math.round(rawH / lh));
-      const colH   = steps * lh;
-
-      dummy.position.set(x, baseH + colH / 2, z);
-      dummy.scale.set(1, colH, 1);
-      dummy.updateMatrix();
-      instMesh.setMatrixAt(idx, dummy.matrix);
-
-      const pi = idx * 4;
-      iColor.setRGB(colorPx[pi] / 255, colorPx[pi + 1] / 255, colorPx[pi + 2] / 255);
-      instMesh.setColorAt(idx, iColor);
-    }
+  // Clone la géométrie du terrain et quantifie chaque sommet Y au pas de couche
+  const geo = (terrainMeshRef.geometry as THREE.BufferGeometry).clone();
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const yRel   = pos.getY(i) - baseH;
+    const quantY = Math.max(0, Math.floor(yRel / lh)) * lh + baseH;
+    pos.setY(i, quantY);
   }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals(); // recalcule les normales pour un éclairage correct des terrasses
 
-  instMesh.instanceMatrix.needsUpdate = true;
-  if (instMesh.instanceColor) instMesh.instanceColor.needsUpdate = true;
+  // Partage le même matériau (texture zones + hillshade) que le terrain lisse
+  const printMesh = new THREE.Mesh(geo, terrainMeshRef.material);
 
   printPreviewGroup = new THREE.Group();
-  printPreviewGroup.add(instMesh);
+  printPreviewGroup.add(printMesh);
   scene.add(printPreviewGroup);
   sceneObjs.push(printPreviewGroup);
 
-  // Masquer le terrain lisse et les meshes flottants (zones, routes ruban, lignes)
-  if (terrainMeshRef) terrainMeshRef.visible = false;
+  // Masquer le terrain lisse et les meshes qui lévitent au-dessus
+  terrainMeshRef.visible = false;
   for (const m of zoneMeshRefs) m.visible = false;
   if (roadMeshGroup) roadMeshGroup.visible = false;
   if (lineMeshGroup) lineMeshGroup.visible = false;
-  // Base, façades, bâtiments et GPX restent visibles
+  // Base, façades, bâtiments 3D et trace GPX restent visibles
 }
 
 export function clearPrintPreview(): void {
@@ -2433,7 +2277,6 @@ export function clearPrintPreview(): void {
     printPreviewGroup = null;
   }
   printPreviewActive = false;
-  // Restaurer le terrain lisse
   if (terrainMeshRef) terrainMeshRef.visible = true;
   for (const m of zoneMeshRefs) m.visible = layerVisible[(m as any).__zoneLayerId] ?? true;
   if (roadMeshGroup) roadMeshGroup.visible = layerVisible['roads'] ?? true;

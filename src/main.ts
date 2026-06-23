@@ -303,8 +303,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     const tab = (btn as HTMLElement).dataset.tab;
     if (!tab || (btn as HTMLButtonElement).disabled) return;
     switchTab(tab);
-    if (tab === 'params') onDimsTabOpen();
-    else if (tab === 'colors') onColorsTabOpen();
+    if (tab === 'params') { clearPrintPreview(); onDimsTabOpen(); }
+    else if (tab === 'colors') { clearPrintPreview(); onColorsTabOpen(); }
     else if (tab === 'apercu') onAperçuTabOpen();
     else detachDimsCanvas(); // zone or render tab — hide the 3D preview canvas
     if (tab === 'render') {
@@ -337,29 +337,16 @@ document.getElementById('btn-next-render')?.addEventListener('click', () => {
   generate();
 });
 
-/* ── Bouton "Aperçu impression 3D" (toggle voxel / lisse) ── */
-document.getElementById('btn-print-preview')?.addEventListener('click', async () => {
-  const btn     = document.getElementById('btn-print-preview') as HTMLButtonElement;
-  const loading = document.getElementById('apercu-print-loading')!;
-
+/* ── Bouton toggle "Aperçu lisse / Aperçu impression" ── */
+document.getElementById('btn-print-preview')?.addEventListener('click', () => {
+  const btn = document.getElementById('btn-print-preview') as HTMLButtonElement;
+  const sp  = btn.querySelector('span')!;
   if (isPrintPreviewActive()) {
     clearPrintPreview();
     btn.classList.remove('active');
-    btn.querySelector('span')!.textContent = 'Aperçu impression';
+    sp.textContent = 'Aperçu impression';
   } else {
-    loading.classList.remove('hidden');
-    btn.disabled = true;
-
-    // Laisser le navigateur rendre le spinner avant de bloquer sur la génération
-    await new Promise<void>(r => setTimeout(r, 60));
-
-    const layerH = Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20);
-    buildPrintPreview(layerH);
-
-    loading.classList.add('hidden');
-    btn.disabled = false;
-    btn.classList.add('active');
-    btn.querySelector('span')!.textContent = 'Aperçu lisse';
+    applyPrintPreview();
   }
 });
 
@@ -367,7 +354,7 @@ document.getElementById('btn-print-preview')?.addEventListener('click', async ()
 document.getElementById('btn-back-zone')?.addEventListener('click', () => { detachDimsCanvas(); switchTab('zone'); });
 document.getElementById('btn-back-dims')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
 document.getElementById('btn-back-params')?.addEventListener('click', () => { switchTab('params'); onDimsTabOpen(); });
-document.getElementById('btn-back-colors')?.addEventListener('click', () => { switchTab('colors'); onColorsTabOpen(); });
+document.getElementById('btn-back-colors')?.addEventListener('click', () => { clearPrintPreview(); switchTab('colors'); onColorsTabOpen(); });
 
 /* ── Generate (onglet 3 manuel) ── */
 document.getElementById('btn-gen')?.addEventListener('click', generate);
@@ -455,19 +442,31 @@ function onColorsTabOpen(): void {
   });
 }
 
+function getLayerHeightMm(): number {
+  return Number((document.getElementById('ps-layer-h') as HTMLInputElement)?.value ?? 0.20);
+}
+
+function applyPrintPreview(): void {
+  buildPrintPreview(getLayerHeightMm());
+  const btn = document.getElementById('btn-print-preview') as HTMLButtonElement | null;
+  if (btn) { btn.classList.add('active'); const sp = btn.querySelector('span'); if (sp) sp.textContent = 'Aperçu lisse'; }
+}
+
 function onAperçuTabOpen(): void {
   if (!state.bounds) return;
   syncDimsInputsFromState();
-  requestAnimationFrame(() => {
+  requestAnimationFrame(async () => {
     const area = document.getElementById('apercu-3d-area')!;
+    clearPrintPreview(); // réinitialise avant de reconstruire la scène
     if (!dimsRendererReady) {
       dimsRendererReady = true;
       initDimsRenderer(area);
-      triggerDimsBuild();
+      await triggerDimsBuild(); // attend la fin du chargement complet
     } else {
       initDimsRenderer(area);
       rebuildScene(getDimSettings());
     }
+    applyPrintPreview(); // applique automatiquement l'aperçu impression
   });
 }
 
