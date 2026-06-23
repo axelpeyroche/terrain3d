@@ -2450,11 +2450,11 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
   if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
 
   const matGroups  = objects.map(o => `<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`).join('\n');
-  const resObjs    = objects.map(o => `<object id="${o.id}" type="model" p:pid="${o.id+1000}" p:pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
+  const resObjs    = objects.map(o => `<object id="${o.id}" type="model" pid="${o.id+1000}" pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
   const buildItems = objects.map(o => `<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`).join('\n');
   const model = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
+    '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
     '  <metadata name="Title">Terrain3D</metadata>',
     '  <resources>', matGroups, resObjs, '  </resources>',
     '  <build>', buildItems, '  </build>',

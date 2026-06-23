@@ -76,7 +76,7 @@ export async function export3MF(filename?: string): Promise<void> {
 
   // Objets
   const resObjs = objects.map(o =>
-    `<object id="${o.id}" type="model" p:pid="${o.id + 1000}" p:pindex="0">` +
+    `<object id="${o.id}" type="model" pid="${o.id + 1000}" pindex="0">` +
     `<mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`,
   ).join('\n');
 
@@ -88,8 +88,7 @@ export async function export3MF(filename?: string): Promise<void> {
   const model = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<model unit="millimeter" xml:lang="en-US"',
-    '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"',
-    '  xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
+    '  xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">',
     '  <metadata name="Title">Terrain3D</metadata>',
     '  <resources>',
     matGroups,
