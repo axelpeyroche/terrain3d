@@ -1376,9 +1376,7 @@ function buildMapTexture(
     for (let gj = 0; gj < G; gj++) {
       for (let gi = 0; gi < G; gi++) {
         const t = Math.max(0, Math.min(1, (grid[gj * G + gi] - minE) / (elevRange || 1)));
-        const rgb = t < 0.4 ? lerp3(cVegL, cVegD, t / 0.4)
-                  : t < 0.65 ? lerp3(cVegD, cBase, (t - 0.4) / 0.25)
-                  : cBase;
+        const rgb = t < 0.45 ? cVegL : t < 0.70 ? cVegD : cBase;
         const pi = (gj * G + gi) * 4;
         sd[pi] = rgb[0]; sd[pi + 1] = rgb[1]; sd[pi + 2] = rgb[2]; sd[pi + 3] = 255;
       }
@@ -1417,51 +1415,7 @@ function buildMapTexture(
     }
   }
 
-  // Step 3 — hillshade pass: precompute per-grid-cell shade, then interpolate per pixel
-  {
-    const SX = wMm / (G - 1);
-    const SZ = dMm / (G - 1);
-    const EVS = elevScaleMm / (elevRange > 0 ? elevRange : 1);
-    // Light from NW at 45° altitude (azimuth 315°)
-    const LX = -0.5, LY = 0.7071, LZ = -0.5;
-
-    const shadeGrid = new Float32Array(G * G);
-    for (let gj = 0; gj < G; gj++) {
-      for (let gi = 0; gi < G; gi++) {
-        const giL = Math.max(0, gi - 1), giR = Math.min(G - 1, gi + 1);
-        const gjU = Math.max(0, gj - 1), gjD = Math.min(G - 1, gj + 1);
-        const dEdX = (grid[gj * G + giR] - grid[gj * G + giL]) / ((giR - giL) * SX);
-        const dEdZ = (grid[gjD * G + gi] - grid[gjU * G + gi]) / ((gjD - gjU) * SZ);
-        const sX = dEdX * EVS, sZ = dEdZ * EVS;
-        const len = Math.sqrt(sX * sX + 1 + sZ * sZ);
-        const dot = (-sX * LX + LY - sZ * LZ) / len;
-        shadeGrid[gj * G + gi] = Math.max(0.35, Math.min(1.3, 0.45 + 0.85 * Math.max(0, dot)));
-      }
-    }
-
-    const imgData = ctx.getImageData(0, 0, S, S);
-    const d = imgData.data;
-    for (let row = 0; row < S; row++) {
-      for (let col = 0; col < S; col++) {
-        const gx = col / (S - 1) * (G - 1);
-        const gy = row / (S - 1) * (G - 1);
-        const gi = Math.min(G - 2, Math.floor(gx));
-        const gj = Math.min(G - 2, Math.floor(gy));
-        const fx = gx - gi, fy = gy - gj;
-        const shade = shadeGrid[gj*G+gi]*(1-fx)*(1-fy)
-                    + shadeGrid[gj*G+gi+1]*fx*(1-fy)
-                    + shadeGrid[(gj+1)*G+gi]*(1-fx)*fy
-                    + shadeGrid[(gj+1)*G+gi+1]*fx*fy;
-        const pi = (row * S + col) * 4;
-        d[pi]   = d[pi]   * shade > 255 ? 255 : d[pi]   * shade;
-        d[pi+1] = d[pi+1] * shade > 255 ? 255 : d[pi+1] * shade;
-        d[pi+2] = d[pi+2] * shade > 255 ? 255 : d[pi+2] * shade;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-  }
-
-  // Step 4a — road lines painted on shaded terrain (texture pass, before waterways)
+  // Step 3 — routes — road lines painted on shaded terrain (texture pass, before waterways)
   if ((layerVisible['roads'] ?? true) && roads.length > 0) {
     const roadSlot = layerSlotOverrides['roads'] ?? 8;
     const roadCol = colorSlots[roadSlot] ?? '#262626';
