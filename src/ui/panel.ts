@@ -578,10 +578,6 @@ export function injectUI(): void {
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4l-6 6 6 6"/></svg>
           Dimensions
         </button>
-        <button class="btn-next" id="btn-next-apercu">
-          Aperçu
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
-        </button>
       </div>
 
       </div><!-- /#colors-panel -->
@@ -604,6 +600,10 @@ export function injectUI(): void {
           <div class="dims-spin"></div>
           <span>Chargement…</span>
         </div>
+        <button class="btn-next cp-next-overlay" id="btn-next-apercu">
+          Aperçu
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
+        </button>
       </div>
 
     </div><!-- /#colors-wrap -->
@@ -628,8 +628,8 @@ export function injectUI(): void {
           Couleurs
         </button>
         <button class="btn-next" id="btn-next-render">
-          Générer
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l4-4 3 3 7-10" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Générer .3MF
         </button>
       </div>
     </div>

@@ -2234,12 +2234,26 @@ function tickLabels(): void {
 let printPreviewGroup: THREE.Group | null = null;
 let printPreviewActive = false;
 
-export function buildPrintPreview(layerHeightMm = 0.20): void {
-  if (!scene || !terrainMeshRef || !cachedElev || !cachedTexture) return;
-  clearPrintPreview();
-  printPreviewActive = true;
+/** Lit les pixels de la texture baked à résolution réduite via drawImage.
+ *  Doit être appelé AVANT clearPrintPreview pour ne jamais laisser
+ *  la scène incohérente si la lecture du canvas échoue. */
+function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
+  if (!cachedTexture) return null;
+  try {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = vgrid;
+    const ctx = cv.getContext('2d')!;
+    ctx.drawImage(cachedTexture.image as CanvasImageSource, 0, 0, vgrid, vgrid);
+    return ctx.getImageData(0, 0, vgrid, vgrid).data;
+  } catch {
+    return null;
+  }
+}
 
-  const VGRID    = 120; // colonnes par axe
+export function buildPrintPreview(layerHeightMm = 0.20): void {
+  if (!scene || !terrainMeshRef || !cachedElev) return;
+
+  const VGRID    = 120;
   const lh       = Math.max(0.01, layerHeightMm);
   const wMm      = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
   const { minE, elevRange } = cachedElev;
@@ -2248,13 +2262,13 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
   const voxelW   = wMm / VGRID;
   const voxelD   = dMm / VGRID;
 
-  // Lecture des pixels depuis le canvas de la texture baked (zones + hillshade)
-  const texImage = cachedTexture.image;
-  if (!(texImage instanceof HTMLCanvasElement)) return;
-  const texCtx = texImage.getContext('2d');
-  if (!texCtx) return;
-  const { width: texW, height: texH } = texImage;
-  const pixels = texCtx.getImageData(0, 0, texW, texH).data;
+  // Lecture pixels AVANT de modifier la scène : si drawImage échoue on utilise
+  // une couleur par défaut mais les voxels s'affichent quand même.
+  const pixels = sampleTexturePixels(VGRID);
+  const defCol = new THREE.Color(colorSlots[layerSlotOverrides['veg_low'] ?? 3] ?? '#8ab858');
+
+  clearPrintPreview();
+  printPreviewActive = true;
 
   const count  = VGRID * VGRID;
   const boxGeo = new THREE.BoxGeometry(voxelW * 0.99, 1, voxelD * 0.99);
@@ -2271,7 +2285,6 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
       const cx = (u - 0.5) * wMm;
       const cz = (0.5 - v) * dMm;
 
-      // Colonne hors de la zone → invisible (scale 0)
       if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) {
         dummy.scale.setScalar(0);
         dummy.position.set(cx, baseH, cz);
@@ -2290,11 +2303,12 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
       dummy.updateMatrix();
       iMesh.setMatrixAt(idx, dummy.matrix);
 
-      // Couleur échantillonnée depuis la texture
-      const px = Math.max(0, Math.min(texW - 1, Math.round(u * (texW - 1))));
-      const py = Math.max(0, Math.min(texH - 1, Math.round(v * (texH - 1))));
-      const pi = (py * texW + px) * 4;
-      col.setRGB(pixels[pi] / 255, pixels[pi + 1] / 255, pixels[pi + 2] / 255);
+      if (pixels) {
+        const pi = (vj * VGRID + vi) * 4;
+        col.setRGB(pixels[pi] / 255, pixels[pi + 1] / 255, pixels[pi + 2] / 255);
+      } else {
+        col.copy(defCol);
+      }
       iMesh.setColorAt(idx, col);
     }
   }
@@ -2311,6 +2325,155 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
   for (const m of zoneMeshRefs) m.visible = false;
   if (roadMeshGroup) roadMeshGroup.visible = false;
   if (lineMeshGroup) lineMeshGroup.visible = false;
+}
+
+/* ══════════════════════════════════════════════
+   EXPORT 3MF — depuis l'aperçu dims preview
+   Base + façades (THREE.js mesh) + terrain en voxels
+   colorés groupés par slot de filament.
+══════════════════════════════════════════════ */
+export async function exportDimsPreview3MF(filename?: string): Promise<void> {
+  if (!cachedElev || !cachedTexture) {
+    alert('Ouvrez d\'abord l\'onglet "Aperçu" pour générer la prévisualisation.'); return;
+  }
+
+  const VGRID = 80;
+  const lh    = 0.20;
+  const wMm = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
+  const { minE, elevRange } = cachedElev;
+  const G        = PREVIEW_GRID;
+  const workGrid = lastWorkGrid ?? cachedElev.grid;
+  const vW = wMm / VGRID, vD = dMm / VGRID;
+
+  const pixels = sampleTexturePixels(VGRID);
+
+  function nearestSlot(r: number, g: number, b: number): number {
+    let best = 1, bd = Infinity;
+    for (const [k, hex] of Object.entries(colorSlots)) {
+      const c = new THREE.Color(hex);
+      const d = (c.r - r/255)**2 + (c.g - g/255)**2 + (c.b - b/255)**2;
+      if (d < bd) { bd = d; best = Number(k); }
+    }
+    return best;
+  }
+
+  interface Vox { cx: number; cz: number; h: number; }
+  const bySlot = new Map<number, Vox[]>();
+  for (let vj = 0; vj < VGRID; vj++) {
+    for (let vi = 0; vi < VGRID; vi++) {
+      const u = (vi + 0.5) / VGRID, v = (vj + 0.5) / VGRID;
+      const cx = (u - 0.5) * wMm, cz = (0.5 - v) * dMm;
+      if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) continue;
+      const elev = sampleElev(workGrid, G, u, 1 - v);
+      const yQ   = Math.max(lh, Math.ceil(((elev - minE) / elevRange) * elevScaleMm / lh) * lh);
+      const slot = pixels
+        ? nearestSlot(pixels[(vj*VGRID+vi)*4], pixels[(vj*VGRID+vi)*4+1], pixels[(vj*VGRID+vi)*4+2])
+        : 1;
+      if (!bySlot.has(slot)) bySlot.set(slot, []);
+      bySlot.get(slot)!.push({ cx, cz, h: yQ });
+    }
+  }
+
+  function buildSlotGeo(voxels: Vox[]): { vx: string; tr: string } {
+    let vx = '', tr = '', base = 0;
+    const hw = vW * 0.99 / 2, hd = vD * 0.99 / 2;
+    for (const { cx, cz, h } of voxels) {
+      // THREE Y-up → 3MF Z-up : x=sceneX, y=sceneZ, z=sceneY
+      const x0 = cx-hw, x1 = cx+hw, y0 = cz-hd, y1 = cz+hd, z0 = baseH, z1 = baseH+h;
+      vx += `<vertex x="${x0.toFixed(3)}" y="${y0.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
+            `<vertex x="${x1.toFixed(3)}" y="${y0.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
+            `<vertex x="${x1.toFixed(3)}" y="${y1.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
+            `<vertex x="${x0.toFixed(3)}" y="${y1.toFixed(3)}" z="${z0.toFixed(3)}"/>` +
+            `<vertex x="${x0.toFixed(3)}" y="${y0.toFixed(3)}" z="${z1.toFixed(3)}"/>` +
+            `<vertex x="${x1.toFixed(3)}" y="${y0.toFixed(3)}" z="${z1.toFixed(3)}"/>` +
+            `<vertex x="${x1.toFixed(3)}" y="${y1.toFixed(3)}" z="${z1.toFixed(3)}"/>` +
+            `<vertex x="${x0.toFixed(3)}" y="${y1.toFixed(3)}" z="${z1.toFixed(3)}"/>`;
+      const b = base;
+      tr += `<triangle v1="${b}" v2="${b+3}" v3="${b+2}"/><triangle v1="${b}" v2="${b+2}" v3="${b+1}"/>` +
+            `<triangle v1="${b+4}" v2="${b+5}" v3="${b+6}"/><triangle v1="${b+4}" v2="${b+6}" v3="${b+7}"/>` +
+            `<triangle v1="${b}" v2="${b+1}" v3="${b+5}"/><triangle v1="${b}" v2="${b+5}" v3="${b+4}"/>` +
+            `<triangle v1="${b+2}" v2="${b+3}" v3="${b+7}"/><triangle v1="${b+2}" v2="${b+7}" v3="${b+6}"/>` +
+            `<triangle v1="${b}" v2="${b+4}" v3="${b+7}"/><triangle v1="${b}" v2="${b+7}" v3="${b+3}"/>` +
+            `<triangle v1="${b+1}" v2="${b+2}" v3="${b+6}"/><triangle v1="${b+1}" v2="${b+6}" v3="${b+5}"/>`;
+      base += 8;
+    }
+    return { vx, tr };
+  }
+
+  function serMesh(mesh: THREE.Mesh, off = 0): { vx: string; tr: string; n: number } {
+    mesh.updateWorldMatrix(true, false);
+    const geo = (mesh.geometry as THREE.BufferGeometry).clone();
+    geo.applyMatrix4(mesh.matrixWorld);
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const idx = geo.index;
+    let vx = '';
+    for (let i = 0; i < pos.count; i++)
+      vx += `<vertex x="${pos.getX(i).toFixed(3)}" y="${pos.getZ(i).toFixed(3)}" z="${pos.getY(i).toFixed(3)}"/>`;
+    let tr = '';
+    if (idx) {
+      for (let i = 0; i < idx.count; i += 3)
+        tr += `<triangle v1="${idx.getX(i)+off}" v2="${idx.getX(i+1)+off}" v3="${idx.getX(i+2)+off}"/>`;
+    } else {
+      for (let i = 0; i < pos.count; i += 3)
+        tr += `<triangle v1="${i+off}" v2="${i+1+off}" v3="${i+2+off}"/>`;
+    }
+    geo.dispose();
+    return { vx, tr, n: pos.count };
+  }
+
+  interface Obj3 { id: number; name: string; col: string; vx: string; tr: string; }
+  const objects: Obj3[] = [];
+  let oid = 1;
+
+  if (baseMeshRef) {
+    const { vx, tr } = serMesh(baseMeshRef);
+    if (tr) {
+      const s = layerSlotOverrides['base'] ?? 1;
+      objects.push({ id: oid++, name: 'base', col: (colorSlots[s] ?? '#c0af88').replace('#',''), vx, tr });
+    }
+  }
+
+  if (facadeMeshRefs.length) {
+    let allVx = '', allTr = '', off = 0;
+    for (const m of facadeMeshRefs) { const r = serMesh(m, off); allVx += r.vx; allTr += r.tr; off += r.n; }
+    if (allTr) {
+      const s = layerSlotOverrides['facade'] ?? 1;
+      objects.push({ id: oid++, name: 'facades', col: (colorSlots[s] ?? '#c0af88').replace('#',''), vx: allVx, tr: allTr });
+    }
+  }
+
+  for (const [slot, voxels] of bySlot) {
+    const { vx, tr } = buildSlotGeo(voxels);
+    if (tr) objects.push({ id: oid++, name: `terrain_s${slot}`, col: (colorSlots[slot]??'#888888').replace('#',''), vx, tr });
+  }
+
+  if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
+
+  const matGroups  = objects.map(o => `<basematerials id="${o.id+1000}"><base name="${o.name}" displaycolor="#${o.col}"/></basematerials>`).join('\n');
+  const resObjs    = objects.map(o => `<object id="${o.id}" type="model" p:pid="${o.id+1000}" p:pindex="0"><mesh><vertices>${o.vx}</vertices><triangles>${o.tr}</triangles></mesh></object>`).join('\n');
+  const buildItems = objects.map(o => `<item objectid="${o.id}" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>`).join('\n');
+  const model = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">',
+    '  <metadata name="Title">Terrain3D</metadata>',
+    '  <resources>', matGroups, resObjs, '  </resources>',
+    '  <build>', buildItems, '  </build>',
+    '</model>',
+  ].join('\n');
+  const rels = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>';
+  const ct   = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-3mfdocument"/></Types>';
+
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', ct);
+  zip.folder('_rels')!.file('.rels', rels);
+  zip.folder('3D')!.file('3dmodel.model', model);
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename ?? `Terrain3D_${Date.now()}.3mf`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
 export function clearPrintPreview(): void {

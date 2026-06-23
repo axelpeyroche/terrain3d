@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, buildPrintPreview, clearPrintPreview, isPrintPreviewActive, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, buildPrintPreview, clearPrintPreview, isPrintPreviewActive, exportDimsPreview3MF, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -330,13 +330,19 @@ document.getElementById('btn-next-apercu')?.addEventListener('click', () => {
   onAperçuTabOpen();
 });
 
-/* ── Bouton "Générer" (onglet 4 → 5) ── */
-document.getElementById('btn-next-render')?.addEventListener('click', () => {
-  document.getElementById('tab-render-btn')?.removeAttribute('disabled');
-  switchTab('render');
-  const canvas = document.getElementById('c3d') as HTMLCanvasElement;
-  if (canvas) ensureThree(canvas);
-  generate();
+/* ── Bouton "Générer .3MF" (onglet 4) ── */
+document.getElementById('btn-next-render')?.addEventListener('click', async () => {
+  const btn = document.getElementById('btn-next-render') as HTMLButtonElement;
+  const sp  = btn.querySelector('span') ?? btn;
+  const origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:flex;align-items:center;gap:6px"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><circle cx="10" cy="10" r="7" stroke-dasharray="22 22" stroke-linecap="round"/></svg>Génération…</span>';
+  try {
+    await exportDimsPreview3MF(`Terrain3D_${Date.now()}.3mf`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origText;
+  }
 });
 
 /* ── Bouton toggle "Aperçu lisse / Aperçu impression" ── */
@@ -424,22 +430,25 @@ document.querySelectorAll('#params-col input, #params-col select').forEach(el =>
 /* ═══════════════════════════════════════════
    COLORS TAB
    ═══════════════════════════════════════════ */
+function showLoading(id: string): void  { document.getElementById(id)?.classList.remove('hidden'); }
+function hideLoading(id: string): void  { document.getElementById(id)?.classList.add('hidden'); }
+
 function onColorsTabOpen(): void {
   if (!state.bounds) return;
-  // Sync dims in case user skipped tab 2
   syncDimsInputsFromState();
-  // rAF: wait one frame so the panel has flex layout computed
-  requestAnimationFrame(() => {
+  requestAnimationFrame(async () => {
     const area = document.getElementById('colors-3d-area')!;
+    showLoading('colors-loading');
     if (!dimsRendererReady) {
       dimsRendererReady = true;
       initDimsRenderer(area);
-      triggerDimsBuild();
+      await triggerDimsBuild();
     } else {
-      // Reposition canvas over colors-3d-area, rebuild scene from cache (instant)
       initDimsRenderer(area);
+      await new Promise<void>(r => requestAnimationFrame(() => r())); // frame pour afficher spinner
       rebuildScene(getDimSettings());
     }
+    hideLoading('colors-loading');
     syncSwatchUI();
   });
 }
@@ -460,6 +469,7 @@ function onAperçuTabOpen(): void {
   syncDimsInputsFromState();
   requestAnimationFrame(async () => {
     const area = document.getElementById('apercu-3d-area')!;
+    showLoading('apercu-loading');
     clearPrintPreview();
     if (!dimsRendererReady) {
       dimsRendererReady = true;
@@ -467,10 +477,10 @@ function onAperçuTabOpen(): void {
       await triggerDimsBuild();
     } else {
       initDimsRenderer(area);
+      await new Promise<void>(r => requestAnimationFrame(() => r())); // frame pour afficher spinner
       rebuildScene(getDimSettings());
     }
-    // Seulement si l'utilisateur est toujours dans l'onglet aperçu
-    // (il peut avoir changé d'onglet pendant le chargement initial)
+    hideLoading('apercu-loading');
     if (activeTab === 'apercu') applyPrintPreview();
   });
 }

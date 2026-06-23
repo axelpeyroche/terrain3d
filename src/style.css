@@ -283,6 +283,7 @@ input[type=file] { display: none; }
   border-radius: 50%; animation: dspin .7s linear infinite;
 }
 @keyframes dspin { to { transform: rotate(360deg); } }
+@keyframes spin   { to { transform: rotate(360deg); } }
 #dims-load-msg { font-family: var(--mono); font-size: 10px; color: var(--dim); letter-spacing: 1px; }
 
 /* Right settings panel */
@@ -894,3 +895,9 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
   border-top: 1px solid var(--b1); background: var(--p0); gap: 8px;
 }
 .apercu-nav .btn-next { flex: 1; justify-content: center; }
+
+/* Bouton "Aperçu →" flottant en bas à droite de la zone 3D couleurs */
+.cp-next-overlay {
+  position: absolute; bottom: 16px; right: 16px; z-index: 10;
+  box-shadow: 0 0 24px rgba(0,216,255,.4);
+}
