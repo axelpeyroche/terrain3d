@@ -896,8 +896,8 @@ input[type=checkbox] { accent-color: var(--cyan); cursor: pointer; }
 }
 .apercu-nav .btn-next { flex: 1; justify-content: center; }
 
-/* Bouton "Aperçu →" flottant en bas à droite de la zone 3D couleurs */
-.cp-next-overlay {
-  position: absolute; bottom: 16px; right: 16px; z-index: 10;
+/* Bouton "Aperçu →" fixé en bas à droite de la page (visible uniquement dans panel-colors) */
+.cp-apercu-fixed {
+  position: fixed; bottom: 24px; right: 24px; z-index: 200;
   box-shadow: 0 0 24px rgba(0,216,255,.4);
 }

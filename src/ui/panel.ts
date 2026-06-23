@@ -26,16 +26,7 @@ export function injectUI(): void {
       <span class="tab-num">4</span>
       <span class="tab-lbl">Aperçu</span>
     </button>
-    <button class="tab-btn" data-tab="render" id="tab-render-btn" disabled>
-      <span class="tab-num">5</span>
-      <span class="tab-lbl">Générer &amp; Exporter</span>
-    </button>
   </nav>
-
-  <div id="tb-right">
-    <button class="btn-stl" id="btn-stl" disabled title="Export STL mono-couleur">⬇ STL</button>
-    <button class="btn-exp" id="btn-export" disabled>💾 Export .3MF</button>
-  </div>
 </header>
 
 <!-- ══ PANELS ═══════════════════════════════════════════ -->
@@ -600,13 +591,16 @@ export function injectUI(): void {
           <div class="dims-spin"></div>
           <span>Chargement…</span>
         </div>
-        <button class="btn-next cp-next-overlay" id="btn-next-apercu">
-          Aperçu
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
-        </button>
       </div>
 
     </div><!-- /#colors-wrap -->
+
+    <!-- Bouton Aperçu : fixé en bas à droite de la page, visible uniquement sur cet onglet -->
+    <button class="btn-next cp-apercu-fixed" id="btn-next-apercu">
+      Aperçu
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
+    </button>
+
   </section>
 
   <!-- ── ONGLET 4 : APERÇU ─────────────────────────── -->
@@ -617,10 +611,6 @@ export function injectUI(): void {
           <div class="dims-spin"></div>
           <span>Chargement…</span>
         </div>
-        <button id="btn-print-preview" class="ap-pp-btn" title="Aperçu impression 3D">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="7" width="12" height="8" rx="1.5"/><path d="M6 7V4.5A1.5 1.5 0 017.5 3h5A1.5 1.5 0 0114 4.5V7"/><rect x="7" y="12" width="6" height="4" rx="0.5" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r="0.8" fill="currentColor" stroke="none"/></svg>
-          <span>Aperçu impression</span>
-        </button>
       </div>
       <div class="apercu-nav">
         <button class="btn-back" id="btn-back-colors">
@@ -628,8 +618,8 @@ export function injectUI(): void {
           Couleurs
         </button>
         <button class="btn-next" id="btn-next-render">
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l4-4 3 3 7-10" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Générer .3MF
+          Générer
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4l6 6-6 6"/></svg>
         </button>
       </div>
     </div>
@@ -689,49 +679,6 @@ export function injectUI(): void {
     </div>
   </div>
 
-  <!-- ── ONGLET 4 : GÉNÉRER & EXPORTER ─────────────────── -->
-  <section id="panel-render" class="panel">
-    <div id="render-wrap">
-
-      <!-- Viewer 3D -->
-      <div id="vp">
-        <canvas id="c3d"></canvas>
-        <div id="empty3d">
-          <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="1.3">
-            <polygon points="32,5 58,52 6,52"/>
-            <polygon points="32,5 44,30 20,30" fill="currentColor" opacity=".15"/>
-          </svg>
-          <p>APERÇU 3D<br>Cliquez sur Générer pour créer le modèle</p>
-        </div>
-        <div id="prog">
-          <div id="pc">
-            <div id="ps">INIT</div>
-            <div id="pl">Préparation...</div>
-            <div id="pt"><div id="pb"></div></div>
-            <div id="pp">0%</div>
-          </div>
-        </div>
-        <div id="hint3d">🖱 Gauche=Rotation · Molette=Zoom · Droite=Déplacer</div>
-        <div id="elev"></div>
-      </div>
-
-      <!-- Panneau droit -->
-      <div id="render-right">
-        <button class="btn-back" id="btn-back-params">
-          <svg viewBox="0 0 20 20" fill="currentColor"><path d="M13 4l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>
-          Paramètres
-        </button>
-        <button class="btn-gen-f" id="btn-gen">▶ Générer le terrain 3D</button>
-        <div id="export-section">
-          <div class="export-label">Exporter le modèle</div>
-          <button class="btn-exp" id="btn-export" disabled>💾 Export .3MF <small>(AMS multi-couleur)</small></button>
-          <button class="btn-stl" id="btn-stl" disabled>⬇ Export STL <small>(mono-couleur)</small></button>
-        </div>
-        <div id="render-info"></div>
-      </div>
-
-    </div>
-  </section>
 
 </main>
 

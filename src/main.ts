@@ -12,7 +12,7 @@ import { fetchOvertureFeatures } from './features/overture';
 import { exportSTL } from './export/stl';
 import { export3MF } from './export/3mf';
 import { state, getSettings } from './state';
-import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, buildPrintPreview, clearPrintPreview, isPrintPreviewActive, exportDimsPreview3MF, type DimSettings } from './scene/dimsPreview';
+import { initDimsRenderer, buildDimsPreview, rebuildScene, resetDimsCamera, detachDimsCanvas, updateColorSlots, setLayerVisible, setLayerSlot, colorSlots, layerSlotOverrides, setGpxLineParams, startMarkerPlacement, cancelMarkerPlacement, isPlacementActive, handleCanvasClick, getPlacedMarkers, setMarkerVisible, deleteMarker, updateMarker, pickMarkerAtCanvas, selectMarker, deselectMarker, getSelectedMarkerId, fetchAndStoreLineFeatures, setLineCategoryEnabled, lineLayerEnabled, setWaterParams, setWaterFeatureEnabled, waterHeightOffset, waterHydroFlatten, waterFeaturesEnabled, setWaterwayParams, setWaterwayFeatureEnabled, waterwayLineWidth, waterwayHeightOffset, waterwayFeaturesEnabled, setLCFeatureEnabled, setLCHeightOffset, layerLCFeatures, layerLCHeightOffset, buildingFloorHeightMm, setBuildingFloorHeight, buildingHeightScale, setBuildingHeightScale, buildingSizeScale, setBuildingSizeScale, buildingMinHeightMm, setBuildingMinHeight, buildingMinSizeM2, setBuildingMinSize, roadHeightMm, roadMinWidthMm, roadWidthMult, roadStyle, setRoadHeight, setRoadMinWidth, setRoadWidthMult, setRoadStyle, rebuildRoadMeshes, buildPrintPreview, clearPrintPreview, exportDimsPreview3MF, type DimSettings } from './scene/dimsPreview';
 import type {
   TerrainWorkerInput, GeometryWorkerInput,
   TerrainResult, GeometryResult,
@@ -184,7 +184,7 @@ export function updateZoneFooter(): void {
     footer.classList.remove('visible');
     document.getElementById('tab-params-btn')?.setAttribute('disabled', '');
     document.getElementById('tab-colors-btn')?.setAttribute('disabled', '');
-    document.getElementById('tab-render-btn')?.setAttribute('disabled', '');
+    document.getElementById('tab-apercu-btn')?.setAttribute('disabled', '');
   }
 }
 
@@ -308,11 +308,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (tab === 'params') { clearPrintPreview(); onDimsTabOpen(); }
     else if (tab === 'colors') { clearPrintPreview(); onColorsTabOpen(); }
     else if (tab === 'apercu') onAperçuTabOpen();
-    else detachDimsCanvas(); // zone or render tab — hide the 3D preview canvas
-    if (tab === 'render') {
-      const canvas = document.getElementById('c3d') as HTMLCanvasElement;
-      if (canvas) ensureThree(canvas);
-    }
+    else detachDimsCanvas();
   });
 });
 
@@ -345,31 +341,11 @@ document.getElementById('btn-next-render')?.addEventListener('click', async () =
   }
 });
 
-/* ── Bouton toggle "Aperçu lisse / Aperçu impression" ── */
-document.getElementById('btn-print-preview')?.addEventListener('click', () => {
-  const btn = document.getElementById('btn-print-preview') as HTMLButtonElement;
-  const sp  = btn.querySelector('span')!;
-  if (isPrintPreviewActive()) {
-    clearPrintPreview();
-    btn.classList.remove('active');
-    sp.textContent = 'Aperçu impression';
-  } else {
-    applyPrintPreview();
-  }
-});
 
 /* ── Boutons retour ── */
 document.getElementById('btn-back-zone')?.addEventListener('click', () => { activeTab = 'zone'; detachDimsCanvas(); switchTab('zone'); });
 document.getElementById('btn-back-dims')?.addEventListener('click', () => { activeTab = 'params'; switchTab('params'); onDimsTabOpen(); });
-document.getElementById('btn-back-params')?.addEventListener('click', () => { activeTab = 'params'; switchTab('params'); onDimsTabOpen(); });
 document.getElementById('btn-back-colors')?.addEventListener('click', () => { activeTab = 'colors'; clearPrintPreview(); switchTab('colors'); onColorsTabOpen(); });
-
-/* ── Generate (onglet 3 manuel) ── */
-document.getElementById('btn-gen')?.addEventListener('click', generate);
-
-/* ── Export ── */
-document.getElementById('btn-stl')?.addEventListener('click', () => exportSTL('terrain3d.stl'));
-document.getElementById('btn-export')?.addEventListener('click', () => export3MF());
 
 /* ── Accordion clicks for Dimensions panel ── */
 document.querySelectorAll('.dp-sh').forEach(sh => {
@@ -401,11 +377,8 @@ document.getElementById('dp-flat')?.addEventListener('change', () => {
   rebuildScene(getDimSettings());
 });
 
-/* ── Quick export button in Dimensions panel ── */
-document.getElementById('dp-dl-btn')?.addEventListener('click', () => {
-  if (!state.generated) { showModal('INFO', 'Générez d\'abord le modèle 3D dans l\'onglet "Générer & Exporter".'); return; }
-  exportSTL('terrain3d.stl');
-});
+/* ── Quick STL export button in Dimensions panel ── */
+document.getElementById('dp-dl-btn')?.addEventListener('click', () => exportSTL('terrain3d.stl'));
 
 /* ── Bouton "Paramètres 3D →" (onglet 1 → 2) ── */
 document.getElementById('btn-next-tab')?.addEventListener('click', () => {
