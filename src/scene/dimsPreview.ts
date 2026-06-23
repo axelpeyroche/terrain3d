@@ -2273,8 +2273,9 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
   printPreviewActive = true;
 
   const count  = VGRID * VGRID;
-  // Léger gap entre colonnes (0.96) pour rendre les bords de couches visibles
-  const boxGeo = new THREE.BoxGeometry(voxelW * 0.96, 1, voxelD * 0.96);
+  // Colonnes jointives (1.0) : pas de bords gris entre cases de même hauteur,
+  // les marches de couches restent visibles aux transitions de hauteur.
+  const boxGeo = new THREE.BoxGeometry(voxelW, 1, voxelD);
   const mat    = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const iMesh  = new THREE.InstancedMesh(boxGeo, mat, count);
 
@@ -2307,7 +2308,9 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
       iMesh.setMatrixAt(idx, dummy.matrix);
 
       if (pixels) {
-        const pi = (vj * VGRID + vi) * 4;
+        // Le canvas a nord en haut (vj=0) mais la position 3D a vj=0 = sud.
+        // On retourne vj pour aligner couleur et élévation (qui utilise 1-v).
+        const pi = ((VGRID - 1 - vj) * VGRID + vi) * 4;
         col.setRGB(pixels[pi] / 255, pixels[pi + 1] / 255, pixels[pi + 2] / 255);
       } else {
         col.copy(defCol);
@@ -2369,8 +2372,9 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
       if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) continue;
       const elev = sampleElev(workGrid, G, u, 1 - v);
       const yQ   = Math.max(lh, Math.ceil(((elev - minE) / elevRange) * elevScaleMm / lh) * lh);
+      const pif  = ((VGRID - 1 - vj) * VGRID + vi) * 4;
       const slot = pixels
-        ? nearestSlot(pixels[(vj*VGRID+vi)*4], pixels[(vj*VGRID+vi)*4+1], pixels[(vj*VGRID+vi)*4+2])
+        ? nearestSlot(pixels[pif], pixels[pif+1], pixels[pif+2])
         : 1;
       if (!bySlot.has(slot)) bySlot.set(slot, []);
       bySlot.get(slot)!.push({ cx, cz, h: yQ });
