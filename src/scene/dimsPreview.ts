@@ -71,6 +71,7 @@ let pendingShape    = '';
 
 // Last scene dims (needed to re-project markers after rebuild)
 let lastW = 200, lastD = 200, lastBaseH = 2, lastElevScale = 1;
+let lastGpxPoints: LatLon[] = [];
 
 // Water body params
 export let waterHeightOffset = -1;   // layers (negative = sinks below surface)
@@ -610,6 +611,7 @@ export function rebuildScene(s: DimSettings): void {
   const { wMm, dMm, baseH, exag, flatFacade, facadeWidthMm, gpxPoints, zoneType, zonePts, bounds } = s;
   const { grid, minE, elevRange } = cachedElev;
   const rb = bounds ?? cachedElev.bounds;
+  lastGpxPoints = gpxPoints;
 
   const cLat = (rb.minLat + rb.maxLat) / 2;
   const realW = (rb.maxLon - rb.minLon) * Math.cos(cLat * Math.PI / 180) * 111320;
@@ -1459,7 +1461,7 @@ function buildMapTexture(
     for (const el of layerEls) {
       if (!el.tags) continue;
       const ww = el.tags.waterway ?? '';
-      const lw = (ww === 'river' ? 7 : ww === 'canal' ? 5 : ww === 'stream' ? 2.5 : 1.5) * waterwayLineWidth;
+      const lw = (ww === 'river' ? 4 : ww === 'canal' ? 3 : ww === 'stream' ? 1.5 : 1) * waterwayLineWidth;
       ctx.beginPath();
       traceGeometry(ctx, el, bounds, S);
       ctx.strokeStyle = col;
@@ -2253,6 +2255,9 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
             const nj = vj + dj, ni = vi + di;
             if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid || waterMask[nj * vgrid + ni]) continue;
             const no = (nj * vgrid + ni) * 4;
+            // Ne pas écraser les routes/bâtiments (pixels non-base, non-eau)
+            const tR = result[no], tG = result[no+1], tB = result[no+2];
+            if ((tR-bR)**2 + (tG-bG)**2 + (tB-bB)**2 >= 600) continue;
             result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
             toAdd[nj * vgrid + ni] = 1;
           }
@@ -2419,10 +2424,10 @@ function buildSlotMap(VGRID: number): Uint8ClampedArray | null {
     }
   }
 
-  // Routes (lignes 2 px = 2 voxels ; dilatation complète à 4 voxels)
+  // Routes (lignes 3 px pour bien dépasser le seuil nearestSlot)
   if ((layerVisible['roads'] ?? true) && cachedRoads.length > 0) {
     ctx.strokeStyle = colorSlots[layerSlotOverrides['roads'] ?? 8] ?? '#262626';
-    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const road of cachedRoads) {
       ctx.beginPath();
       let first = true;
@@ -2433,6 +2438,20 @@ function buildSlotMap(VGRID: number): Uint8ClampedArray | null {
       }
       ctx.stroke();
     }
+  }
+
+  // Trace GPX (slot 6, rouge) — dessiné en dernier pour dominer
+  if ((layerVisible['gpx'] ?? true) && lastGpxPoints.length >= 2) {
+    ctx.strokeStyle = colorSlots[layerSlotOverrides['gpx'] ?? 6] ?? '#ff4500';
+    ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < lastGpxPoints.length; i++) {
+      const gp = lastGpxPoints[i];
+      const cx = (gp.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon) * S;
+      const cy = (1 - (gp.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)) * S;
+      if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
   }
 
   // Dilatation 1-ring : les traits fins (1-2 px) s'étendent à leurs voisins
@@ -2631,9 +2650,40 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     5: 'eau', 6: 'gpx', 7: 'batiments', 8: 'routes',
   };
   for (const [slot, slotCells] of bySlot) {
+    if (slotCells.size < 5) continue; // ignore pixels isolés (bruit de correspondance couleur)
     const { vx, tr } = buildSlotMesh(slot, slotCells);
     const name = SLOT_NAMES[slot] ?? `couche_${slot}`;
     if (tr) objects.push({ id: oid++, slot, name, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
+  }
+
+  // ── Façades : 4 murs périmètre + fond, Z=0 → baseH+maxH ──
+  {
+    const maxTerrainH = allCells.size > 0
+      ? Array.from(allCells.values()).reduce((m, c) => Math.max(m, c.h), 0)
+      : elevScaleMm;
+    const totalH = baseH + maxTerrainH;
+    const x0 = -wMm / 2, x1 = wMm / 2, y0 = -dMm / 2, y1 = dMm / 2;
+    let vx = '', tr = '', fvc = 0;
+    function fq(
+      ax: number, ay: number, az: number, bx: number, by: number, bz: number,
+      cx: number, cy: number, cz: number, dx: number, dy: number, dz: number,
+    ) {
+      vx += `<vertex x="${ax.toFixed(3)}" y="${ay.toFixed(3)}" z="${az.toFixed(3)}"/>` +
+            `<vertex x="${bx.toFixed(3)}" y="${by.toFixed(3)}" z="${bz.toFixed(3)}"/>` +
+            `<vertex x="${cx.toFixed(3)}" y="${cy.toFixed(3)}" z="${cz.toFixed(3)}"/>` +
+            `<vertex x="${dx.toFixed(3)}" y="${dy.toFixed(3)}" z="${dz.toFixed(3)}"/>`;
+      tr += `<triangle v1="${fvc}" v2="${fvc+1}" v3="${fvc+2}"/>` +
+            `<triangle v1="${fvc}" v2="${fvc+2}" v3="${fvc+3}"/>`;
+      fvc += 4;
+    }
+    fq(x1,y1,0,  x0,y1,0,  x0,y1,totalH, x1,y1,totalH); // Nord  +Y
+    fq(x0,y0,0,  x1,y0,0,  x1,y0,totalH, x0,y0,totalH); // Sud   -Y
+    fq(x1,y0,0,  x1,y1,0,  x1,y1,totalH, x1,y0,totalH); // Est   +X
+    fq(x0,y1,0,  x0,y0,0,  x0,y0,totalH, x0,y1,totalH); // Ouest -X
+    fq(x0,y1,0,  x1,y1,0,  x1,y0,0,  x0,y0,0);           // Fond  -Z
+    const facSlot = layerSlotOverrides['facade'] ?? 1;
+    const facCol = (colorSlots[facSlot] ?? '#c0af88').replace('#', '');
+    objects.push({ id: oid++, slot: facSlot, name: 'facade', col: facCol, vx, tr });
   }
 
   if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
