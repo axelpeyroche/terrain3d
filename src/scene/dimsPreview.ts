@@ -2203,7 +2203,6 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
             const pi = (sy * bigN + sx) * 4;
             const r = big[pi], g = big[pi+1], b = big[pi+2];
             sumR += r; sumG += g; sumB += b; n++;
-            // Un pixel est "eau" si le bleu domine nettement le rouge ET le vert
             if (!hasWater && b > r + 25 && b > g + 25 && b > 70) {
               wR = r; wG = g; wB = b; hasWater = true;
             }
@@ -2214,6 +2213,28 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
         result[out+1] = hasWater ? wG : sumG / n;
         result[out+2] = hasWater ? wB : sumB / n;
         result[out+3] = 255;
+      }
+    }
+
+    // Dilatation eau 1-ring : propage chaque cellule eau sur ses 4 voisins.
+    // Compense le sous-échantillonnage des cours d'eau fins (< 2 voxels de large).
+    const waterMask = new Uint8Array(vgrid * vgrid);
+    for (let i = 0; i < vgrid * vgrid; i++) {
+      const b = result[i*4+2], r = result[i*4], g = result[i*4+1];
+      if (b > r + 25 && b > g + 25 && b > 70) waterMask[i] = 1;
+    }
+    for (let vj = 0; vj < vgrid; vj++) {
+      for (let vi = 0; vi < vgrid; vi++) {
+        if (!waterMask[vj * vgrid + vi]) continue;
+        const src = (vj * vgrid + vi) * 4;
+        const dirs: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
+        for (const [dj, di] of dirs) {
+          const nj = vj + dj, ni = vi + di;
+          if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid) continue;
+          if (waterMask[nj * vgrid + ni]) continue;
+          const no = (nj * vgrid + ni) * 4;
+          result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
+        }
       }
     }
     return result;
@@ -2353,13 +2374,12 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
       const elev = sampleElev(workGrid, G, u, 1 - v);
       const yRaw = ((elev - minE) / elevRange) * elevScaleMm;
       const pif = ((VGRID - 1 - vj) * VGRID + vi) * 4;
-      let slot = 1, isWater = false;
+      let slot = 1;
       if (pixels) {
         const pr = pixels[pif], pg = pixels[pif + 1], pb = pixels[pif + 2];
-        isWater = pb > pr + 25 && pb > pg + 25 && pb > 70;
         slot = nearestSlot(pr, pg, pb);
       }
-      const yQ = Math.max(lh, Math.ceil(yRaw / lh) * lh - (isWater ? 2 * lh : 0));
+      const yQ = Math.max(lh, Math.ceil(yRaw / lh) * lh);
       const key = `${vi},${vj}`;
       allCells.set(key, { slot, h: yQ });
       if (!bySlot.has(slot)) bySlot.set(slot, new Map());
@@ -2476,9 +2496,14 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     objects.push({ id: oid++, slot: baseSlot, name: 'base_plate', col: baseCol, vx, tr });
   }
 
+  const SLOT_NAMES: Record<number, string> = {
+    1: 'terrain_nu', 2: 'neige', 3: 'vegetation_basse', 4: 'vegetation_dense',
+    5: 'eau', 6: 'gpx', 7: 'batiments', 8: 'routes',
+  };
   for (const [slot, slotCells] of bySlot) {
     const { vx, tr } = buildSlotMesh(slot, slotCells);
-    if (tr) objects.push({ id: oid++, slot, name: `terrain_s${slot}`, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
+    const name = SLOT_NAMES[slot] ?? `couche_${slot}`;
+    if (tr) objects.push({ id: oid++, slot, name, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
   }
 
   if (!objects.length) { alert('Aucun maillage à exporter.'); return; }
