@@ -2253,14 +2253,16 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
 export function buildPrintPreview(layerHeightMm = 0.20): void {
   if (!scene || !terrainMeshRef || !cachedElev) return;
 
-  const VGRID    = 120;
   const lh       = Math.max(0.01, layerHeightMm);
   const wMm      = lastW, dMm = lastD, baseH = lastBaseH, elevScaleMm = lastElevScale;
   const { minE, elevRange } = cachedElev;
   const G        = PREVIEW_GRID;
   const workGrid = lastWorkGrid ?? cachedElev.grid;
-  const voxelW   = wMm / VGRID;
-  const voxelD   = dMm / VGRID;
+
+  // Résolution dynamique : ~0.5 mm par case, plafonné à 500 pour les perfs
+  const VGRID  = Math.min(500, Math.max(150, Math.round(Math.max(wMm, dMm) / 0.50)));
+  const voxelW = wMm / VGRID;
+  const voxelD = dMm / VGRID;
 
   // Lecture pixels AVANT de modifier la scène : si drawImage échoue on utilise
   // une couleur par défaut mais les voxels s'affichent quand même.
@@ -2271,7 +2273,8 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
   printPreviewActive = true;
 
   const count  = VGRID * VGRID;
-  const boxGeo = new THREE.BoxGeometry(voxelW * 0.99, 1, voxelD * 0.99);
+  // Léger gap entre colonnes (0.96) pour rendre les bords de couches visibles
+  const boxGeo = new THREE.BoxGeometry(voxelW * 0.96, 1, voxelD * 0.96);
   const mat    = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const iMesh  = new THREE.InstancedMesh(boxGeo, mat, count);
 
