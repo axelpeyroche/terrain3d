@@ -117,6 +117,7 @@ export let buildingSizeScale     = 1.0;
 export let buildingMinHeightMm   = 0.60;
 export let buildingMinSizeM2     = 1.0;
 let cachedBuildings: OSMEl[] = [];
+let cachedBuildingParts: OSMEl[] = [];
 let cachedTowers: OSMEl[] = [];
 let towerMeshRefs: THREE.Object3D[] = [];
 let cachedBuildingsKey = '';
@@ -559,7 +560,7 @@ export async function buildDimsPreview(
 
   if (fetchNeeds.features || fetchNeeds.buildings) {
     onProgress(30, 'Chargement des données géographiques…');
-    const { zoneFeatures, buildings, towers, roads } = await fetchAllOSMFeatures(bounds);
+    const { zoneFeatures, buildings, buildingParts, towers, roads } = await fetchAllOSMFeatures(bounds);
     // Update caches if fetch returned any data (empty = failure or genuinely empty area)
     if (zoneFeatures.length > 0 || buildings.length > 0 || roads.length > 0) {
       cachedFeaturesKey = key;
@@ -570,6 +571,7 @@ export async function buildDimsPreview(
         if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
       }
       cachedBuildings = buildings;
+      cachedBuildingParts = buildingParts;
       cachedTowers = towers;
       cachedRoads = roads;
     }
@@ -756,6 +758,18 @@ export function rebuildScene(s: DimSettings): void {
     }
   }
 
+  // ── Building parts (e.g. Tour Eiffel building:part) ────
+  if (cachedBuildingParts.length > 0) {
+    const visible = layerVisible['buildings'] ?? true;
+    for (const m of buildBuildingPartMeshes(
+      cachedBuildingParts, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+    )) {
+      m.visible = visible;
+      buildingMeshRefs.push(m);
+      add(m);
+    }
+  }
+
   // ── Towers / landmarks ──────────────────────────────
   towerMeshRefs = [];
   if (cachedTowers.length > 0) {
@@ -796,10 +810,11 @@ export function resetDimsCamera(): void {
 async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   zoneFeatures: OSMEl[];
   buildings: OSMEl[];
+  buildingParts: OSMEl[];
   towers: OSMEl[];
   roads: { hwType: string; geom: GeoPoint[] }[];
 }> {
-  const empty = { zoneFeatures: [], buildings: [], towers: [], roads: [] };
+  const empty = { zoneFeatures: [], buildings: [], buildingParts: [], towers: [], roads: [] };
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
   const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
@@ -813,6 +828,9 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   way["landuse"="reservoir"]${bb};
   relation["landuse"="reservoir"]${bb};
   way["landuse"="basin"]${bb};
+  way["leisure"~"^(park|garden|pitch|sports_centre)$"]${bb};
+  relation["leisure"~"^(park|garden)$"]${bb};
+  way["landuse"~"^(park|recreation_ground|village_green|allotments)$"]${bb};
   way["natural"="wood"]${bb};
   relation["natural"="wood"]${bb};
   way["landuse"="forest"]${bb};
@@ -833,6 +851,8 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   way["natural"="mud"]${bb};
   way["building"]${bb};
   relation["building"]["type"="multipolygon"]${bb};
+  way["building:part"]${bb};
+  relation["building:part"]["type"="multipolygon"]${bb};
   way["highway"~"^(${HW})$"]${bb};
   node["man_made"="tower"]${bb};
   way["man_made"="tower"]${bb};
@@ -852,6 +872,7 @@ out geom qt;`;
     const elements: OSMEl[] = (await res.json()).elements ?? [];
     const zoneFeatures: OSMEl[] = [];
     const buildings: OSMEl[] = [];
+    const buildingParts: OSMEl[] = [];
     const towers: OSMEl[] = [];
     const roads: { hwType: string; geom: GeoPoint[] }[] = [];
     for (const el of elements) {
@@ -861,13 +882,15 @@ out geom qt;`;
         roads.push({ hwType: tags.highway, geom: el.geometry! });
       } else if (tags['man_made'] === 'tower') {
         towers.push(el);
+      } else if (tags['building:part']) {
+        buildingParts.push(el);
       } else if (tags.building) {
         buildings.push(el);
       } else {
         zoneFeatures.push(el);
       }
     }
-    return { zoneFeatures, buildings, towers, roads };
+    return { zoneFeatures, buildings, buildingParts, towers, roads };
   } catch {
     clearTimeout(t);
     return empty;
@@ -942,7 +965,7 @@ function buildBuildingMeshes(
         const vz = (0.5 - (p.lat - minLat) / (maxLat - minLat)) * dMm;
         if (pointInZone(vx, vz, lastZonePoly)) inCount++;
       }
-      if (inCount / outer.length < 0.6) continue;
+      if (inCount < outer.length) continue;
     }
 
     const shape = new THREE.Shape();
@@ -962,6 +985,79 @@ function buildBuildingMeshes(
       depth: heightMm,
       bevelEnabled: false,
     });
+    geo.rotateX(-Math.PI / 2);
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = yBase;
+    meshes.push(mesh);
+  }
+  return meshes;
+}
+
+function buildBuildingPartMeshes(
+  parts: OSMEl[],
+  bounds: LatLonBounds,
+  grid: Float32Array, G: number,
+  minE: number, elevRange: number,
+  wMm: number, dMm: number,
+  baseH: number, elevScaleMm: number,
+): THREE.Mesh[] {
+  const { minLat, maxLat, minLon, maxLon } = bounds;
+  const color = new THREE.Color(colorSlots[layerSlotOverrides['buildings'] ?? 7] ?? '#888888');
+  const clippingPlanes = [
+    new THREE.Plane(new THREE.Vector3(-1, 0, 0), wMm / 2),
+    new THREE.Plane(new THREE.Vector3(1, 0, 0), wMm / 2),
+    new THREE.Plane(new THREE.Vector3(0, 0, -1), dMm / 2),
+    new THREE.Plane(new THREE.Vector3(0, 0, 1), dMm / 2),
+  ];
+  const mat = new THREE.MeshLambertMaterial({ color, clippingPlanes });
+  const meshes: THREE.Mesh[] = [];
+
+  const cLat = (minLat + maxLat) / 2;
+  const lonScale = Math.cos(cLat * Math.PI / 180);
+  const mmPerM = wMm / ((maxLon - minLon) * lonScale * 111320);
+
+  for (const el of parts) {
+    const polys = getOsmPolygons(el);
+    if (!polys.length) continue;
+    const outer = polys[0];
+    if (outer.length < 3) continue;
+
+    const heightM = parseFloat(el.tags?.['height'] ?? '3');
+    const minHeightM = parseFloat(el.tags?.['min_height'] ?? '0');
+    const heightMm = Math.max(0.1, (heightM - minHeightM) * mmPerM * buildingHeightScale);
+
+    let sumLon = 0, sumLat = 0;
+    for (const p of outer) { sumLon += p.lon; sumLat += p.lat; }
+    const cLonFrac = (sumLon / outer.length - minLon) / (maxLon - minLon);
+    const cLatFrac = (sumLat / outer.length - minLat) / (maxLat - minLat);
+    const cSx = (cLonFrac - 0.5) * wMm;
+    const cSy = (cLatFrac - 0.5) * dMm;
+
+    if (lastZonePoly) {
+      let inCount = 0;
+      for (const p of outer) {
+        const vx = (p.lon - minLon) / (maxLon - minLon) * wMm - wMm / 2;
+        const vz = (0.5 - (p.lat - minLat) / (maxLat - minLat)) * dMm;
+        if (pointInZone(vx, vz, lastZonePoly)) inCount++;
+      }
+      if (inCount < outer.length) continue;
+    }
+
+    const shape = new THREE.Shape();
+    for (let i = 0; i < outer.length; i++) {
+      const lonFrac = (outer[i].lon - minLon) / (maxLon - minLon);
+      const latFrac = (outer[i].lat - minLat) / (maxLat - minLat);
+      const sx = cSx + (lonFrac * wMm - wMm / 2 - cSx) * buildingSizeScale;
+      const sy = cSy + (latFrac * dMm - dMm / 2 - cSy) * buildingSizeScale;
+      if (i === 0) shape.moveTo(sx, sy); else shape.lineTo(sx, sy);
+    }
+    shape.closePath();
+
+    const elev = sampleElev(grid, G, cLonFrac, 1 - cLatFrac);
+    const yBase = baseH + ((elev - minE) / elevRange) * elevScaleMm + minHeightM * mmPerM * buildingHeightScale;
+
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: heightMm, bevelEnabled: false });
     geo.rotateX(-Math.PI / 2);
 
     const mesh = new THREE.Mesh(geo, mat);
@@ -1358,6 +1454,7 @@ const ZONE_LAYERS: Array<{
   { id: 'wetland',   match: t => matchLCFeature(t, layerLCFeatures['wetland_lc'] ?? {}), slot: 3, fill: true },
   { id: 'snow',      match: t => matchLCFeature(t, layerLCFeatures['snow_lc']    ?? {}), slot: 2, fill: true },
   { id: 'barren',    match: t => matchLCFeature(t, layerLCFeatures['barren_lc']  ?? {}), slot: 1, fill: true },
+  { id: 'parks', match: t => t.leisure === 'park' || t.leisure === 'garden' || t.leisure === 'pitch' || t.landuse === 'recreation_ground' || t.landuse === 'village_green' || t.landuse === 'allotments', slot: 3, fill: true },
   { id: 'water',          match: t => t.natural === 'water' && (() => { const c = classifyWaterFeature(t); return c === 'water_canal' ? waterwayFeaturesEnabled['canal_polygons'] !== false : waterFeaturesEnabled[c] !== false; })(), slot: 5, fill: true },
   { id: 'reservoir',      match: t => t.landuse === 'reservoir' || t.landuse === 'basin', slot: 5, fill: true },
   { id: 'river_polygons', match: t => t.waterway === 'riverbank' && waterwayFeaturesEnabled['river_polygons'] !== false, slot: 5, fill: true },
@@ -2905,6 +3002,106 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     const { vx, tr } = buildSlotMesh(slot, slotCells);
     const name = SLOT_NAMES[slot] ?? `couche_${slot}`;
     if (tr) objects.push({ id: oid++, slot, name, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
+  }
+
+  // ── Tours (man_made=tower, incl. Tour Eiffel) en géométrie 3MF ──
+  if (cachedTowers.length > 0 && cachedElev) {
+    const { minLat: bMinLat, maxLat: bMaxLat, minLon: bMinLon, maxLon: bMaxLon } = cachedElev.bounds;
+    const cLat3 = (bMinLat + bMaxLat) / 2;
+    const lonScale3 = Math.cos(cLat3 * Math.PI / 180);
+    const mmPerM3 = wMm / ((bMaxLon - bMinLon) * lonScale3 * 111320);
+    const towerSlot = layerSlotOverrides['buildings'] ?? 7;
+    const towerCol = (colorSlots[towerSlot] ?? '#888888').replace('#', '');
+
+    function addFrustum3MF(fcx: number, fcy: number, zBot: number, r0: number, r1: number, fh: number, segs: number): { vx: string; tr: string } {
+      let fvx = '', ftr = '';
+      const zTop = zBot + fh;
+      for (let i = 0; i < segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        fvx += `<vertex x="${(fcx + r0 * Math.cos(a)).toFixed(3)}" y="${(fcy + r0 * Math.sin(a)).toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
+      }
+      for (let i = 0; i < segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        fvx += `<vertex x="${(fcx + r1 * Math.cos(a)).toFixed(3)}" y="${(fcy + r1 * Math.sin(a)).toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
+      }
+      fvx += `<vertex x="${fcx.toFixed(3)}" y="${fcy.toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
+      fvx += `<vertex x="${fcx.toFixed(3)}" y="${fcy.toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
+      const botC = segs * 2, topC = segs * 2 + 1;
+      for (let i = 0; i < segs; i++) {
+        const n = (i + 1) % segs;
+        ftr += `<triangle v1="${i}" v2="${n}" v3="${segs + n}"/>`;
+        ftr += `<triangle v1="${i}" v2="${segs + n}" v3="${segs + i}"/>`;
+        ftr += `<triangle v1="${botC}" v2="${n}" v3="${i}"/>`;
+        ftr += `<triangle v1="${topC}" v2="${segs + i}" v3="${segs + n}"/>`;
+      }
+      return { vx: fvx, tr: ftr };
+    }
+
+    for (const el of cachedTowers) {
+      if (!el.tags) continue;
+      let cLonFrac3: number, cLatFrac3: number;
+      if (el.type === 'node' && el.lat !== undefined && el.lon !== undefined) {
+        cLonFrac3 = (el.lon - bMinLon) / (bMaxLon - bMinLon);
+        cLatFrac3 = (el.lat - bMinLat) / (bMaxLat - bMinLat);
+      } else {
+        const polys3 = getOsmPolygons(el);
+        if (!polys3.length) continue;
+        const outer3 = polys3[0];
+        if (!outer3.length) continue;
+        let sLon3 = 0, sLat3 = 0;
+        for (const p of outer3) { sLon3 += p.lon; sLat3 += p.lat; }
+        cLonFrac3 = (sLon3 / outer3.length - bMinLon) / (bMaxLon - bMinLon);
+        cLatFrac3 = (sLat3 / outer3.length - bMinLat) / (bMaxLat - bMinLat);
+      }
+      if (cLonFrac3 < 0 || cLonFrac3 > 1 || cLatFrac3 < 0 || cLatFrac3 > 1) continue;
+
+      const tcx = (cLonFrac3 - 0.5) * wMm;
+      const tcy = (0.5 - cLatFrac3) * dMm; // 3MF y = sceneZ
+      if (lastZonePoly && !pointInZone(tcx, tcy, lastZonePoly)) continue;
+
+      const elev3 = sampleElev(workGrid, G, cLonFrac3, 1 - cLatFrac3);
+      const yBase3 = baseH + ((elev3 - minE) / elevRange) * elevScaleMm;
+
+      const tName = (el.tags['name'] ?? el.tags['name:fr'] ?? '').toLowerCase();
+      const isEiffel3 = tName.includes('eiffel') || tName.includes('tour eiffel');
+
+      let tvx = '', ttr = '';
+      let globalVCount = 0;
+
+      function appendFrustum(fcx: number, fcy: number, zBot: number, r0f: number, r1f: number, fh: number, segs: number): void {
+        const { vx: fvx, tr: ftr } = addFrustum3MF(fcx, fcy, zBot, r0f, r1f, fh, segs);
+        const base = globalVCount;
+        tvx += fvx;
+        // segs*2 side vertices + 2 center vertices = segs*2+2 vertices per frustum
+        globalVCount += segs * 2 + 2;
+        // offset all vertex indices in triangle refs by base (only matches integer values in v1/v2/v3 attributes)
+        ttr += ftr.replace(/(?<=v[123]=")(\d+)(?=")/g, (n) => String(parseInt(n) + base));
+      }
+
+      if (isEiffel3) {
+        const sections3 = [
+          { r0: 62.5 * mmPerM3, r1: 30 * mmPerM3, h: 57 * mmPerM3 },
+          { r0: 30 * mmPerM3,   r1: 18 * mmPerM3, h: 59 * mmPerM3 },
+          { r0: 18 * mmPerM3,   r1: 3 * mmPerM3,  h: 160 * mmPerM3 },
+          { r0: 3 * mmPerM3,    r1: 0.3 * mmPerM3, h: 54 * mmPerM3 },
+        ];
+        let zOff = yBase3;
+        for (const sec of sections3) {
+          appendFrustum(tcx, tcy, zOff, sec.r0, sec.r1, sec.h, 8);
+          zOff += sec.h;
+        }
+      } else {
+        const heightM3 = parseFloat(el.tags['height'] ?? '30');
+        const tH3 = Math.max(2, heightM3 * mmPerM3);
+        const r0 = Math.max(0.5, tH3 * 0.04);
+        const r1 = r0 * 0.4;
+        appendFrustum(tcx, tcy, yBase3, r0, r1, tH3, 6);
+      }
+
+      if (ttr) {
+        objects.push({ id: oid++, slot: towerSlot, name: isEiffel3 ? 'tour_eiffel' : `tower_${oid}`, col: towerCol, vx: tvx, tr: ttr });
+      }
+    }
   }
 
   // ── Façades : 4 murs périmètre + fond, Z=0 → baseH+maxH ──
