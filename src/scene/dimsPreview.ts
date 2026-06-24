@@ -885,10 +885,9 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
 }> {
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  // Jeu de routes éprouvé (léger). Les allées/passerelles sont récupérées
-  // dans une requête séparée (HW_PATHS) pour ne JAMAIS alourdir la requête principale.
+  // Vraies routes uniquement (réseau connecté). On exclut footway/path/cycleway/etc.
+  // qui, en forêt/zone rurale, génèrent une multitude de fragments déconnectés.
   const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
-  const HW_PATHS = 'pedestrian|footway|path|cycleway|steps';
 
   // ── Requête principale (sans building:part — trop volumineux en ville) ──
   const mainQuery = `[out:json][timeout:60][maxsize:536870912];
@@ -939,7 +938,6 @@ out geom qt;`;
   way["building:part"]["min_height"]${bb};
   way["building:part"]["building:levels"]${bb};
   relation["building:part"]["height"]["type"="multipolygon"]${bb};
-  way["highway"~"^(${HW_PATHS})$"]${bb};
 );
 out geom qt;`;
 
