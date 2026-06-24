@@ -2194,10 +2194,15 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
     ctx.drawImage(cachedTexture.image as CanvasImageSource, 0, 0, bigN, bigN);
     const big = ctx.getImageData(0, 0, bigN, bigN).data;
 
-    // Couleur de base pour détecter les pixels "spéciaux" (routes, bâtiments, GPX…)
+    // Couleur de base
     const baseHexRaw = colorSlots[layerSlotOverrides['base'] ?? 1] ?? '#c0af88';
     const baseC = parseInt(baseHexRaw.replace('#', ''), 16);
     const bR = (baseC >> 16) & 0xff, bG = (baseC >> 8) & 0xff, bB = baseC & 0xff;
+    // Couleur route : exclue de la moyenne et de la détection spéciale
+    // (les routes sont rendues comme tubes de surface, pas comme voxels colorés)
+    const roadHex = colorSlots[layerSlotOverrides['roads'] ?? 8] ?? '#262626';
+    const roadC2 = parseInt(roadHex.replace('#', ''), 16);
+    const roR = (roadC2 >> 16) & 0xff, roG = (roadC2 >> 8) & 0xff, roB = roadC2 & 0xff;
 
     const result = new Uint8ClampedArray(vgrid * vgrid * 4);
     for (let vj = 0; vj < vgrid; vj++) {
@@ -2207,14 +2212,14 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
         const x0 = Math.floor(vi * step);
         const x1 = Math.min(Math.ceil((vi + 1) * step), bigN);
         let sumR = 0, sumG = 0, sumB = 0, n = 0;
-        // Eau (bleu dominant) : priorité absolue, capture 1 pixel suffit
         let wR = 0, wG = 0, wB = 0, hasWater = false;
-        // Pixel le plus "différent" de la base (routes sombres, bâtiments gris…)
         let spR = 0, spG = 0, spB = 0, spBestD = 0;
         for (let sy = y0; sy < y1; sy++) {
           for (let sx = x0; sx < x1; sx++) {
             const pi = (sy * bigN + sx) * 4;
             const r = big[pi], g = big[pi+1], b = big[pi+2];
+            // Ignorer les pixels de couleur route (rendus séparément comme tubes)
+            if ((r-roR)**2 + (g-roG)**2 + (b-roB)**2 < 1500) continue;
             sumR += r; sumG += g; sumB += b; n++;
             if (!hasWater && b > r + 25 && b > g + 25 && b > 70) {
               wR = r; wG = g; wB = b; hasWater = true;
@@ -2225,6 +2230,7 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
             }
           }
         }
+        if (n === 0) { sumR = bR; sumG = bG; sumB = bB; n = 1; } // voxel entièrement route
         const out = (vj * vgrid + vi) * 4;
         const useR = hasWater ? wR : spBestD > 0 ? spR : sumR / n;
         const useG = hasWater ? wG : spBestD > 0 ? spG : sumG / n;
@@ -2242,10 +2248,11 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
       if (b > r + 25 && b > g + 25 && b > 70) waterMask[i] = 1;
     }
     const dirs: [number, number][] = [[-1,0],[1,0],[0,-1],[0,1]];
-    // 2 passes : remplit les lacunes jusqu'à 2 voxels de large.
+    // 1 passe : suffit pour combler les lacunes diagonales dans les cours d'eau fins.
+    // 2 passes causeraient des débordements de 2 voxels sur les berges.
     // IMPORTANT : on accumule dans toAdd et on l'applique APRÈS la passe,
     // pour éviter le flood-fill (expansion en cascade dans la même passe).
-    for (let pass = 0; pass < 2; pass++) {
+    for (let pass = 0; pass < 1; pass++) {
       const toAdd = new Uint8Array(vgrid * vgrid);
       for (let vj = 0; vj < vgrid; vj++) {
         for (let vi = 0; vi < vgrid; vi++) {
@@ -2378,16 +2385,6 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
         const pi = ((VGRID - 1 - vj) * VGRID + vi) * 4;
         pr = pixels[pi]; pg = pixels[pi + 1]; pb = pixels[pi + 2];
         isWater = pb > pr + 25 && pb > pg + 25 && pb > 70;
-
-        // Routes → couleur terrain (les routes sont rendues comme tubes de surface)
-        if (!isWater) {
-          const rc = parseInt((colorSlots[layerSlotOverrides['roads'] ?? 8] ?? '#262626').replace('#', ''), 16);
-          const rR = (rc >> 16) & 0xff, rG = (rc >> 8) & 0xff, rB = rc & 0xff;
-          if ((pr - rR) ** 2 + (pg - rG) ** 2 + (pb - rB) ** 2 < 2000) {
-            const [hR, hG, hB] = hypso(yRaw / elevScaleMm);
-            pr = hR; pg = hG; pb = hB;
-          }
-        }
 
         // Eau → aplatir à l'élévation min des voisins bleus pour éviter les rives bleues
         if (isWater) {
