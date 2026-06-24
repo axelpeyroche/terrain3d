@@ -2271,6 +2271,57 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
   }
 }
 
+/** Construit les routes de l'aperçu comme des tubes sur la surface du terrain (identique au GPX). */
+function buildRoadPreviewLines(
+  roads: { hwType: string; geom: GeoPoint[] }[],
+  bounds: LatLonBounds,
+  wMm: number, dMm: number,
+  grid: Float32Array, G: number,
+  minE: number, elevRange: number, baseH: number, elevScaleMm: number,
+): THREE.Group {
+  const group = new THREE.Group();
+  const roadSlot = layerSlotOverrides['roads'] ?? 8;
+  const col = colorSlots[roadSlot] ?? '#262626';
+  const radius = 0.21;
+  const yLift = radius + 0.05;
+  const mat = new THREE.MeshLambertMaterial({ color: col });
+
+  for (const road of roads) {
+    if (!road.geom || road.geom.length < 2) continue;
+    const rawPts: THREE.Vector3[] = road.geom.map(p => {
+      const u = Math.max(0.0005, Math.min(0.9995, (p.lon - bounds.minLon) / (bounds.maxLon - bounds.minLon)));
+      const v = Math.max(0.0005, Math.min(0.9995, (p.lat - bounds.minLat) / (bounds.maxLat - bounds.minLat)));
+      const x = (u - 0.5) * wMm, z = (0.5 - v) * dMm;
+      return new THREE.Vector3(x, sampleTerrainY(x, z, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm, yLift), z);
+    });
+
+    const DENSIFY_MM = 2.0;
+    const pts: THREE.Vector3[] = [rawPts[0]];
+    for (let i = 0; i < rawPts.length - 1; i++) {
+      const a = rawPts[i], b = rawPts[i + 1];
+      const dx = b.x - a.x, dz = b.z - a.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const steps = Math.max(1, Math.floor(dist / DENSIFY_MM));
+      for (let j = 1; j <= steps; j++) {
+        const t = j / steps;
+        const mx = a.x + dx * t, mz = a.z + dz * t;
+        const my = sampleTerrainY(mx, mz, wMm, dMm, grid, G, minE, elevRange, baseH, elevScaleMm, yLift);
+        const np = new THREE.Vector3(mx, my, mz);
+        if (np.distanceTo(pts[pts.length - 1]) >= 0.1) pts.push(np);
+      }
+    }
+    if (pts.length < 2) continue;
+
+    try {
+      const curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+      const nSeg = Math.min(200, pts.length * 3);
+      const tube = new THREE.TubeGeometry(curve, nSeg, radius, 5, false);
+      group.add(new THREE.Mesh(tube, mat));
+    } catch { /* skip degenerate curves */ }
+  }
+  return group;
+}
+
 export function buildPrintPreview(layerHeightMm = 0.20): void {
   if (!scene || !terrainMeshRef || !cachedElev) return;
 
@@ -2320,13 +2371,37 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
       }
 
       const elev = sampleElev(workGrid, G, u, 1 - v);
-      const yRaw = ((elev - minE) / elevRange) * elevScaleMm;
+      let yRaw = ((elev - minE) / elevRange) * elevScaleMm;
 
       let pr = 0, pg = 0, pb = 0, isWater = false;
       if (pixels) {
         const pi = ((VGRID - 1 - vj) * VGRID + vi) * 4;
         pr = pixels[pi]; pg = pixels[pi + 1]; pb = pixels[pi + 2];
         isWater = pb > pr + 25 && pb > pg + 25 && pb > 70;
+
+        // Routes → couleur terrain (les routes sont rendues comme tubes de surface)
+        if (!isWater) {
+          const rc = parseInt((colorSlots[layerSlotOverrides['roads'] ?? 8] ?? '#262626').replace('#', ''), 16);
+          const rR = (rc >> 16) & 0xff, rG = (rc >> 8) & 0xff, rB = rc & 0xff;
+          if ((pr - rR) ** 2 + (pg - rG) ** 2 + (pb - rB) ** 2 < 2000) {
+            const [hR, hG, hB] = hypso(yRaw / elevScaleMm);
+            pr = hR; pg = hG; pb = hB;
+          }
+        }
+
+        // Eau → aplatir à l'élévation min des voisins bleus pour éviter les rives bleues
+        if (isWater) {
+          for (const [dj, di] of [[-1,0],[1,0],[0,-1],[0,1]] as [number,number][]) {
+            const nj = vj + dj, ni = vi + di;
+            if (nj < 0 || nj >= VGRID || ni < 0 || ni >= VGRID) continue;
+            const npi = ((VGRID - 1 - nj) * VGRID + ni) * 4;
+            const nb = pixels[npi + 2], nr = pixels[npi], ng = pixels[npi + 1];
+            if (nb > nr + 25 && nb > ng + 25 && nb > 70) {
+              const nu = (ni + 0.5) / VGRID, nv = (nj + 0.5) / VGRID;
+              yRaw = Math.min(yRaw, ((sampleElev(workGrid, G, nu, 1 - nv) - minE) / elevRange) * elevScaleMm);
+            }
+          }
+        }
       }
       const yQ = Math.max(lh, Math.ceil(yRaw / lh) * lh - (isWater ? 2 * lh : 0));
 
@@ -2349,6 +2424,16 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
 
   printPreviewGroup = new THREE.Group();
   printPreviewGroup.add(iMesh);
+
+  // Routes comme tubes sur la surface (identique à la trace GPX)
+  if ((layerVisible['roads'] ?? true) && cachedRoads.length > 0 && cachedElev) {
+    const rb = cachedElev.bounds;
+    const roadLines = buildRoadPreviewLines(
+      cachedRoads, rb, wMm, dMm, workGrid, G, minE, elevRange, baseH, elevScaleMm,
+    );
+    printPreviewGroup.add(roadLines);
+  }
+
   scene.add(printPreviewGroup);
   sceneObjs.push(printPreviewGroup);
 
