@@ -1461,7 +1461,7 @@ function buildMapTexture(
     for (const el of layerEls) {
       if (!el.tags) continue;
       const ww = el.tags.waterway ?? '';
-      const lw = (ww === 'river' ? 4 : ww === 'canal' ? 3 : ww === 'stream' ? 1.5 : 1) * waterwayLineWidth;
+      const lw = (ww === 'river' ? 5 : ww === 'canal' ? 4 : ww === 'stream' ? 3 : 2) * waterwayLineWidth;
       ctx.beginPath();
       traceGeometry(ctx, el, bounds, S);
       ctx.strokeStyle = col;
@@ -2338,8 +2338,8 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
   const G        = PREVIEW_GRID;
   const workGrid = lastWorkGrid ?? cachedElev.grid;
 
-  // Résolution dynamique : ~0.5 mm par case, plafonné à 500 pour les perfs
-  const VGRID  = Math.min(500, Math.max(150, Math.round(Math.max(wMm, dMm) / 0.50)));
+  // Résolution dynamique : ~0.33 mm par case, plafonné à 700 pour le détail
+  const VGRID  = Math.min(700, Math.max(150, Math.round(Math.max(wMm, dMm) / 0.33)));
   const voxelW = wMm / VGRID;
   const voxelD = dMm / VGRID;
 
@@ -2407,7 +2407,16 @@ export function buildPrintPreview(layerHeightMm = 0.20): void {
       dummy.updateMatrix();
       iMesh.setMatrixAt(idx, dummy.matrix);
 
-      if (pixels) {
+      if (pixels && !isWater) {
+        // Hillshade depuis le gradient d'élévation local (soleil NW, azimuth 315°)
+        const du = 1.0 / VGRID;
+        const ex = sampleElev(workGrid, G, Math.min(0.9999, u + du), 1 - v);
+        const ez = sampleElev(workGrid, G, u, 1 - Math.min(0.9999, v + du));
+        const sx = (ex - elev) * elevScaleMm / elevRange / (wMm / VGRID);
+        const sz = (ez - elev) * elevScaleMm / elevRange / (dMm / VGRID);
+        const hs = Math.max(0.70, Math.min(1.30, 1.0 + sx * 0.5 - sz * 0.35));
+        col.setRGB(Math.min(1, pr / 255 * hs), Math.min(1, pg / 255 * hs), Math.min(1, pb / 255 * hs));
+      } else if (pixels) {
         col.setRGB(pr / 255, pg / 255, pb / 255);
       } else {
         col.copy(defCol);
