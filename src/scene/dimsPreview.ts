@@ -42,6 +42,7 @@ export const layerVisible: Record<string, boolean> = {
   river_polygons: true, barren: true,
   buildings: true,
   roads: true,
+  towers: true,
 };
 
 // Per-layer slot assignment overrides (layerId → slot number)
@@ -116,6 +117,8 @@ export let buildingSizeScale     = 1.0;
 export let buildingMinHeightMm   = 0.60;
 export let buildingMinSizeM2     = 1.0;
 let cachedBuildings: OSMEl[] = [];
+let cachedTowers: OSMEl[] = [];
+let towerMeshRefs: THREE.Object3D[] = [];
 let cachedBuildingsKey = '';
 export function setBuildingFloorHeight(h: number): void   { buildingFloorHeightMm = h; }
 export function setBuildingHeightScale(v: number): void   { buildingHeightScale = v; }
@@ -163,10 +166,12 @@ const PREVIEW_GRID = 256;
 const TEX_SIZE = 3072; // high-res for precise zone boundaries
 
 interface OSMEl {
-  type: 'way' | 'relation' | string;
+  type: 'way' | 'relation' | 'node' | string;
   tags?: Record<string, string>;
   geometry?: GeoPoint[];
   members?: OSMMember[];
+  lat?: number;   // for node elements
+  lon?: number;   // for node elements
 }
 interface OSMMember {
   type: string;
@@ -554,7 +559,7 @@ export async function buildDimsPreview(
 
   if (fetchNeeds.features || fetchNeeds.buildings) {
     onProgress(30, 'Chargement des données géographiques…');
-    const { zoneFeatures, buildings, roads } = await fetchAllOSMFeatures(bounds);
+    const { zoneFeatures, buildings, towers, roads } = await fetchAllOSMFeatures(bounds);
     // Update caches if fetch returned any data (empty = failure or genuinely empty area)
     if (zoneFeatures.length > 0 || buildings.length > 0 || roads.length > 0) {
       cachedFeaturesKey = key;
@@ -565,6 +570,7 @@ export async function buildDimsPreview(
         if (cachedTexture) { cachedTexture.dispose(); cachedTexture = null; }
       }
       cachedBuildings = buildings;
+      cachedTowers = towers;
       cachedRoads = roads;
     }
   }
@@ -750,6 +756,19 @@ export function rebuildScene(s: DimSettings): void {
     }
   }
 
+  // ── Towers / landmarks ──────────────────────────────
+  towerMeshRefs = [];
+  if (cachedTowers.length > 0) {
+    const visible = layerVisible['towers'] ?? true;
+    for (const m of buildTowerMeshes(
+      cachedTowers, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+    )) {
+      m.visible = visible;
+      towerMeshRefs.push(m);
+      add(m);
+    }
+  }
+
   // ── Camera ────────────────────────────────────────────
   const diag = Math.sqrt(wMm * wMm + dMm * dMm);
   {
@@ -777,9 +796,10 @@ export function resetDimsCamera(): void {
 async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   zoneFeatures: OSMEl[];
   buildings: OSMEl[];
+  towers: OSMEl[];
   roads: { hwType: string; geom: GeoPoint[] }[];
 }> {
-  const empty = { zoneFeatures: [], buildings: [], roads: [] };
+  const empty = { zoneFeatures: [], buildings: [], towers: [], roads: [] };
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
   const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
@@ -788,7 +808,11 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   way["natural"="water"]${bb};
   relation["natural"="water"]${bb};
   way["waterway"="riverbank"]${bb};
+  relation["waterway"="riverbank"]${bb};
   way["waterway"~"^(river|canal|stream|ditch)$"]${bb};
+  way["landuse"="reservoir"]${bb};
+  relation["landuse"="reservoir"]${bb};
+  way["landuse"="basin"]${bb};
   way["natural"="wood"]${bb};
   relation["natural"="wood"]${bb};
   way["landuse"="forest"]${bb};
@@ -810,6 +834,9 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   way["building"]${bb};
   relation["building"]["type"="multipolygon"]${bb};
   way["highway"~"^(${HW})$"]${bb};
+  node["man_made"="tower"]${bb};
+  way["man_made"="tower"]${bb};
+  relation["man_made"="tower"]${bb};
 );
 out geom qt;`;
 
@@ -825,19 +852,22 @@ out geom qt;`;
     const elements: OSMEl[] = (await res.json()).elements ?? [];
     const zoneFeatures: OSMEl[] = [];
     const buildings: OSMEl[] = [];
+    const towers: OSMEl[] = [];
     const roads: { hwType: string; geom: GeoPoint[] }[] = [];
     for (const el of elements) {
       const tags = el.tags;
       if (!tags) continue;
       if (tags.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
         roads.push({ hwType: tags.highway, geom: el.geometry! });
+      } else if (tags['man_made'] === 'tower') {
+        towers.push(el);
       } else if (tags.building) {
         buildings.push(el);
       } else {
         zoneFeatures.push(el);
       }
     }
-    return { zoneFeatures, buildings, roads };
+    return { zoneFeatures, buildings, towers, roads };
   } catch {
     clearTimeout(t);
     return empty;
@@ -887,8 +917,12 @@ function buildBuildingMeshes(
     // Filter by real-world footprint area
     if (buildingMinSizeM2 > 0 && computeFeatureAreaM2(el, lonScale) < buildingMinSizeM2) continue;
 
-    const levels = parseFloat(el.tags?.['building:levels'] ?? '2') || 2;
-    const heightMm = Math.max(buildingMinHeightMm, levels * buildingFloorHeightMm * buildingHeightScale);
+    const heightM = parseFloat(el.tags?.['height'] ?? '0');
+    const levels = parseFloat(el.tags?.['building:levels'] ?? '0') || 0;
+    const mmPerM = wMm / ((maxLon - minLon) * lonScale * 111320);
+    const heightMm = heightM > 0
+      ? Math.max(buildingMinHeightMm, heightM * mmPerM * buildingHeightScale)
+      : Math.max(buildingMinHeightMm, (levels > 0 ? levels : 2) * buildingFloorHeightMm * buildingHeightScale);
 
     // Centroid in geo coords for elevation sampling
     let sumLon = 0, sumLat = 0;
@@ -900,11 +934,15 @@ function buildBuildingMeshes(
     const cSx = cLonFrac * wMm - wMm / 2;
     const cSy = cLatFrac * dMm - dMm / 2;
 
-    // Skip buildings whose centroid falls outside the zone polygon
+    // Skip buildings where too many vertices fall outside the zone polygon
     if (lastZonePoly) {
-      const cZx = cSx;
-      const cZz = (0.5 - cLatFrac) * dMm;
-      if (!pointInZone(cZx, cZz, lastZonePoly)) continue;
+      let inCount = 0;
+      for (const p of outer) {
+        const vx = (p.lon - minLon) / (maxLon - minLon) * wMm - wMm / 2;
+        const vz = (0.5 - (p.lat - minLat) / (maxLat - minLat)) * dMm;
+        if (pointInZone(vx, vz, lastZonePoly)) inCount++;
+      }
+      if (inCount / outer.length < 0.6) continue;
     }
 
     const shape = new THREE.Shape();
@@ -931,6 +969,101 @@ function buildBuildingMeshes(
     meshes.push(mesh);
   }
   return meshes;
+}
+
+/* ══════════════════════════════════════════════
+   LANDMARK TOWERS (man_made=tower, incl. Tour Eiffel)
+══════════════════════════════════════════════ */
+
+function buildTowerMeshes(
+  towers: OSMEl[],
+  bounds: LatLonBounds,
+  grid: Float32Array, G: number,
+  minE: number, elevRange: number,
+  wMm: number, dMm: number,
+  baseH: number, elevScaleMm: number,
+): THREE.Object3D[] {
+  const { minLat, maxLat, minLon, maxLon } = bounds;
+  const cLat = (minLat + maxLat) / 2;
+  const lonScale = Math.cos(cLat * Math.PI / 180);
+  const mmPerM = wMm / ((maxLon - minLon) * lonScale * 111320);
+  const color = new THREE.Color(colorSlots[layerSlotOverrides['buildings'] ?? 7] ?? '#888888');
+  const mat = new THREE.MeshLambertMaterial({ color });
+  const result: THREE.Object3D[] = [];
+
+  for (const el of towers) {
+    if (!el.tags) continue;
+
+    // Determine center coordinates
+    let cLonFrac: number, cLatFrac: number;
+    if (el.type === 'node' && el.lat !== undefined && el.lon !== undefined) {
+      cLonFrac = (el.lon - minLon) / (maxLon - minLon);
+      cLatFrac = (el.lat - minLat) / (maxLat - minLat);
+    } else {
+      const polys = getOsmPolygons(el);
+      if (!polys.length) continue;
+      const outer = polys[0];
+      if (!outer.length) continue;
+      let sLon = 0, sLat = 0;
+      for (const p of outer) { sLon += p.lon; sLat += p.lat; }
+      cLonFrac = (sLon / outer.length - minLon) / (maxLon - minLon);
+      cLatFrac = (sLat / outer.length - minLat) / (maxLat - minLat);
+    }
+    if (cLonFrac < 0 || cLonFrac > 1 || cLatFrac < 0 || cLatFrac > 1) continue;
+
+    const cx = (cLonFrac - 0.5) * wMm;
+    const cz = (0.5 - cLatFrac) * dMm;
+    if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) continue;
+
+    const elev = sampleElev(grid, G, cLonFrac, 1 - cLatFrac);
+    const yBase = baseH + ((elev - minE) / elevRange) * elevScaleMm;
+
+    // Detect Eiffel Tower by name
+    const name = (el.tags['name'] ?? el.tags['name:fr'] ?? '').toLowerCase();
+    const isEiffel = name.includes('eiffel') || name.includes('tour eiffel');
+
+    if (isEiffel) {
+      // Simplified Eiffel Tower: 4 frustum sections stacked
+      // Real dimensions: base 125m×125m, height 330m
+      const tH = 330 * mmPerM;  // total height in mm
+      const sections: { r0: number; r1: number; h: number }[] = [
+        { r0: 62.5 * mmPerM, r1: 30 * mmPerM, h: 57 * mmPerM },   // base to 1st floor
+        { r0: 30 * mmPerM,   r1: 18 * mmPerM, h: 59 * mmPerM },   // 1st to 2nd floor
+        { r0: 18 * mmPerM,   r1: 3 * mmPerM,  h: 160 * mmPerM },  // body
+        { r0: 3 * mmPerM,    r1: 0.3 * mmPerM, h: 54 * mmPerM },  // spire
+      ];
+      const group = new THREE.Group();
+      let yOff = 0;
+      for (const sec of sections) {
+        const geo = new THREE.CylinderGeometry(sec.r1, sec.r0, sec.h, 8);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(cx, yBase + yOff + sec.h / 2, cz);
+        group.add(mesh);
+        yOff += sec.h;
+      }
+      // Platform rings at each floor junction
+      const platforms = [57 * mmPerM, (57 + 59) * mmPerM];
+      const pRadii   = [30 * mmPerM,  18 * mmPerM];
+      for (let i = 0; i < platforms.length; i++) {
+        const pgeo = new THREE.CylinderGeometry(pRadii[i] * 1.05, pRadii[i] * 1.05, 2 * mmPerM, 8);
+        const pm = new THREE.Mesh(pgeo, mat);
+        pm.position.set(cx, yBase + platforms[i], cz);
+        group.add(pm);
+      }
+      result.push(group);
+    } else {
+      // Generic tower: simple tapered cylinder
+      const heightM = parseFloat(el.tags['height'] ?? '30');
+      const tH = Math.max(2, heightM * mmPerM);
+      const r0 = Math.max(0.5, tH * 0.04);
+      const r1 = r0 * 0.4;
+      const geo = new THREE.CylinderGeometry(r1, r0, tH, 6);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(cx, yBase + tH / 2, cz);
+      result.push(mesh);
+    }
+  }
+  return result;
 }
 
 /* ══════════════════════════════════════════════
@@ -1226,6 +1359,7 @@ const ZONE_LAYERS: Array<{
   { id: 'snow',      match: t => matchLCFeature(t, layerLCFeatures['snow_lc']    ?? {}), slot: 2, fill: true },
   { id: 'barren',    match: t => matchLCFeature(t, layerLCFeatures['barren_lc']  ?? {}), slot: 1, fill: true },
   { id: 'water',          match: t => t.natural === 'water' && (() => { const c = classifyWaterFeature(t); return c === 'water_canal' ? waterwayFeaturesEnabled['canal_polygons'] !== false : waterFeaturesEnabled[c] !== false; })(), slot: 5, fill: true },
+  { id: 'reservoir',      match: t => t.landuse === 'reservoir' || t.landuse === 'basin', slot: 5, fill: true },
   { id: 'river_polygons', match: t => t.waterway === 'riverbank' && waterwayFeaturesEnabled['river_polygons'] !== false, slot: 5, fill: true },
   { id: 'waterways',      match: t => !!t.waterway && t.waterway !== 'riverbank' && isWaterwayEnabled(t), slot: 5, fill: false },
 ];
@@ -1403,6 +1537,32 @@ function buildMapTexture(
     }
   }
 
+  // Step 2b — zone boundary strokes for crisp, vectorized zone edges
+  for (const layer of ZONE_LAYERS) {
+    if (!layer.fill) continue;
+    if (!layerVisible[layer.id]) continue;
+    const layerEls = features.filter(el => {
+      if (!el.tags || !layer.match(el.tags)) return false;
+      if (minAreaM2 > 0) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
+      return true;
+    });
+    if (!layerEls.length) continue;
+    const effectiveSlot = layerSlotOverrides[layer.id] ?? layer.slot;
+    const baseHex = colorSlots[effectiveSlot] ?? '#888';
+    // Darker shade of zone color for contour lines
+    const bc = parseInt(baseHex.replace('#', ''), 16);
+    const r2 = Math.round(((bc >> 16) & 0xff) * 0.65);
+    const g2 = Math.round(((bc >> 8)  & 0xff) * 0.65);
+    const b2 = Math.round(( bc        & 0xff) * 0.65);
+    const strokeCol = `rgb(${r2},${g2},${b2})`;
+    ctx.beginPath();
+    for (const el of layerEls) traceGeometry(ctx, el, bounds, S);
+    ctx.strokeStyle = strokeCol;
+    ctx.lineWidth = 2.5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
   // Step 3 — routes — road lines painted on shaded terrain (texture pass, before waterways)
   if ((layerVisible['roads'] ?? true) && roads.length > 0) {
     const roadSlot = layerSlotOverrides['roads'] ?? 8;
@@ -1461,7 +1621,7 @@ function buildMapTexture(
     for (const el of layerEls) {
       if (!el.tags) continue;
       const ww = el.tags.waterway ?? '';
-      const lw = (ww === 'river' ? 5 : ww === 'canal' ? 4 : ww === 'stream' ? 3 : 2) * waterwayLineWidth;
+      const lw = (ww === 'river' ? 7 : ww === 'canal' ? 6 : ww === 'stream' ? 5 : 4) * waterwayLineWidth;
       ctx.beginPath();
       traceGeometry(ctx, el, bounds, S);
       ctx.strokeStyle = col;
@@ -2262,9 +2422,9 @@ function sampleTexturePixels(vgrid: number): Uint8ClampedArray | null {
             const nj = vj + dj, ni = vi + di;
             if (nj < 0 || nj >= vgrid || ni < 0 || ni >= vgrid || waterMask[nj * vgrid + ni]) continue;
             const no = (nj * vgrid + ni) * 4;
-            // Ne pas écraser les routes/bâtiments (pixels non-base, non-eau)
+            // Ne dilater que dans les pixels non-route (la végétation est OK)
             const tR = result[no], tG = result[no+1], tB = result[no+2];
-            if ((tR-bR)**2 + (tG-bG)**2 + (tB-bB)**2 >= 600) continue;
+            if ((tR-roR)**2 + (tG-roG)**2 + (tB-roB)**2 < 1500) continue;
             result[no] = result[src]; result[no+1] = result[src+1]; result[no+2] = result[src+2];
             toAdd[nj * vgrid + ni] = 1;
           }
