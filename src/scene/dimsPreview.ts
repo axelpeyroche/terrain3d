@@ -841,26 +841,39 @@ export function resetDimsCamera(): void {
 }
 
 /* ══════════════════════════════════════════════
-   OSM FETCH — scindé en 2 requêtes indépendantes :
-   1) Carte principale (zones + bâtiments + routes + parcs + eau) — robuste.
-   2) Monuments 3D (building:part + tours) — séparée, son échec n'impacte pas
-      la carte (en ville dense building:part peut dépasser le timeout/maxsize).
+   OSM FETCH — 2 requêtes max (limite de concurrence Overpass) :
+   1) Carte principale (zones + bâtiments + routes + parcs + eau) — critique,
+      avec repli sur des miroirs Overpass en cas d'échec/rate-limit.
+   2) Détails optionnels (building:part + allées) — son échec n'impacte pas la carte.
 ══════════════════════════════════════════════ */
-async function overpassFetch(query: string, timeoutMs: number): Promise<OSMEl[]> {
+const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.openstreetmap.fr/api/interpreter',
+];
+
+/** Un seul essai sur un endpoint. Renvoie les éléments, ou null si échec (pour bascule miroir). */
+async function overpassOnce(endpoint: string, query: string, timeoutMs: number): Promise<OSMEl[] | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(
-      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-      { signal: ctrl.signal },
-    );
+    const res = await fetch(`${endpoint}?data=${encodeURIComponent(query)}`, { signal: ctrl.signal });
     clearTimeout(t);
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     return (await res.json()).elements ?? [];
   } catch {
     clearTimeout(t);
-    return [];
+    return null;
   }
+}
+
+/** Essaie les endpoints dans l'ordre jusqu'au premier succès. `endpoints`=1 seul → pas de repli. */
+async function overpassFetch(query: string, timeoutMs: number, endpoints: string[] = OVERPASS_ENDPOINTS): Promise<OSMEl[]> {
+  for (const ep of endpoints) {
+    const r = await overpassOnce(ep, query, timeoutMs);
+    if (r !== null) return r;
+  }
+  return [];
 }
 
 async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
@@ -917,30 +930,26 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
 );
 out geom qt;`;
 
-  // ── Requête monuments : building:part 3D (avec height/min_height) ──
-  const monQuery = `[out:json][timeout:50][maxsize:268435456];
+  // ── Requête secondaire (optionnelle, non bloquante) : building:part 3D + allées.
+  // Tout ce qui est volumineux/instable en ville y est isolé. Un seul endpoint,
+  // timeout court : si elle échoue on perd juste les détails, jamais la carte.
+  const detailQuery = `[out:json][timeout:40][maxsize:268435456];
 (
   way["building:part"]["height"]${bb};
   way["building:part"]["min_height"]${bb};
   way["building:part"]["building:levels"]${bb};
   relation["building:part"]["height"]["type"="multipolygon"]${bb};
-);
-out geom qt;`;
-
-  // ── Requête allées/passerelles : séparée et non bloquante ──
-  const pathsQuery = `[out:json][timeout:45][maxsize:268435456];
-(
   way["highway"~"^(${HW_PATHS})$"]${bb};
 );
 out geom qt;`;
 
-  // Max 2 requêtes concurrentes (limite Overpass) : la paire critique d'abord,
-  // puis les allées séquentiellement pour ne jamais affamer la requête principale.
-  const [mainEls, monEls] = await Promise.all([
+  // 2 requêtes en parallèle (= limite de concurrence Overpass) :
+  // - principale : avec repli sur les miroirs (critique).
+  // - détails : un seul endpoint, échec toléré.
+  const [mainEls, detailEls] = await Promise.all([
     overpassFetch(mainQuery, 58000),
-    overpassFetch(monQuery, 50000),
+    overpassFetch(detailQuery, 42000, [OVERPASS_ENDPOINTS[0]]),
   ]);
-  const pathEls = await overpassFetch(pathsQuery, 45000);
 
   const zoneFeatures: OSMEl[] = [];
   const buildings: OSMEl[] = [];
@@ -960,13 +969,13 @@ out geom qt;`;
       zoneFeatures.push(el);
     }
   }
-  for (const el of pathEls) {
-    if (el.tags?.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
+  for (const el of detailEls) {
+    if (!el.tags) continue;
+    if (el.tags['building:part']) {
+      buildingParts.push(el);
+    } else if (el.tags.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
       roads.push({ hwType: el.tags.highway, geom: el.geometry! });
     }
-  }
-  for (const el of monEls) {
-    if (el.tags?.['building:part']) buildingParts.push(el);
   }
   return { zoneFeatures, buildings, buildingParts, towers, roads };
 }
