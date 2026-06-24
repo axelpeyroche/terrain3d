@@ -840,9 +840,28 @@ export function resetDimsCamera(): void {
 }
 
 /* ══════════════════════════════════════════════
-   SINGLE OSM FETCH — zones + buildings + routes en une requête
-   Évite les rate-limits Overpass (max 2 concurrent) et les timeouts séquentiels.
+   OSM FETCH — scindé en 2 requêtes indépendantes :
+   1) Carte principale (zones + bâtiments + routes + parcs + eau) — robuste.
+   2) Monuments 3D (building:part + tours) — séparée, son échec n'impacte pas
+      la carte (en ville dense building:part peut dépasser le timeout/maxsize).
 ══════════════════════════════════════════════ */
+async function overpassFetch(query: string, timeoutMs: number): Promise<OSMEl[]> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(
+      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
+      { signal: ctrl.signal },
+    );
+    clearTimeout(t);
+    if (!res.ok) return [];
+    return (await res.json()).elements ?? [];
+  } catch {
+    clearTimeout(t);
+    return [];
+  }
+}
+
 async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   zoneFeatures: OSMEl[];
   buildings: OSMEl[];
@@ -850,11 +869,12 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   towers: OSMEl[];
   roads: { hwType: string; geom: GeoPoint[] }[];
 }> {
-  const empty = { zoneFeatures: [], buildings: [], buildingParts: [], towers: [], roads: [] };
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
   const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
-  const query = `[out:json][timeout:60][maxsize:536870912];
+
+  // ── Requête principale (sans building:part — trop volumineux en ville) ──
+  const mainQuery = `[out:json][timeout:60][maxsize:536870912];
 (
   way["natural"="water"]${bb};
   relation["natural"="water"]${bb};
@@ -887,50 +907,49 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
   way["natural"="mud"]${bb};
   way["building"]${bb};
   relation["building"]["type"="multipolygon"]${bb};
-  way["building:part"]${bb};
-  relation["building:part"]["type"="multipolygon"]${bb};
   way["highway"~"^(${HW})$"]${bb};
   node["man_made"="tower"]${bb};
   way["man_made"="tower"]${bb};
-  relation["man_made"="tower"]${bb};
 );
 out geom qt;`;
 
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 58000);
-  try {
-    const res = await fetch(
-      `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-      { signal: ctrl.signal },
-    );
-    clearTimeout(t);
-    if (!res.ok) return empty;
-    const elements: OSMEl[] = (await res.json()).elements ?? [];
-    const zoneFeatures: OSMEl[] = [];
-    const buildings: OSMEl[] = [];
-    const buildingParts: OSMEl[] = [];
-    const towers: OSMEl[] = [];
-    const roads: { hwType: string; geom: GeoPoint[] }[] = [];
-    for (const el of elements) {
-      const tags = el.tags;
-      if (!tags) continue;
-      if (tags.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
-        roads.push({ hwType: tags.highway, geom: el.geometry! });
-      } else if (tags['man_made'] === 'tower') {
-        towers.push(el);
-      } else if (tags['building:part']) {
-        buildingParts.push(el);
-      } else if (tags.building) {
-        buildings.push(el);
-      } else {
-        zoneFeatures.push(el);
-      }
+  // ── Requête monuments : building:part 3D (avec height/min_height) ──
+  const monQuery = `[out:json][timeout:50][maxsize:268435456];
+(
+  way["building:part"]["height"]${bb};
+  way["building:part"]["min_height"]${bb};
+  way["building:part"]["building:levels"]${bb};
+  relation["building:part"]["height"]["type"="multipolygon"]${bb};
+);
+out geom qt;`;
+
+  const [mainEls, monEls] = await Promise.all([
+    overpassFetch(mainQuery, 58000),
+    overpassFetch(monQuery, 50000),
+  ]);
+
+  const zoneFeatures: OSMEl[] = [];
+  const buildings: OSMEl[] = [];
+  const buildingParts: OSMEl[] = [];
+  const towers: OSMEl[] = [];
+  const roads: { hwType: string; geom: GeoPoint[] }[] = [];
+  for (const el of mainEls) {
+    const tags = el.tags;
+    if (!tags) continue;
+    if (tags.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
+      roads.push({ hwType: tags.highway, geom: el.geometry! });
+    } else if (tags['man_made'] === 'tower') {
+      towers.push(el);
+    } else if (tags.building) {
+      buildings.push(el);
+    } else {
+      zoneFeatures.push(el);
     }
-    return { zoneFeatures, buildings, buildingParts, towers, roads };
-  } catch {
-    clearTimeout(t);
-    return empty;
   }
+  for (const el of monEls) {
+    if (el.tags?.['building:part']) buildingParts.push(el);
+  }
+  return { zoneFeatures, buildings, buildingParts, towers, roads };
 }
 
 /** Ray-casting point-in-polygon test. poly is [[x,z]…] in model space (mm). */
