@@ -40,6 +40,7 @@ export const layerVisible: Record<string, boolean> = {
   snow: true, water: true, waterways: true,
   gpx: true, gpx_line: true,
   river_polygons: true, barren: true,
+  parks: true, reservoir: true,
   buildings: true,
   roads: true,
   towers: true,
@@ -871,7 +872,7 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
 }> {
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
+  const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|pedestrian|footway|path|cycleway|service|steps';
 
   // ── Requête principale (sans building:part — trop volumineux en ville) ──
   const mainQuery = `[out:json][timeout:60][maxsize:536870912];
@@ -1058,35 +1059,43 @@ function buildBuildingMeshes(
 // Convention : x = sceneX (mm), y = sceneZ/profondeur (mm), z = hauteur (mm).
 interface MonPrism { b: [number, number][]; t: [number, number][]; zb: number; zt: number; }
 
-/** Tour Eiffel paramétrique : 4 pieds évasés (arches) + 2 plateformes + corps fuselé + flèche. */
+/** Tour Eiffel paramétrique : 4 pieds évasés (arches) + 2 plateformes + corps fuselé + flèche.
+ *  Optimisée pour l'impression 3D : aucune section plus fine que MIN_HALF_MM (parois imprimables). */
 function eiffelPrisms(cx: number, cy: number, baseZ: number, M: number): MonPrism[] {
   const prisms: MonPrism[] = [];
-  // Carré centré sur (offX, offY) métres, demi-côté half mètres → 4 coins CCW vus de dessus.
-  const sq = (offX: number, offY: number, half: number): [number, number][] => [
-    [cx + (offX - half) * M, cy + (offY - half) * M],
-    [cx + (offX + half) * M, cy + (offY - half) * M],
-    [cx + (offX + half) * M, cy + (offY + half) * M],
-    [cx + (offX - half) * M, cy + (offY + half) * M],
-  ];
+  const MIN_HALF_MM = 0.55; // demi-côté minimal → ~1.1 mm d'épaisseur, imprimable en FDM
+  // Carré : centre (offX, offY) en mètres, demi-côté en mètres, clampé à MIN_HALF_MM.
+  const sq = (offX: number, offY: number, halfM: number): [number, number][] => {
+    const ox = offX * M, oy = offY * M;
+    const h = Math.max(halfM * M, MIN_HALF_MM);
+    return [
+      [cx + ox - h, cy + oy - h],
+      [cx + ox + h, cy + oy - h],
+      [cx + ox + h, cy + oy + h],
+      [cx + ox - h, cy + oy + h],
+    ];
+  };
   const Z = (m: number) => baseZ + m * M;
   const corners: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 
-  // Étage 1 — 4 pieds : pied au sol (écart 50 m, côté 14 m) convergeant vers la 1re plateforme (écart 18 m, côté 9 m)
+  // Étage 1 — 4 pieds massifs et évasés formant les arches : sol (écart 46 m, ½ 9 m) → 1re plateforme (écart 19 m, ½ 5.5 m)
   for (const [sx, sy] of corners) {
-    prisms.push({ b: sq(sx * 50, sy * 50, 7), t: sq(sx * 18, sy * 18, 4.5), zb: Z(0), zt: Z(57) });
+    prisms.push({ b: sq(sx * 46, sy * 46, 9), t: sq(sx * 19, sy * 19, 5.5), zb: Z(0), zt: Z(57) });
   }
-  // 1re plateforme (dalle carrée pleine, ~65 m de côté)
-  prisms.push({ b: sq(0, 0, 33), t: sq(0, 0, 33), zb: Z(57), zt: Z(62) });
-  // Étage 2 — 4 montants : écart 16 m → 9 m
+  // 1re plateforme (dalle carrée pleine, ~66 m de côté, épaisse)
+  prisms.push({ b: sq(0, 0, 33), t: sq(0, 0, 32), zb: Z(57), zt: Z(64) });
+  // Étage 2 — 4 montants : écart 18 m (½ 5.5) → 10 m (½ 4)
   for (const [sx, sy] of corners) {
-    prisms.push({ b: sq(sx * 16, sy * 16, 5), t: sq(sx * 9, sy * 9, 3), zb: Z(62), zt: Z(115) });
+    prisms.push({ b: sq(sx * 18, sy * 18, 5.5), t: sq(sx * 10, sy * 10, 4), zb: Z(64), zt: Z(115) });
   }
   // 2e plateforme (~34 m de côté)
-  prisms.push({ b: sq(0, 0, 17), t: sq(0, 0, 17), zb: Z(115), zt: Z(119) });
-  // Corps fuselé (tube carré qui se rétrécit)
-  prisms.push({ b: sq(0, 0, 10), t: sq(0, 0, 2.2), zb: Z(119), zt: Z(276) });
-  // Flèche / antenne
-  prisms.push({ b: sq(0, 0, 2.2), t: sq(0, 0, 0.4), zb: Z(276), zt: Z(330) });
+  prisms.push({ b: sq(0, 0, 17), t: sq(0, 0, 16), zb: Z(115), zt: Z(122) });
+  // Corps fuselé inférieur (tube carré qui se rétrécit)
+  prisms.push({ b: sq(0, 0, 9), t: sq(0, 0, 4), zb: Z(122), zt: Z(230) });
+  // Corps fuselé supérieur
+  prisms.push({ b: sq(0, 0, 4), t: sq(0, 0, 1.6), zb: Z(230), zt: Z(295) });
+  // Flèche / antenne (clampée à l'épaisseur imprimable)
+  prisms.push({ b: sq(0, 0, 1.6), t: sq(0, 0, 0.5), zb: Z(295), zt: Z(324) });
   return prisms;
 }
 
@@ -1288,6 +1297,9 @@ function roadRealWidthM(hwType: string): number {
   if (hwType === 'primary'  || hwType === 'primary_link')  return 6;
   if (hwType === 'secondary'|| hwType === 'secondary_link')return 5;
   if (hwType === 'tertiary' || hwType === 'tertiary_link') return 4;
+  // Voies piétonnes / chemins / pistes : fines
+  if (hwType === 'footway' || hwType === 'path' || hwType === 'cycleway'
+      || hwType === 'steps' || hwType === 'service' || hwType === 'pedestrian') return 2;
   return 3.5; // residential, unclassified, living_street
 }
 
@@ -1731,7 +1743,8 @@ function buildMapTexture(
     if (!layerVisible[layer.id]) continue;
     const layerEls = features.filter(el => {
       if (!el.tags || !layer.match(el.tags)) return false;
-      if (layer.fill && minAreaM2 > 0) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
+      // L'eau (slot 5) n'est jamais filtrée par surface : les petits bassins/étangs comptent.
+      if (layer.fill && minAreaM2 > 0 && layer.slot !== 5) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
       return true;
     });
     if (!layerEls.length) continue;
@@ -1755,7 +1768,7 @@ function buildMapTexture(
     if (!layerVisible[layer.id]) continue;
     const layerEls = features.filter(el => {
       if (!el.tags || !layer.match(el.tags)) return false;
-      if (minAreaM2 > 0) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
+      if (minAreaM2 > 0 && layer.slot !== 5) return computeFeatureAreaM2(el, lonScale) >= minAreaM2;
       return true;
     });
     if (!layerEls.length) continue;
