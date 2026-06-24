@@ -872,7 +872,10 @@ async function fetchAllOSMFeatures(bounds: LatLonBounds): Promise<{
 }> {
   const { minLat, minLon, maxLat, maxLon } = bounds;
   const bb = `(${minLat},${minLon},${maxLat},${maxLon})`;
-  const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street|pedestrian|footway|path|cycleway|service|steps';
+  // Jeu de routes éprouvé (léger). Les allées/passerelles sont récupérées
+  // dans une requête séparée (HW_PATHS) pour ne JAMAIS alourdir la requête principale.
+  const HW = 'motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified|residential|living_street';
+  const HW_PATHS = 'pedestrian|footway|path|cycleway|steps';
 
   // ── Requête principale (sans building:part — trop volumineux en ville) ──
   const mainQuery = `[out:json][timeout:60][maxsize:536870912];
@@ -924,10 +927,20 @@ out geom qt;`;
 );
 out geom qt;`;
 
+  // ── Requête allées/passerelles : séparée et non bloquante ──
+  const pathsQuery = `[out:json][timeout:45][maxsize:268435456];
+(
+  way["highway"~"^(${HW_PATHS})$"]${bb};
+);
+out geom qt;`;
+
+  // Max 2 requêtes concurrentes (limite Overpass) : la paire critique d'abord,
+  // puis les allées séquentiellement pour ne jamais affamer la requête principale.
   const [mainEls, monEls] = await Promise.all([
     overpassFetch(mainQuery, 58000),
     overpassFetch(monQuery, 50000),
   ]);
+  const pathEls = await overpassFetch(pathsQuery, 45000);
 
   const zoneFeatures: OSMEl[] = [];
   const buildings: OSMEl[] = [];
@@ -945,6 +958,11 @@ out geom qt;`;
       buildings.push(el);
     } else {
       zoneFeatures.push(el);
+    }
+  }
+  for (const el of pathEls) {
+    if (el.tags?.highway && el.type === 'way' && (el.geometry?.length ?? 0) >= 2) {
+      roads.push({ hwType: el.tags.highway, geom: el.geometry! });
     }
   }
   for (const el of monEls) {
