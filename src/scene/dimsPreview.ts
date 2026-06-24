@@ -758,11 +758,48 @@ export function rebuildScene(s: DimSettings): void {
     }
   }
 
-  // ── Building parts (e.g. Tour Eiffel building:part) ────
+  // ── Monuments paramétriques (Tour Eiffel) ────────────
+  // Détecté par nom ; on rend un modèle fidèle et on supprime les building:part
+  // et la tour générique qui chevaucheraient (évite le doublon géométrique).
+  const cLatM = (rb.minLat + rb.maxLat) / 2;
+  const lonScaleM = Math.cos(cLatM * Math.PI / 180);
+  const mmPerMrebuild = wMm / ((rb.maxLon - rb.minLon) * lonScaleM * 111320);
+  let eiffelSuppress: { cx: number; cz: number; rMm: number } | null = null;
+  towerMeshRefs = [];
+  {
+    const eiffel = findNamedMonument('eiffel');
+    if (eiffel) {
+      const lonFrac = (eiffel.lon - rb.minLon) / (rb.maxLon - rb.minLon);
+      const latFrac = (eiffel.lat - rb.minLat) / (rb.maxLat - rb.minLat);
+      if (lonFrac >= 0 && lonFrac <= 1 && latFrac >= 0 && latFrac <= 1) {
+        const cx = (lonFrac - 0.5) * wMm;
+        const cz = (0.5 - latFrac) * dMm;
+        if (!lastZonePoly || pointInZone(cx, cz, lastZonePoly)) {
+          const elev = sampleElev(workGrid, G, lonFrac, 1 - latFrac);
+          const baseZ = baseH + ((elev - minE) / elevRange) * elevScaleMm;
+          const prisms = eiffelPrisms(cx, cz, baseZ, mmPerMrebuild);
+          const positions: number[] = [], indices: number[] = [];
+          for (const p of prisms) prismToThree(p, positions, indices);
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+          geo.setIndex(indices);
+          geo.computeVertexNormals();
+          const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(colorSlots[layerSlotOverrides['buildings'] ?? 7] ?? '#888888') });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.visible = layerVisible['towers'] ?? true;
+          towerMeshRefs.push(mesh);
+          add(mesh);
+          eiffelSuppress = { cx, cz, rMm: 90 * mmPerMrebuild };
+        }
+      }
+    }
+  }
+
+  // ── Building parts (autres monuments 3D : building:part) ────
   if (cachedBuildingParts.length > 0) {
     const visible = layerVisible['buildings'] ?? true;
     for (const m of buildBuildingPartMeshes(
-      cachedBuildingParts, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+      cachedBuildingParts, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm, eiffelSuppress,
     )) {
       m.visible = visible;
       buildingMeshRefs.push(m);
@@ -770,12 +807,11 @@ export function rebuildScene(s: DimSettings): void {
     }
   }
 
-  // ── Towers / landmarks ──────────────────────────────
-  towerMeshRefs = [];
+  // ── Towers / landmarks génériques ───────────────────
   if (cachedTowers.length > 0) {
     const visible = layerVisible['towers'] ?? true;
     for (const m of buildTowerMeshes(
-      cachedTowers, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm,
+      cachedTowers, rb, workGrid, G, minE, elevRange, wMm, dMm, baseH, elevScaleMm, eiffelSuppress,
     )) {
       m.visible = visible;
       towerMeshRefs.push(m);
@@ -994,6 +1030,87 @@ function buildBuildingMeshes(
   return meshes;
 }
 
+/* ══════════════════════════════════════════════
+   MONUMENTS PARAMÉTRIQUES (modèles fidèles)
+   Géométrie partagée entre l'aperçu THREE.js et l'export 3MF.
+══════════════════════════════════════════════ */
+
+// Un prisme = base[4] + sommet[4] (coins XY en mm) entre deux hauteurs Z.
+// Convention : x = sceneX (mm), y = sceneZ/profondeur (mm), z = hauteur (mm).
+interface MonPrism { b: [number, number][]; t: [number, number][]; zb: number; zt: number; }
+
+/** Tour Eiffel paramétrique : 4 pieds évasés (arches) + 2 plateformes + corps fuselé + flèche. */
+function eiffelPrisms(cx: number, cy: number, baseZ: number, M: number): MonPrism[] {
+  const prisms: MonPrism[] = [];
+  // Carré centré sur (offX, offY) métres, demi-côté half mètres → 4 coins CCW vus de dessus.
+  const sq = (offX: number, offY: number, half: number): [number, number][] => [
+    [cx + (offX - half) * M, cy + (offY - half) * M],
+    [cx + (offX + half) * M, cy + (offY - half) * M],
+    [cx + (offX + half) * M, cy + (offY + half) * M],
+    [cx + (offX - half) * M, cy + (offY + half) * M],
+  ];
+  const Z = (m: number) => baseZ + m * M;
+  const corners: [number, number][] = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+
+  // Étage 1 — 4 pieds : pied au sol (écart 50 m, côté 14 m) convergeant vers la 1re plateforme (écart 18 m, côté 9 m)
+  for (const [sx, sy] of corners) {
+    prisms.push({ b: sq(sx * 50, sy * 50, 7), t: sq(sx * 18, sy * 18, 4.5), zb: Z(0), zt: Z(57) });
+  }
+  // 1re plateforme (dalle carrée pleine, ~65 m de côté)
+  prisms.push({ b: sq(0, 0, 33), t: sq(0, 0, 33), zb: Z(57), zt: Z(62) });
+  // Étage 2 — 4 montants : écart 16 m → 9 m
+  for (const [sx, sy] of corners) {
+    prisms.push({ b: sq(sx * 16, sy * 16, 5), t: sq(sx * 9, sy * 9, 3), zb: Z(62), zt: Z(115) });
+  }
+  // 2e plateforme (~34 m de côté)
+  prisms.push({ b: sq(0, 0, 17), t: sq(0, 0, 17), zb: Z(115), zt: Z(119) });
+  // Corps fuselé (tube carré qui se rétrécit)
+  prisms.push({ b: sq(0, 0, 10), t: sq(0, 0, 2.2), zb: Z(119), zt: Z(276) });
+  // Flèche / antenne
+  prisms.push({ b: sq(0, 0, 2.2), t: sq(0, 0, 0.4), zb: Z(276), zt: Z(330) });
+  return prisms;
+}
+
+/** Émet un prisme en THREE.js (scène : x, y=hauteur, z=profondeur). */
+function prismToThree(p: MonPrism, positions: number[], indices: number[]): void {
+  const base = positions.length / 3;
+  for (const [x, y] of p.b) positions.push(x, p.zb, y);
+  for (const [x, y] of p.t) positions.push(x, p.zt, y);
+  const quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+  for (const [a, b, c, d] of quads) {
+    indices.push(base + a, base + b, base + c, base + a, base + c, base + d);
+  }
+}
+
+/** Émet un prisme en 3MF (Z-up : x=sceneX, y=sceneZ, z=hauteur). Renvoie XML avec indices locaux 0-7. */
+function prismTo3MF(p: MonPrism): { vx: string; nv: number } {
+  let vx = '';
+  for (const [x, y] of p.b) vx += `<vertex x="${x.toFixed(3)}" y="${y.toFixed(3)}" z="${p.zb.toFixed(3)}"/>`;
+  for (const [x, y] of p.t) vx += `<vertex x="${x.toFixed(3)}" y="${y.toFixed(3)}" z="${p.zt.toFixed(3)}"/>`;
+  return { vx, nv: 8 };
+}
+
+const PRISM_QUADS = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]];
+
+/** Cherche un monument nommé (ex. "eiffel") parmi tours/bâtiments/parties, renvoie son centre géo. */
+function findNamedMonument(needle: string): { lon: number; lat: number } | null {
+  const scan = (els: OSMEl[]): { lon: number; lat: number } | null => {
+    for (const el of els) {
+      const nm = (el.tags?.['name'] ?? el.tags?.['name:fr'] ?? el.tags?.['name:en'] ?? '').toLowerCase();
+      if (!nm.includes(needle)) continue;
+      if (el.type === 'node' && el.lat !== undefined && el.lon !== undefined) return { lon: el.lon, lat: el.lat };
+      const polys = getOsmPolygons(el);
+      if (polys.length && polys[0].length) {
+        let sl = 0, sla = 0;
+        for (const p of polys[0]) { sl += p.lon; sla += p.lat; }
+        return { lon: sl / polys[0].length, lat: sla / polys[0].length };
+      }
+    }
+    return null;
+  };
+  return scan(cachedTowers) ?? scan(cachedBuildings) ?? scan(cachedBuildingParts);
+}
+
 function buildBuildingPartMeshes(
   parts: OSMEl[],
   bounds: LatLonBounds,
@@ -1001,6 +1118,7 @@ function buildBuildingPartMeshes(
   minE: number, elevRange: number,
   wMm: number, dMm: number,
   baseH: number, elevScaleMm: number,
+  suppress?: { cx: number; cz: number; rMm: number } | null,
 ): THREE.Mesh[] {
   const { minLat, maxLat, minLon, maxLon } = bounds;
   const color = new THREE.Color(colorSlots[layerSlotOverrides['buildings'] ?? 7] ?? '#888888');
@@ -1033,6 +1151,12 @@ function buildBuildingPartMeshes(
     const cLatFrac = (sumLat / outer.length - minLat) / (maxLat - minLat);
     const cSx = (cLonFrac - 0.5) * wMm;
     const cSy = (cLatFrac - 0.5) * dMm;
+
+    // Supprimer les parts couvertes par un monument paramétrique (ex. Tour Eiffel)
+    if (suppress) {
+      const cz = (0.5 - cLatFrac) * dMm;
+      if ((cSx - suppress.cx) ** 2 + (cz - suppress.cz) ** 2 < suppress.rMm ** 2) continue;
+    }
 
     if (lastZonePoly) {
       let inCount = 0;
@@ -1068,7 +1192,7 @@ function buildBuildingPartMeshes(
 }
 
 /* ══════════════════════════════════════════════
-   LANDMARK TOWERS (man_made=tower, incl. Tour Eiffel)
+   LANDMARK TOWERS (man_made=tower génériques — Eiffel géré séparément)
 ══════════════════════════════════════════════ */
 
 function buildTowerMeshes(
@@ -1078,6 +1202,7 @@ function buildTowerMeshes(
   minE: number, elevRange: number,
   wMm: number, dMm: number,
   baseH: number, elevScaleMm: number,
+  suppress?: { cx: number; cz: number; rMm: number } | null,
 ): THREE.Object3D[] {
   const { minLat, maxLat, minLon, maxLon } = bounds;
   const cLat = (minLat + maxLat) / 2;
@@ -1111,53 +1236,24 @@ function buildTowerMeshes(
     const cz = (0.5 - cLatFrac) * dMm;
     if (lastZonePoly && !pointInZone(cx, cz, lastZonePoly)) continue;
 
+    // La Tour Eiffel (et tout monument paramétrique) est rendue séparément : on saute
+    // la tour générique nommée Eiffel et celles couvertes par le modèle paramétrique.
+    const name = (el.tags['name'] ?? el.tags['name:fr'] ?? '').toLowerCase();
+    if (name.includes('eiffel')) continue;
+    if (suppress && (cx - suppress.cx) ** 2 + (cz - suppress.cz) ** 2 < suppress.rMm ** 2) continue;
+
     const elev = sampleElev(grid, G, cLonFrac, 1 - cLatFrac);
     const yBase = baseH + ((elev - minE) / elevRange) * elevScaleMm;
 
-    // Detect Eiffel Tower by name
-    const name = (el.tags['name'] ?? el.tags['name:fr'] ?? '').toLowerCase();
-    const isEiffel = name.includes('eiffel') || name.includes('tour eiffel');
-
-    if (isEiffel) {
-      // Simplified Eiffel Tower: 4 frustum sections stacked
-      // Real dimensions: base 125m×125m, height 330m
-      const tH = 330 * mmPerM;  // total height in mm
-      const sections: { r0: number; r1: number; h: number }[] = [
-        { r0: 62.5 * mmPerM, r1: 30 * mmPerM, h: 57 * mmPerM },   // base to 1st floor
-        { r0: 30 * mmPerM,   r1: 18 * mmPerM, h: 59 * mmPerM },   // 1st to 2nd floor
-        { r0: 18 * mmPerM,   r1: 3 * mmPerM,  h: 160 * mmPerM },  // body
-        { r0: 3 * mmPerM,    r1: 0.3 * mmPerM, h: 54 * mmPerM },  // spire
-      ];
-      const group = new THREE.Group();
-      let yOff = 0;
-      for (const sec of sections) {
-        const geo = new THREE.CylinderGeometry(sec.r1, sec.r0, sec.h, 8);
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.set(cx, yBase + yOff + sec.h / 2, cz);
-        group.add(mesh);
-        yOff += sec.h;
-      }
-      // Platform rings at each floor junction
-      const platforms = [57 * mmPerM, (57 + 59) * mmPerM];
-      const pRadii   = [30 * mmPerM,  18 * mmPerM];
-      for (let i = 0; i < platforms.length; i++) {
-        const pgeo = new THREE.CylinderGeometry(pRadii[i] * 1.05, pRadii[i] * 1.05, 2 * mmPerM, 8);
-        const pm = new THREE.Mesh(pgeo, mat);
-        pm.position.set(cx, yBase + platforms[i], cz);
-        group.add(pm);
-      }
-      result.push(group);
-    } else {
-      // Generic tower: simple tapered cylinder
-      const heightM = parseFloat(el.tags['height'] ?? '30');
-      const tH = Math.max(2, heightM * mmPerM);
-      const r0 = Math.max(0.5, tH * 0.04);
-      const r1 = r0 * 0.4;
-      const geo = new THREE.CylinderGeometry(r1, r0, tH, 6);
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(cx, yBase + tH / 2, cz);
-      result.push(mesh);
-    }
+    // Tour générique : cylindre légèrement fuselé
+    const heightM = parseFloat(el.tags['height'] ?? '30');
+    const tH = Math.max(2, heightM * mmPerM);
+    const r0 = Math.max(0.5, tH * 0.04);
+    const r1 = r0 * 0.4;
+    const geo = new THREE.CylinderGeometry(r1, r0, tH, 6);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(cx, yBase + tH / 2, cz);
+    result.push(mesh);
   }
   return result;
 }
@@ -3004,102 +3100,164 @@ export async function exportDimsPreview3MF(filename?: string): Promise<void> {
     if (tr) objects.push({ id: oid++, slot, name, col: (colorSlots[slot] ?? '#888888').replace('#', ''), vx, tr });
   }
 
-  // ── Tours (man_made=tower, incl. Tour Eiffel) en géométrie 3MF ──
-  if (cachedTowers.length > 0 && cachedElev) {
+  // ── Monuments 3D dans le 3MF ──
+  if (cachedElev) {
     const { minLat: bMinLat, maxLat: bMaxLat, minLon: bMinLon, maxLon: bMaxLon } = cachedElev.bounds;
     const cLat3 = (bMinLat + bMaxLat) / 2;
     const lonScale3 = Math.cos(cLat3 * Math.PI / 180);
     const mmPerM3 = wMm / ((bMaxLon - bMinLon) * lonScale3 * 111320);
-    const towerSlot = layerSlotOverrides['buildings'] ?? 7;
-    const towerCol = (colorSlots[towerSlot] ?? '#888888').replace('#', '');
+    const monSlot = layerSlotOverrides['buildings'] ?? 7;
+    const monCol = (colorSlots[monSlot] ?? '#888888').replace('#', '');
 
-    function addFrustum3MF(fcx: number, fcy: number, zBot: number, r0: number, r1: number, fh: number, segs: number): { vx: string; tr: string } {
-      let fvx = '', ftr = '';
-      const zTop = zBot + fh;
-      for (let i = 0; i < segs; i++) {
-        const a = (i / segs) * Math.PI * 2;
-        fvx += `<vertex x="${(fcx + r0 * Math.cos(a)).toFixed(3)}" y="${(fcy + r0 * Math.sin(a)).toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
+    // Émet un ensemble de prismes en XML 3MF (indices locaux par prisme, décalés).
+    function prismsTo3MF(prisms: MonPrism[]): { vx: string; tr: string } {
+      let vx = '', tr = '', base = 0;
+      for (const p of prisms) {
+        const { vx: pvx, nv } = prismTo3MF(p);
+        vx += pvx;
+        for (const [a, b, c, d] of PRISM_QUADS) {
+          tr += `<triangle v1="${base + a}" v2="${base + b}" v3="${base + c}"/>` +
+                `<triangle v1="${base + a}" v2="${base + c}" v3="${base + d}"/>`;
+        }
+        base += nv;
       }
-      for (let i = 0; i < segs; i++) {
-        const a = (i / segs) * Math.PI * 2;
-        fvx += `<vertex x="${(fcx + r1 * Math.cos(a)).toFixed(3)}" y="${(fcy + r1 * Math.sin(a)).toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
-      }
-      fvx += `<vertex x="${fcx.toFixed(3)}" y="${fcy.toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
-      fvx += `<vertex x="${fcx.toFixed(3)}" y="${fcy.toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
-      const botC = segs * 2, topC = segs * 2 + 1;
-      for (let i = 0; i < segs; i++) {
-        const n = (i + 1) % segs;
-        ftr += `<triangle v1="${i}" v2="${n}" v3="${segs + n}"/>`;
-        ftr += `<triangle v1="${i}" v2="${segs + n}" v3="${segs + i}"/>`;
-        ftr += `<triangle v1="${botC}" v2="${n}" v3="${i}"/>`;
-        ftr += `<triangle v1="${topC}" v2="${segs + i}" v3="${segs + n}"/>`;
-      }
-      return { vx: fvx, tr: ftr };
+      return { vx, tr };
     }
 
-    for (const el of cachedTowers) {
-      if (!el.tags) continue;
-      let cLonFrac3: number, cLatFrac3: number;
-      if (el.type === 'node' && el.lat !== undefined && el.lon !== undefined) {
-        cLonFrac3 = (el.lon - bMinLon) / (bMaxLon - bMinLon);
-        cLatFrac3 = (el.lat - bMinLat) / (bMaxLat - bMinLat);
-      } else {
-        const polys3 = getOsmPolygons(el);
-        if (!polys3.length) continue;
-        const outer3 = polys3[0];
-        if (!outer3.length) continue;
-        let sLon3 = 0, sLat3 = 0;
-        for (const p of outer3) { sLon3 += p.lon; sLat3 += p.lat; }
-        cLonFrac3 = (sLon3 / outer3.length - bMinLon) / (bMaxLon - bMinLon);
-        cLatFrac3 = (sLat3 / outer3.length - bMinLat) / (bMaxLat - bMinLat);
-      }
-      if (cLonFrac3 < 0 || cLonFrac3 > 1 || cLatFrac3 < 0 || cLatFrac3 > 1) continue;
-
-      const tcx = (cLonFrac3 - 0.5) * wMm;
-      const tcy = (0.5 - cLatFrac3) * dMm; // 3MF y = sceneZ
-      if (lastZonePoly && !pointInZone(tcx, tcy, lastZonePoly)) continue;
-
-      const elev3 = sampleElev(workGrid, G, cLonFrac3, 1 - cLatFrac3);
-      const yBase3 = baseH + ((elev3 - minE) / elevRange) * elevScaleMm;
-
-      const tName = (el.tags['name'] ?? el.tags['name:fr'] ?? '').toLowerCase();
-      const isEiffel3 = tName.includes('eiffel') || tName.includes('tour eiffel');
-
-      let tvx = '', ttr = '';
-      let globalVCount = 0;
-
-      function appendFrustum(fcx: number, fcy: number, zBot: number, r0f: number, r1f: number, fh: number, segs: number): void {
-        const { vx: fvx, tr: ftr } = addFrustum3MF(fcx, fcy, zBot, r0f, r1f, fh, segs);
-        const base = globalVCount;
-        tvx += fvx;
-        // segs*2 side vertices + 2 center vertices = segs*2+2 vertices per frustum
-        globalVCount += segs * 2 + 2;
-        // offset all vertex indices in triangle refs by base (only matches integer values in v1/v2/v3 attributes)
-        ttr += ftr.replace(/(?<=v[123]=")(\d+)(?=")/g, (n) => String(parseInt(n) + base));
-      }
-
-      if (isEiffel3) {
-        const sections3 = [
-          { r0: 62.5 * mmPerM3, r1: 30 * mmPerM3, h: 57 * mmPerM3 },
-          { r0: 30 * mmPerM3,   r1: 18 * mmPerM3, h: 59 * mmPerM3 },
-          { r0: 18 * mmPerM3,   r1: 3 * mmPerM3,  h: 160 * mmPerM3 },
-          { r0: 3 * mmPerM3,    r1: 0.3 * mmPerM3, h: 54 * mmPerM3 },
-        ];
-        let zOff = yBase3;
-        for (const sec of sections3) {
-          appendFrustum(tcx, tcy, zOff, sec.r0, sec.r1, sec.h, 8);
-          zOff += sec.h;
+    // ── Tour Eiffel paramétrique ──
+    let eiffelSup3: { cx: number; cz: number; rMm: number } | null = null;
+    const eiffel3 = findNamedMonument('eiffel');
+    if (eiffel3) {
+      const lonFrac = (eiffel3.lon - bMinLon) / (bMaxLon - bMinLon);
+      const latFrac = (eiffel3.lat - bMinLat) / (bMaxLat - bMinLat);
+      if (lonFrac >= 0 && lonFrac <= 1 && latFrac >= 0 && latFrac <= 1) {
+        const cx = (lonFrac - 0.5) * wMm;
+        const cz = (0.5 - latFrac) * dMm;
+        if (!lastZonePoly || pointInZone(cx, cz, lastZonePoly)) {
+          const elev = sampleElev(workGrid, G, lonFrac, 1 - latFrac);
+          const baseZ = baseH + ((elev - minE) / elevRange) * elevScaleMm;
+          const { vx, tr } = prismsTo3MF(eiffelPrisms(cx, cz, baseZ, mmPerM3));
+          if (tr) objects.push({ id: oid++, slot: monSlot, name: 'tour_eiffel', col: monCol, vx, tr });
+          eiffelSup3 = { cx, cz, rMm: 90 * mmPerM3 };
         }
-      } else {
+      }
+    }
+
+    // ── Autres monuments : building:part extrudés (prisme par polygone) ──
+    if (cachedBuildingParts.length > 0) {
+      let pvx = '', ptr = '', pbase = 0;
+      for (const el of cachedBuildingParts) {
+        const polys = getOsmPolygons(el);
+        if (!polys.length) continue;
+        const outer = polys[0];
+        if (outer.length < 3) continue;
+
+        // Centre + suppression Eiffel
+        let sLon = 0, sLat = 0;
+        for (const p of outer) { sLon += p.lon; sLat += p.lat; }
+        const cLonF = (sLon / outer.length - bMinLon) / (bMaxLon - bMinLon);
+        const cLatF = (sLat / outer.length - bMinLat) / (bMaxLat - bMinLat);
+        const pcx = (cLonF - 0.5) * wMm, pcz = (0.5 - cLatF) * dMm;
+        if (eiffelSup3 && (pcx - eiffelSup3.cx) ** 2 + (pcz - eiffelSup3.cz) ** 2 < eiffelSup3.rMm ** 2) continue;
+
+        // Tous les sommets dans la zone
+        let allIn = true;
+        const ring: [number, number][] = [];
+        for (const p of outer) {
+          const vx = (p.lon - bMinLon) / (bMaxLon - bMinLon) * wMm - wMm / 2;
+          const vz = (0.5 - (p.lat - bMinLat) / (bMaxLat - bMinLat)) * dMm;
+          ring.push([vx, vz]);
+          if (lastZonePoly && !pointInZone(vx, vz, lastZonePoly)) allIn = false;
+        }
+        if (!allIn) continue;
+
+        const heightM = parseFloat(el.tags?.['height'] ?? '6');
+        const minHeightM = parseFloat(el.tags?.['min_height'] ?? '0');
+        const elevP = sampleElev(workGrid, G, cLonF, 1 - cLatF);
+        const zGround = baseH + ((elevP - minE) / elevRange) * elevScaleMm;
+        const zBot = zGround + minHeightM * mmPerM3 * buildingHeightScale;
+        const zTop = zBot + Math.max(0.2, (heightM - minHeightM) * mmPerM3 * buildingHeightScale);
+
+        // Prisme polygonal : n sommets bas + n sommets haut, murs + capuchons en éventail
+        const n = ring.length;
+        for (const [x, y] of ring) pvx += `<vertex x="${x.toFixed(3)}" y="${y.toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
+        for (const [x, y] of ring) pvx += `<vertex x="${x.toFixed(3)}" y="${y.toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
+        for (let i = 0; i < n; i++) {
+          const j = (i + 1) % n;
+          // mur (i, j, n+j, n+i)
+          ptr += `<triangle v1="${pbase + i}" v2="${pbase + j}" v3="${pbase + n + j}"/>` +
+                 `<triangle v1="${pbase + i}" v2="${pbase + n + j}" v3="${pbase + n + i}"/>`;
+        }
+        for (let i = 1; i < n - 1; i++) {
+          // toit (éventail depuis sommet 0)
+          ptr += `<triangle v1="${pbase + n}" v2="${pbase + n + i}" v3="${pbase + n + i + 1}"/>`;
+          // sol (éventail inversé)
+          ptr += `<triangle v1="${pbase}" v2="${pbase + i + 1}" v3="${pbase + i}"/>`;
+        }
+        pbase += 2 * n;
+      }
+      if (ptr) objects.push({ id: oid++, slot: monSlot, name: 'monuments_detail', col: monCol, vx: pvx, tr: ptr });
+    }
+
+    // ── Tours génériques (man_made=tower, hors Eiffel) ──
+    if (cachedTowers.length > 0) {
+      function addFrustum3MF(fcx: number, fcy: number, zBot: number, r0: number, r1: number, fh: number, segs: number): { vx: string; tr: string } {
+        let fvx = '', ftr = '';
+        const zTop = zBot + fh;
+        for (let i = 0; i < segs; i++) {
+          const a = (i / segs) * Math.PI * 2;
+          fvx += `<vertex x="${(fcx + r0 * Math.cos(a)).toFixed(3)}" y="${(fcy + r0 * Math.sin(a)).toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
+        }
+        for (let i = 0; i < segs; i++) {
+          const a = (i / segs) * Math.PI * 2;
+          fvx += `<vertex x="${(fcx + r1 * Math.cos(a)).toFixed(3)}" y="${(fcy + r1 * Math.sin(a)).toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
+        }
+        fvx += `<vertex x="${fcx.toFixed(3)}" y="${fcy.toFixed(3)}" z="${zBot.toFixed(3)}"/>`;
+        fvx += `<vertex x="${fcx.toFixed(3)}" y="${fcy.toFixed(3)}" z="${zTop.toFixed(3)}"/>`;
+        const botC = segs * 2, topC = segs * 2 + 1;
+        for (let i = 0; i < segs; i++) {
+          const nn = (i + 1) % segs;
+          ftr += `<triangle v1="${i}" v2="${nn}" v3="${segs + nn}"/>`;
+          ftr += `<triangle v1="${i}" v2="${segs + nn}" v3="${segs + i}"/>`;
+          ftr += `<triangle v1="${botC}" v2="${nn}" v3="${i}"/>`;
+          ftr += `<triangle v1="${topC}" v2="${segs + i}" v3="${segs + nn}"/>`;
+        }
+        return { vx: fvx, tr: ftr };
+      }
+
+      for (const el of cachedTowers) {
+        if (!el.tags) continue;
+        const tName = (el.tags['name'] ?? el.tags['name:fr'] ?? '').toLowerCase();
+        if (tName.includes('eiffel')) continue; // géré par le modèle paramétrique
+        let cLonFrac3: number, cLatFrac3: number;
+        if (el.type === 'node' && el.lat !== undefined && el.lon !== undefined) {
+          cLonFrac3 = (el.lon - bMinLon) / (bMaxLon - bMinLon);
+          cLatFrac3 = (el.lat - bMinLat) / (bMaxLat - bMinLat);
+        } else {
+          const polys3 = getOsmPolygons(el);
+          if (!polys3.length) continue;
+          const outer3 = polys3[0];
+          if (!outer3.length) continue;
+          let sLon3 = 0, sLat3 = 0;
+          for (const p of outer3) { sLon3 += p.lon; sLat3 += p.lat; }
+          cLonFrac3 = (sLon3 / outer3.length - bMinLon) / (bMaxLon - bMinLon);
+          cLatFrac3 = (sLat3 / outer3.length - bMinLat) / (bMaxLat - bMinLat);
+        }
+        if (cLonFrac3 < 0 || cLonFrac3 > 1 || cLatFrac3 < 0 || cLatFrac3 > 1) continue;
+
+        const tcx = (cLonFrac3 - 0.5) * wMm;
+        const tcy = (0.5 - cLatFrac3) * dMm;
+        if (lastZonePoly && !pointInZone(tcx, tcy, lastZonePoly)) continue;
+        if (eiffelSup3 && (tcx - eiffelSup3.cx) ** 2 + (tcy - eiffelSup3.cz) ** 2 < eiffelSup3.rMm ** 2) continue;
+
+        const elev3 = sampleElev(workGrid, G, cLonFrac3, 1 - cLatFrac3);
+        const yBase3 = baseH + ((elev3 - minE) / elevRange) * elevScaleMm;
         const heightM3 = parseFloat(el.tags['height'] ?? '30');
         const tH3 = Math.max(2, heightM3 * mmPerM3);
         const r0 = Math.max(0.5, tH3 * 0.04);
         const r1 = r0 * 0.4;
-        appendFrustum(tcx, tcy, yBase3, r0, r1, tH3, 6);
-      }
-
-      if (ttr) {
-        objects.push({ id: oid++, slot: towerSlot, name: isEiffel3 ? 'tour_eiffel' : `tower_${oid}`, col: towerCol, vx: tvx, tr: ttr });
+        const { vx, tr } = addFrustum3MF(tcx, tcy, yBase3, r0, r1, tH3, 6);
+        if (tr) objects.push({ id: oid++, slot: monSlot, name: `tower_${oid}`, col: monCol, vx, tr });
       }
     }
   }
